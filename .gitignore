@@ -357,3 +357,5 @@ MigrationBackup/
 .ionide/
 /tests/XrmToolkit.TestProjects.xrmcache
 *.xrmsuo
+
+/src/XrmToolkit/XrmToolkit.ProxyGeneration.Extensions/XrmToolkit.ProxyGeneration.Extensions.targets
