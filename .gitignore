@@ -358,5 +358,9 @@ MigrationBackup/
 /tests/XrmToolkit.TestProjects.xrmcache
 *.xrmsuo
 
+# Code signing certificates
+*.snk
+*.cer
+*.pfx
+
 /src/XrmToolkit/XrmToolkit.ProxyGeneration.Extensions/XrmToolkit.ProxyGeneration.Extensions.targets
-/src/XrmToolkit/XrmToolkit.Linq/XrmToolkit.Linq.snk
