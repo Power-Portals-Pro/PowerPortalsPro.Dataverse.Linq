@@ -364,3 +364,4 @@ MigrationBackup/
 *.pfx
 
 /src/XrmToolkit/XrmToolkit.ProxyGeneration.Extensions/XrmToolkit.ProxyGeneration.Extensions.targets
+/src/XrmToolkit/.cr/
