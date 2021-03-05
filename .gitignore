@@ -365,3 +365,6 @@ MigrationBackup/
 
 /src/XrmToolkit/XrmToolkit.ProxyGeneration.Extensions/XrmToolkit.ProxyGeneration.Extensions.targets
 /src/XrmToolkit/.cr/
+/src/XrmToolkit/XrmToolkit.ProxyGeneration.Extensions.v9/XrmToolkit.ProxyGeneration.Extensions.targets
+/src/XrmToolkit/XrmToolkit.ProxyGeneration.Extensions.v8/XrmToolkit.ProxyGeneration.Extensions.targets
+/src/XrmToolkit/XrmToolkit.ProxyGeneration.Extensions.v7/XrmToolkit.ProxyGeneration.Extensions.targets
