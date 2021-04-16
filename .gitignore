@@ -362,6 +362,7 @@ MigrationBackup/
 *.snk
 *.cer
 *.pfx
+*.secret
 
 /src/XrmToolkit/XrmToolkit.ProxyGeneration.Extensions/XrmToolkit.ProxyGeneration.Extensions.targets
 /src/XrmToolkit/.cr/
