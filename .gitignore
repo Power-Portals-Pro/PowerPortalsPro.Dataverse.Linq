@@ -357,6 +357,7 @@ MigrationBackup/
 .ionide/
 /tests/XrmToolkit.TestProjects.xrmcache
 *.xrmsuo
+*.xrmsuo2
 
 # Code signing certificates
 *.snk
