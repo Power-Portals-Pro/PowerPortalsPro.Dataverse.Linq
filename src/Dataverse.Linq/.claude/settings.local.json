@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//d/Code/XrmToolkit - Dev/src/XrmToolkit/**)",
+      "Read(//d/Code/XrmToolkit - Dev/src/**)",
+      "Bash(xargs grep:*)",
+      "Bash(grep -r \"ServiceClient\\\\|PowerPlatform\" \"D:\\\\Code\\\\XrmToolkit - Dev\\\\src\" --include=\"*.csproj\" -l 2>/dev/null | head -5)",
+      "Bash(cd \"D:\\\\Code\\\\XrmToolkit - Dev\\\\src\\\\XrmToolkit\\\\Dataverse.Linq\" && dotnet build 2>&1)",
+      "Bash(powershell -Command \"\ntry {\n  \\\\$dll = [System.Reflection.Assembly]::LoadFrom\\('C:\\\\Users\\\\steve\\\\.nuget\\\\packages\\\\microsoft.powerplatform.dataverse.client\\\\1.1.12\\\\lib\\\\net6.0\\\\Microsoft.Xrm.Sdk.dll'\\)\n  \\\\$dll.GetExportedTypes\\(\\) | Where-Object { \\\\$_.IsInterface -and \\\\$_.Name -like '*Async*' } | Select-Object FullName\n} catch [System.Reflection.ReflectionTypeLoadException] {\n  \\\\$_.Exception.Types | Where-Object { \\\\$_ -ne \\\\$null -and \\\\$_.IsInterface -and \\\\$_.Name -like '*Async*' } | Select-Object FullName\n}\n\")",
+      "Bash(powershell -Command \"$dll = [System.Reflection.Assembly]::LoadFrom\\('C:\\\\Users\\\\steve\\\\.nuget\\\\packages\\\\microsoft.powerplatform.dataverse.client\\\\1.1.12\\\\lib\\\\net6.0\\\\Microsoft.Xrm.Sdk.dll'\\); try { $dll.GetExportedTypes\\(\\) | Where-Object { $_.IsInterface -and $_.Name -like '*Async*' } | ForEach-Object { $_.FullName } } catch { 'error' }\")",
+      "Bash(find \"D:\\\\Code\\\\XrmToolkit - Dev\" -name \"Dataverse.Linq.Tests*\" -o -name \"*Dataverse.Linq.Tests*\" 2>/dev/null | head -20)",
+      "Bash(cd \"D:\\\\Code\\\\XrmToolkit - Dev\\\\src\\\\XrmToolkit\\\\Dataverse.Linq.Tests\" && dotnet test --no-build 2>&1 | tail -5; dotnet test 2>&1 | tail -30)",
+      "Bash(cd \"D:\\\\Code\\\\XrmToolkit - Dev\\\\src\\\\XrmToolkit\\\\Dataverse.Linq.Tests\" && dotnet test 2>&1 | tail -30)"
+    ]
+  }
+}
