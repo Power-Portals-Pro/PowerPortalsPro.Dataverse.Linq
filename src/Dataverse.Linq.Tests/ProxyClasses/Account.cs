@@ -7,6 +7,7 @@ namespace Dataverse.Linq.Tests.ProxyClasses;
 public class Account : Entity
 {
     public new const string LogicalName = "account";
+    public const string PrimaryIdAttribute = "accountid";
 
     public Account() : base(LogicalName) { }
 
