@@ -127,6 +127,41 @@ public class QueryableTests
     }
 
     // -------------------------------------------------------------------------
+    // Column selection
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ToListAsync_WithColumns_EmitsAttributeElementsInsteadOfAllAttributes()
+    {
+        FetchExpression? captured = null;
+        var service = Substitute.For<IOrganizationServiceAsync>();
+        service.RetrieveMultipleAsync(Arg.Do<QueryBase>(q => captured = q as FetchExpression))
+               .Returns(SinglePage());
+
+        await service.Queryable<Account>("name", "telephone1").ToListAsync();
+
+        var entity = XDocument.Parse(captured!.Query).Root!.Element("entity")!;
+        entity.Element("all-attributes").Should().BeNull();
+        var attributes = entity.Elements("attribute").Select(e => e.Attribute("name")!.Value).ToList();
+        attributes.Should().Equal("name", "telephone1");
+    }
+
+    [Fact]
+    public async Task ToListAsync_WithNoColumns_EmitsAllAttributes()
+    {
+        FetchExpression? captured = null;
+        var service = Substitute.For<IOrganizationServiceAsync>();
+        service.RetrieveMultipleAsync(Arg.Do<QueryBase>(q => captured = q as FetchExpression))
+               .Returns(SinglePage());
+
+        await service.Queryable<Account>().ToListAsync();
+
+        var entity = XDocument.Parse(captured!.Query).Root!.Element("entity")!;
+        entity.Element("all-attributes").Should().NotBeNull();
+        entity.Elements("attribute").Should().BeEmpty();
+    }
+
+    // -------------------------------------------------------------------------
     // Guard clauses
     // -------------------------------------------------------------------------
 

@@ -10,11 +10,13 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
 {
     internal IOrganizationServiceAsync Service { get; }
     internal string EntityLogicalName { get; }
+    internal IReadOnlyList<string>? Columns { get; }
 
-    internal DataverseQueryProvider(IOrganizationServiceAsync service, string entityLogicalName)
+    internal DataverseQueryProvider(IOrganizationServiceAsync service, string entityLogicalName, IReadOnlyList<string>? columns = null)
     {
         Service = service;
         EntityLogicalName = entityLogicalName;
+        Columns = columns;
     }
 
     public IQueryable CreateQuery(Expression expression) =>
@@ -46,7 +48,7 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
 
     internal async Task<List<T>> ExecuteListAsync(Expression expression, CancellationToken cancellationToken = default)
     {
-        var fetchXml = FetchXmlBuilder.Build(EntityLogicalName);
+        var fetchXml = FetchXmlBuilder.Build(EntityLogicalName, Columns);
         var entities = await RetrieveAllAsync(fetchXml, cancellationToken);
         return entities.Select(e => e.ToEntity<T>()).ToList();
     }

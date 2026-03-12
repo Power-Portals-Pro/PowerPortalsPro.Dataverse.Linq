@@ -13,9 +13,9 @@ public class DataverseQueryable<T> : IQueryable<T>, IOrderedQueryable<T> where T
 {
     private readonly DataverseQueryProvider<T> _provider;
 
-    internal DataverseQueryable(IOrganizationServiceAsync service, string entityLogicalName)
+    internal DataverseQueryable(IOrganizationServiceAsync service, string entityLogicalName, IReadOnlyList<string>? columns = null)
     {
-        _provider = new DataverseQueryProvider<T>(service, entityLogicalName);
+        _provider = new DataverseQueryProvider<T>(service, entityLogicalName, columns);
         Expression = Expression.Constant(this);
     }
 

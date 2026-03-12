@@ -11,14 +11,14 @@ public static class ServiceClientExtensions
     /// Creates a <see cref="DataverseQueryable{T}"/> for the given entity type.
     /// The entity type must be decorated with <see cref="EntityLogicalNameAttribute"/>.
     /// </summary>
-    public static DataverseQueryable<T> Queryable<T>(this IOrganizationServiceAsync service)
+    public static DataverseQueryable<T> Queryable<T>(this IOrganizationServiceAsync service, params string[] columns)
         where T : Entity
     {
         var entityLogicalName = typeof(T).GetCustomAttribute<EntityLogicalNameAttribute>()?.LogicalName
             ?? throw new InvalidOperationException(
                 $"Type '{typeof(T).Name}' must be decorated with '{nameof(EntityLogicalNameAttribute)}'.");
 
-        return new DataverseQueryable<T>(service, entityLogicalName);
+        return new DataverseQueryable<T>(service, entityLogicalName, columns.Length > 0 ? columns : null);
     }
 
     /// <summary>
