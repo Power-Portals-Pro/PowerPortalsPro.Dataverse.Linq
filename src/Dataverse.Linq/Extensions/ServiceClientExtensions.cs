@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore.Query;
 using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Client;
@@ -31,7 +32,7 @@ public static class ServiceClientExtensions
         CancellationToken cancellationToken = default)
     {
         if (queryable.Provider is IAsyncQueryProvider asyncProvider)
-            return asyncProvider.ExecuteAsync<List<TElement>>(queryable.Expression, cancellationToken);
+            return asyncProvider.ExecuteAsync<Task<List<TElement>>>(queryable.Expression, cancellationToken);
 
         return Task.FromResult(queryable.ToList());
     }
