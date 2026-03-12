@@ -1,6 +1,8 @@
+using Dataverse.Linq.Expressions;
 using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
+using System.Collections;
 using System.Linq.Expressions;
 using System.Xml.Linq;
 
@@ -24,10 +26,11 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
 
     public IQueryable<TElement> CreateQuery<TElement>(Expression expression)
     {
-        if (typeof(TElement) != typeof(T))
-            throw new NotSupportedException($"Query element type mismatch: expected {typeof(T).Name}, got {typeof(TElement).Name}.");
+        if (typeof(TElement) == typeof(T))
+            return (IQueryable<TElement>)(object)new DataverseQueryable<T>(this, expression);
 
-        return (IQueryable<TElement>)(object)new DataverseQueryable<T>(this, expression);
+        // Projected type (e.g. anonymous type from a Select clause)
+        return new DataverseProjectedQueryable<TElement>(this, expression);
     }
 
     public object? Execute(Expression expression) => ExecuteList(expression);
@@ -37,20 +40,35 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
 
     public async Task<TResult> ExecuteAsync<TResult>(Expression expression, CancellationToken cancellationToken = default)
     {
-        var results = await ExecuteListAsync(expression, cancellationToken);
-        if (results is TResult result)
-            return result;
-        throw new InvalidCastException($"Cannot convert {nameof(List<T>)} to {typeof(TResult).Name}.");
+        var (selectColumns, projector) = SelectExpressionParser.Parse(expression);
+        var columns = selectColumns ?? Columns;
+
+        var fetchXml = FetchXmlBuilder.Build(EntityLogicalName, columns);
+        var entities = await RetrieveAllAsync(fetchXml, cancellationToken);
+        var typedEntities = entities.Select(e => e.ToEntity<T>());
+
+        if (projector is not null)
+            return BuildProjectedList<TResult>(typedEntities, projector);
+
+        var results = typedEntities.ToList();
+        if (results is TResult directResult)
+            return directResult;
+
+        throw new InvalidCastException($"Cannot convert List<{typeof(T).Name}> to {typeof(TResult).Name}.");
     }
 
     internal List<T> ExecuteList(Expression expression) =>
-        ExecuteListAsync(expression).GetAwaiter().GetResult();
+        ExecuteAsync<List<T>>(expression).GetAwaiter().GetResult();
 
-    internal async Task<List<T>> ExecuteListAsync(Expression expression, CancellationToken cancellationToken = default)
+    private static TResult BuildProjectedList<TResult>(IEnumerable<T> source, Delegate projector)
     {
-        var fetchXml = FetchXmlBuilder.Build(EntityLogicalName, Columns);
-        var entities = await RetrieveAllAsync(fetchXml, cancellationToken);
-        return entities.Select(e => e.ToEntity<T>()).ToList();
+        var elementType = typeof(TResult).GetGenericArguments()[0];
+        var list = (IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(elementType))!;
+
+        foreach (var item in source)
+            list.Add(projector.DynamicInvoke(item));
+
+        return (TResult)(object)list;
     }
 
     private async Task<List<Entity>> RetrieveAllAsync(string baseFetchXml, CancellationToken cancellationToken)

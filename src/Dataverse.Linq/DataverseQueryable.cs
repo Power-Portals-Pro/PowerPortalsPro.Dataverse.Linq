@@ -34,7 +34,4 @@ public class DataverseQueryable<T> : IQueryable<T>, IOrderedQueryable<T> where T
         _provider.ExecuteList(Expression).GetEnumerator();
 
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
-
-    internal Task<List<T>> ExecuteAsync(CancellationToken cancellationToken = default) =>
-        _provider.ExecuteAsync<List<T>>(Expression, cancellationToken);
 }

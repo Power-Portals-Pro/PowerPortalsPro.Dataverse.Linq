@@ -16,9 +16,24 @@ public class Account : Entity
         Attributes.AddRange(entity.Attributes);
     }
 
+    [AttributeLogicalName("name")]
     public string? Name
     {
         get => GetAttributeValue<string>("name");
         set => SetAttributeValue("name", value);
+    }
+
+    [AttributeLogicalName("websiteurl")]
+    public string? Website
+    {
+        get => GetAttributeValue<string>("websiteurl");
+        set => SetAttributeValue("websiteurl", value);
+    }
+
+    [AttributeLogicalName("primarycontactid")]
+    public EntityReference? PrimaryContact
+    {
+        get => GetAttributeValue<EntityReference>("primarycontactid");
+        set => SetAttributeValue("primarycontactid", value);
     }
 }

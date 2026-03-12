@@ -162,6 +162,67 @@ public class QueryableTests
     }
 
     // -------------------------------------------------------------------------
+    // Select projection — FetchXml columns
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ToListAsync_WithSelectProjection_EmitsOnlySelectedColumns()
+    {
+        FetchExpression? captured = null;
+        var service = Substitute.For<IOrganizationServiceAsync>();
+        service.RetrieveMultipleAsync(Arg.Do<QueryBase>(q => captured = q as FetchExpression))
+               .Returns(SinglePage());
+
+        await (from a in service.Queryable<Account>()
+               select new { a.Name, a.Website, a.PrimaryContact }).ToListAsync();
+
+        var entity = XDocument.Parse(captured!.Query).Root!.Element("entity")!;
+        entity.Element("all-attributes").Should().BeNull();
+        var columns = entity.Elements("attribute").Select(e => e.Attribute("name")!.Value).ToList();
+        columns.Should().Equal("name", "websiteurl", "primarycontactid");
+    }
+
+    [Fact]
+    public async Task ToListAsync_WithSelectProjection_ReturnsProjectedValues()
+    {
+        var contactRef = new EntityReference("contact", Guid.NewGuid());
+        var entity = new Entity("account", Guid.NewGuid())
+        {
+            ["name"] = "Contoso",
+            ["websiteurl"] = "https://contoso.com",
+            ["primarycontactid"] = contactRef,
+        };
+
+        var service = Substitute.For<IOrganizationServiceAsync>();
+        service.RetrieveMultipleAsync(Arg.Any<QueryBase>()).Returns(SinglePage(entity));
+
+        var results = await (from a in service.Queryable<Account>()
+                             select new { a.Name, a.Website, a.PrimaryContact }).ToListAsync();
+
+        results.Should().HaveCount(1);
+        results[0].Name.Should().Be("Contoso");
+        results[0].Website.Should().Be("https://contoso.com");
+        results[0].PrimaryContact.Should().Be(contactRef);
+    }
+
+    [Fact]
+    public async Task ToListAsync_WithSelectProjection_SelectColumnsOverrideExplicitColumns()
+    {
+        // Explicit columns on Queryable() should be overridden by the Select expression
+        FetchExpression? captured = null;
+        var service = Substitute.For<IOrganizationServiceAsync>();
+        service.RetrieveMultipleAsync(Arg.Do<QueryBase>(q => captured = q as FetchExpression))
+               .Returns(SinglePage());
+
+        await (from a in service.Queryable<Account>("name")
+               select new { a.Website }).ToListAsync();
+
+        var columns = XDocument.Parse(captured!.Query).Root!.Element("entity")!
+            .Elements("attribute").Select(e => e.Attribute("name")!.Value).ToList();
+        columns.Should().Equal("websiteurl");
+    }
+
+    // -------------------------------------------------------------------------
     // Guard clauses
     // -------------------------------------------------------------------------
 

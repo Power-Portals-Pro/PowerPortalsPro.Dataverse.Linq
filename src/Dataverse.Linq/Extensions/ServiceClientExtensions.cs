@@ -23,15 +23,15 @@ public static class ServiceClientExtensions
 
     /// <summary>
     /// Asynchronously executes the query and returns all results as a <see cref="List{T}"/>.
+    /// Works on both root queryables and projected queryables (e.g. after a Select clause).
     /// Handles paging automatically.
     /// </summary>
-    public static Task<List<T>> ToListAsync<T>(
-        this DataverseQueryable<T> queryable,
+    public static Task<List<TElement>> ToListAsync<TElement>(
+        this IQueryable<TElement> queryable,
         CancellationToken cancellationToken = default)
-        where T : Entity
     {
         if (queryable.Provider is IAsyncQueryProvider asyncProvider)
-            return asyncProvider.ExecuteAsync<List<T>>(queryable.Expression, cancellationToken);
+            return asyncProvider.ExecuteAsync<List<TElement>>(queryable.Expression, cancellationToken);
 
         return Task.FromResult(queryable.ToList());
     }
