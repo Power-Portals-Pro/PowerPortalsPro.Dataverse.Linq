@@ -104,7 +104,15 @@
       "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"ClassName~FetchXmlGenerationTests\" --no-restore 2>&1 | tail -10)",
       "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"ClassName~FetchXml\" --no-restore --list-tests 2>&1 | head -20)",
       "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"FullyQualifiedName~ToFetchXml\" --no-restore 2>&1 | tail -10)",
-      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"FullyQualifiedName~ToFetchXml\" --no-restore 2>&1 | tail -5)"
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"FullyQualifiedName~ToFetchXml\" --no-restore 2>&1 | tail -5)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet build src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj 2>&1 | tail -15)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"FullyQualifiedName~MinWithSelector\" --no-restore -v n 2>&1 | tail -30)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"FullyQualifiedName~MinWithSelector\" --no-restore --logger \"console;verbosity=detailed\" 2>&1 | grep -A 20 \"Expected\")",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"FullyQualifiedName~Aggregate|FullyQualifiedName~Count_|FullyQualifiedName~Min_|FullyQualifiedName~Max_|FullyQualifiedName~Sum_|FullyQualifiedName~Average_|FullyQualifiedName~LongCount\" --no-restore --logger \"console;verbosity=detailed\" 2>&1 | grep -E \"\\\\[xUnit|Passed|Failed\" | head -40)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"FullyQualifiedName~Count_|FullyQualifiedName~Min_|FullyQualifiedName~Max_|FullyQualifiedName~Sum_|FullyQualifiedName~Average_|FullyQualifiedName~LongCount|FullyQualifiedName~MoneyValue\" --no-restore --logger \"console;verbosity=detailed\" 2>&1 | grep -E \"FAIL|Passed|Expected|but found\")",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"FullyQualifiedName~Count_|FullyQualifiedName~Min_|FullyQualifiedName~Max_|FullyQualifiedName~Sum_|FullyQualifiedName~Average_|FullyQualifiedName~LongCount|FullyQualifiedName~MoneyValue\" --no-restore --logger \"console;verbosity=detailed\" 2>&1 | grep -E \"FAIL|Passed\\\\b|Expected|but found\")",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"FullyQualifiedName~Average_WithSelector\" --no-restore --logger \"console;verbosity=detailed\" 2>&1 | grep -E \"FAIL|Passed\\\\b|Expected|but found\")",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --no-restore 2>&1 | tail -5)"
     ]
   }
 }

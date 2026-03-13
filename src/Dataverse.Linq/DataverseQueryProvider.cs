@@ -51,6 +51,12 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
         var fetchXml = FetchXmlBuilder.Build(query);
         var entities = RetrieveAll(fetchXml);
 
+        // Aggregate terminal operator (Min, Max, Sum, Average, Count)
+        if (query.TerminalOperator is QueryTerminalOperator.Min or QueryTerminalOperator.Max
+            or QueryTerminalOperator.Sum or QueryTerminalOperator.Average
+            or QueryTerminalOperator.Count or QueryTerminalOperator.LongCount)
+            return ExtractAggregateResult<TResult>(entities, query.TerminalOperator);
+
         // Scalar terminal operator (First, Single, etc.)
         if (query.TerminalOperator is not QueryTerminalOperator.List)
         {
@@ -75,6 +81,16 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
     public TResult ExecuteAsync<TResult>(Expression expression, CancellationToken cancellationToken = default)
     {
         var query = FetchXmlQueryTranslator.Translate<T>(expression, Columns, EntityLogicalName);
+
+        // Aggregate terminal operator: TResult = Task<TElement>
+        if (query.TerminalOperator is QueryTerminalOperator.Min or QueryTerminalOperator.Max
+            or QueryTerminalOperator.Sum or QueryTerminalOperator.Average
+            or QueryTerminalOperator.Count or QueryTerminalOperator.LongCount)
+        {
+            var elementType = typeof(TResult).GetGenericArguments()[0];
+            var method = GetPrivateMethod(nameof(ExecuteAggregateAsync)).MakeGenericMethod(elementType);
+            return (TResult)method.Invoke(this, [query, cancellationToken])!;
+        }
 
         // Scalar terminal operator: TResult = Task<TElement>
         if (query.TerminalOperator is not QueryTerminalOperator.List)
@@ -189,6 +205,44 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
         var entities = await RetrieveAllAsync(fetchXml, cancellationToken);
         var projected = ProjectEntities<TElement>(entities, query);
         return ApplyTerminalOperator(projected, query.TerminalOperator);
+    }
+
+    private async Task<TElement> ExecuteAggregateAsync<TElement>(
+        FetchXmlQuery query, CancellationToken cancellationToken)
+    {
+        var fetchXml = FetchXmlBuilder.Build(query);
+        var entities = await RetrieveAllAsync(fetchXml, cancellationToken);
+        return ExtractAggregateResult<TElement>(entities, query.TerminalOperator);
+    }
+
+    private static TResult ExtractAggregateResult<TResult>(List<Entity> entities, QueryTerminalOperator op)
+    {
+        if (entities.Count == 0)
+            throw new InvalidOperationException("Aggregate query returned no results.");
+
+        var alias = op switch
+        {
+            QueryTerminalOperator.Min => "min",
+            QueryTerminalOperator.Max => "max",
+            QueryTerminalOperator.Sum => "sum",
+            QueryTerminalOperator.Average => "avg",
+            QueryTerminalOperator.Count or QueryTerminalOperator.LongCount => "count",
+            _ => throw new InvalidOperationException($"Unexpected aggregate operator '{op}'.")
+        };
+
+        var entity = entities[0];
+        var aliasedValue = entity.GetAttributeValue<AliasedValue>(alias)
+            ?? throw new InvalidOperationException(
+                $"Aggregate result did not contain expected '{alias}' alias.");
+
+        var rawValue = aliasedValue.Value;
+
+        // Money types return Money objects; extract the decimal value
+        if (rawValue is Money money)
+            rawValue = money.Value;
+
+        var targetType = Nullable.GetUnderlyingType(typeof(TResult)) ?? typeof(TResult);
+        return (TResult)Convert.ChangeType(rawValue, targetType);
     }
 
     private static TElement ApplyTerminalOperator<TElement>(List<TElement> results, QueryTerminalOperator op)

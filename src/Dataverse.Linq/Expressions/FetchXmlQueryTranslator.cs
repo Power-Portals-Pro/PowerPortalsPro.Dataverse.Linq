@@ -192,6 +192,15 @@ internal static class FetchXmlQueryTranslator
                         HandleTerminalOperator(call, ctx);
                         return;
 
+                    case nameof(Queryable.Min):
+                    case nameof(Queryable.Max):
+                    case nameof(Queryable.Sum):
+                    case nameof(Queryable.Average):
+                    case nameof(Queryable.Count):
+                    case nameof(Queryable.LongCount):
+                        HandleAggregateOperator(call, ctx);
+                        return;
+
                     default:
                         throw new NotSupportedException(
                             $"LINQ operator '{call.Method.Name}' is not supported.");
@@ -984,6 +993,95 @@ internal static class FetchXmlQueryTranslator
     }
 
     // -------------------------------------------------------------------------
+    // Aggregate operators — Min / Max / Sum / Average / Count / LongCount
+    // -------------------------------------------------------------------------
+
+    private static void HandleAggregateOperator(MethodCallExpression call, TranslationContext ctx)
+    {
+        var methodName = call.Method.Name;
+        var isCount = methodName is nameof(Queryable.Count) or nameof(Queryable.LongCount);
+
+        ctx.Query.TerminalOperator = methodName switch
+        {
+            nameof(Queryable.Min) => QueryTerminalOperator.Min,
+            nameof(Queryable.Max) => QueryTerminalOperator.Max,
+            nameof(Queryable.Sum) => QueryTerminalOperator.Sum,
+            nameof(Queryable.Average) => QueryTerminalOperator.Average,
+            nameof(Queryable.Count) => QueryTerminalOperator.Count,
+            nameof(Queryable.LongCount) => QueryTerminalOperator.LongCount,
+            _ => throw new NotSupportedException($"Unsupported aggregate method '{methodName}'.")
+        };
+
+        var fetchXmlFunction = ctx.Query.TerminalOperator switch
+        {
+            QueryTerminalOperator.Min => "min",
+            QueryTerminalOperator.Max => "max",
+            QueryTerminalOperator.Sum => "sum",
+            QueryTerminalOperator.Average => "avg",
+            QueryTerminalOperator.Count or QueryTerminalOperator.LongCount => "count",
+            _ => throw new NotSupportedException()
+        };
+
+        // Recurse into the source expression
+        TranslateCore(call.Arguments[0], ctx);
+
+        if (isCount)
+        {
+            // Count(predicate) — apply as Where filter
+            if (call.Arguments.Count == 2)
+            {
+                var lambda = ExtractLambda(call.Arguments[1]);
+                var filter = ctx.Query.Filter ??= new FetchFilter { Type = FilterType.And };
+                TranslatePredicate(lambda.Body, filter, ctx);
+            }
+
+            // Count uses the entity's primary ID attribute
+            ctx.Query.AllAttributes = false;
+            ctx.Query.Attributes.Clear();
+            ctx.Query.Attributes.Add(new FetchAttribute
+            {
+                Name = ctx.Query.EntityLogicalName + "id",
+                Alias = fetchXmlFunction,
+                Aggregate = fetchXmlFunction
+            });
+        }
+        else if (call.Arguments.Count == 2)
+        {
+            // Min(selector), Max(selector), etc. — extract the attribute from the selector
+            var lambda = ExtractLambda(call.Arguments[1]);
+            var attrName = GetAttributeName(lambda.Body)
+                ?? throw new NotSupportedException(
+                    $"Could not resolve attribute for '{methodName}'.");
+
+            ctx.Query.AllAttributes = false;
+            ctx.Query.Attributes.Clear();
+            ctx.Query.Attributes.Add(new FetchAttribute
+            {
+                Name = attrName,
+                Alias = fetchXmlFunction,
+                Aggregate = fetchXmlFunction
+            });
+        }
+        else
+        {
+            // No-selector (e.g. .Select(a => a.Prop).Min())
+            // The preceding Select should have populated Attributes with a single column.
+            if (ctx.Query.Attributes.Count != 1)
+                throw new NotSupportedException(
+                    $"'{methodName}' without a selector requires exactly one column. " +
+                    "Use a Select to project a single column, or use the overload with a selector.");
+
+            var attr = ctx.Query.Attributes[0];
+            attr.Alias = fetchXmlFunction;
+            attr.Aggregate = fetchXmlFunction;
+        }
+
+        ctx.Query.Aggregate = true;
+        ctx.Query.Projector = null;
+        ctx.Query.ProjectionType = null;
+    }
+
+    // -------------------------------------------------------------------------
     // Inner join — Queryable.Join(outer, inner, outerKey, innerKey, resultSelector)
     // -------------------------------------------------------------------------
 
@@ -1448,6 +1546,14 @@ internal static class FetchXmlQueryTranslator
             memberExpr.Expression is MemberExpression { Member: PropertyInfo refProp })
         {
             return refProp.GetCustomAttribute<AttributeLogicalNameAttribute>()?.LogicalName;
+        }
+
+        // Two-level Money access: a.CreditLimitMoney.Value → [AttributeLogicalName] on CreditLimitMoney
+        if (memberExpr.Member.Name == nameof(Money.Value) &&
+            memberExpr.Member.DeclaringType == typeof(Money) &&
+            memberExpr.Expression is MemberExpression { Member: PropertyInfo moneyProp })
+        {
+            return moneyProp.GetCustomAttribute<AttributeLogicalNameAttribute>()?.LogicalName;
         }
 
         return null;

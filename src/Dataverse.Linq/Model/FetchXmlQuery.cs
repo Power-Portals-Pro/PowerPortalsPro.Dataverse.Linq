@@ -10,6 +10,12 @@ internal enum QueryTerminalOperator
     FirstOrDefault,
     Single,
     SingleOrDefault,
+    Min,
+    Max,
+    Sum,
+    Average,
+    Count,
+    LongCount,
 }
 
 /// <summary>

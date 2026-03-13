@@ -1849,4 +1849,213 @@ public class FetchXmlGenerationTests
             </fetch>
             """);
     }
+
+    // -------------------------------------------------------------------------
+    // Aggregate operators — Min / Max / Sum / Average / Count
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_MinWithSelector_GeneratesAggregateMin()
+    {
+        var queryable = _service.Queryable<CustomAccount>();
+        var expr = System.Linq.Expressions.Expression.Call(
+            typeof(Queryable), nameof(Queryable.Min),
+            [typeof(CustomAccount), typeof(int?)],
+            queryable.Expression,
+            System.Linq.Expressions.Expression.Quote((System.Linq.Expressions.Expression<Func<CustomAccount, int?>>)(a => a.NumberOfEmployees)));
+
+        var fetchXml = TranslateToFetchXml<CustomAccount>(expr);
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="new_customaccount">
+                <attribute name="new_numberofemployees" alias="min" aggregate="min" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_MaxWithSelector_GeneratesAggregateMax()
+    {
+        var queryable = _service.Queryable<CustomAccount>();
+        var expr = System.Linq.Expressions.Expression.Call(
+            typeof(Queryable), nameof(Queryable.Max),
+            [typeof(CustomAccount), typeof(int?)],
+            queryable.Expression,
+            System.Linq.Expressions.Expression.Quote((System.Linq.Expressions.Expression<Func<CustomAccount, int?>>)(a => a.NumberOfEmployees)));
+
+        var fetchXml = TranslateToFetchXml<CustomAccount>(expr);
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="new_customaccount">
+                <attribute name="new_numberofemployees" alias="max" aggregate="max" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_SumWithSelector_GeneratesAggregateSum()
+    {
+        var queryable = _service.Queryable<CustomAccount>();
+        var expr = System.Linq.Expressions.Expression.Call(
+            typeof(Queryable), nameof(Queryable.Sum),
+            [typeof(CustomAccount)],
+            queryable.Expression,
+            System.Linq.Expressions.Expression.Quote((System.Linq.Expressions.Expression<Func<CustomAccount, decimal?>>)(a => a.PercentComplete)));
+
+        var fetchXml = TranslateToFetchXml<CustomAccount>(expr);
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="new_customaccount">
+                <attribute name="new_percentcomplete" alias="sum" aggregate="sum" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_AverageWithSelector_GeneratesAggregateAvg()
+    {
+        var queryable = _service.Queryable<CustomAccount>();
+        var expr = System.Linq.Expressions.Expression.Call(
+            typeof(Queryable), nameof(Queryable.Average),
+            [typeof(CustomAccount)],
+            queryable.Expression,
+            System.Linq.Expressions.Expression.Quote((System.Linq.Expressions.Expression<Func<CustomAccount, decimal?>>)(a => a.PercentComplete)));
+
+        var fetchXml = TranslateToFetchXml<CustomAccount>(expr);
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="new_customaccount">
+                <attribute name="new_percentcomplete" alias="avg" aggregate="avg" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_Count_GeneratesAggregateCount()
+    {
+        var queryable = _service.Queryable<CustomAccount>();
+        var expr = System.Linq.Expressions.Expression.Call(
+            typeof(Queryable), nameof(Queryable.Count),
+            [typeof(CustomAccount)],
+            queryable.Expression);
+
+        var fetchXml = TranslateToFetchXml<CustomAccount>(expr);
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="new_customaccount">
+                <attribute name="new_customaccountid" alias="count" aggregate="count" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_CountWithPredicate_GeneratesAggregateCountWithFilter()
+    {
+        var queryable = _service.Queryable<CustomAccount>();
+        var expr = System.Linq.Expressions.Expression.Call(
+            typeof(Queryable), nameof(Queryable.Count),
+            [typeof(CustomAccount)],
+            queryable.Expression,
+            System.Linq.Expressions.Expression.Quote((System.Linq.Expressions.Expression<Func<CustomAccount, bool>>)(a => a.Name.Contains("ABC"))));
+
+        var fetchXml = TranslateToFetchXml<CustomAccount>(expr);
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="new_customaccount">
+                <attribute name="new_customaccountid" alias="count" aggregate="count" />
+                <filter type="and">
+                  <condition attribute="new_name" operator="like" value="%ABC%" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_MinWithSelectAndWhere_GeneratesAggregateWithFilter()
+    {
+        var queryable = _service.Queryable<CustomAccount>()
+            .Where(a => a.Name.Contains("ABC"))
+            .Select(a => a.NumberOfEmployees);
+
+        var expr = System.Linq.Expressions.Expression.Call(
+            typeof(Queryable), nameof(Queryable.Min),
+            [typeof(int?)],
+            queryable.Expression);
+
+        var fetchXml = TranslateToFetchXml<CustomAccount>(expr);
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="new_customaccount">
+                <attribute name="new_numberofemployees" alias="min" aggregate="min" />
+                <filter type="and">
+                  <condition attribute="new_name" operator="like" value="%ABC%" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_MinOnMoneyValue_ResolvesMoneyAttribute()
+    {
+        var queryable = _service.Queryable<CustomAccount>()
+            .Select(a => a.CreditLimitMoney.Value);
+
+        var expr = System.Linq.Expressions.Expression.Call(
+            typeof(Queryable), nameof(Queryable.Min),
+            [typeof(decimal)],
+            queryable.Expression);
+
+        var fetchXml = TranslateToFetchXml<CustomAccount>(expr);
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="new_customaccount">
+                <attribute name="new_creditlimit" alias="min" aggregate="min" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_LongCount_GeneratesAggregateCount()
+    {
+        var queryable = _service.Queryable<CustomAccount>();
+        var expr = System.Linq.Expressions.Expression.Call(
+            typeof(Queryable), nameof(Queryable.LongCount),
+            [typeof(CustomAccount)],
+            queryable.Expression);
+
+        var fetchXml = TranslateToFetchXml<CustomAccount>(expr);
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="new_customaccount">
+                <attribute name="new_customaccountid" alias="count" aggregate="count" />
+              </entity>
+            </fetch>
+            """);
+    }
 }
