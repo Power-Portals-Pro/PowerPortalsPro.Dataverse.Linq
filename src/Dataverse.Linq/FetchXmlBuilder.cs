@@ -79,10 +79,8 @@ internal static class FetchXmlBuilder
 
     private static XElement BuildFilter(FetchFilter filter)
     {
-        var element = new XElement("filter");
-
-        if (filter.Type == FilterType.Or)
-            element.Add(new XAttribute("type", "or"));
+        var element = new XElement("filter",
+            new XAttribute("type", filter.Type == FilterType.Or ? "or" : "and"));
 
         foreach (var condition in filter.Conditions)
             element.Add(BuildCondition(condition));

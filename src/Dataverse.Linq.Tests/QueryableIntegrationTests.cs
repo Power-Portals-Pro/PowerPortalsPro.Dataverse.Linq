@@ -372,4 +372,117 @@ public class QueryableIntegrationTests : IntegrationTestBase
 
         results.Should().HaveCount(150);
     }
+
+    // -------------------------------------------------------------------------
+    // Where — typed proxy
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ToListAsync_WhereNameEquals_ReturnsMatchingRecords()
+    {
+        var results = await Service.Queryable<CustomAccount>()
+            .Where(a => a.Name == "Custom Account 001")
+            .ToListAsync();
+
+        results.Should().ContainSingle();
+        results[0].Name.Should().Be("Custom Account 001");
+    }
+
+    [Fact]
+    public async Task ToListAsync_WhereNameNotNull_ExcludesNulls()
+    {
+        var results = await Service.Queryable<CustomAccount>()
+            .Where(a => a.Name != null)
+            .ToListAsync();
+
+        results.Should().HaveCount(150);
+        results.Should().AllSatisfy(r => r.Name.Should().NotBeNull());
+    }
+
+    [Fact]
+    public async Task ToListAsync_WhereDescriptionIsNull_ReturnsRecordsWithNullDescription()
+    {
+        var all = await Service.Queryable<CustomAccount>().ToListAsync();
+        var nullDescriptions = all.Count(a => a.Description == null);
+
+        var results = await Service.Queryable<CustomAccount>()
+            .Where(a => a.Description == null)
+            .ToListAsync();
+
+        results.Should().HaveCount(nullDescriptions);
+    }
+
+    // -------------------------------------------------------------------------
+    // Where — unbound entity with GetAttributeValue
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ToListAsync_UnboundEntity_WhereNotIsNullOrEmpty_ReturnsNonNullRecords()
+    {
+        var results = await Service.Queryable("new_customaccount")
+            .Where(x => !string.IsNullOrEmpty(x.GetAttributeValue<string>("new_name")))
+            .ToListAsync();
+
+        results.Should().HaveCount(150);
+        results.Should().AllSatisfy(r =>
+            r.GetAttributeValue<string>("new_name").Should().NotBeNullOrEmpty());
+    }
+
+    [Fact]
+    public async Task ToListAsync_UnboundEntity_WhereIsNullOrEmpty_ReturnsNullRecords()
+    {
+        var all = await Service.Queryable("new_customaccount").ToListAsync();
+        var nullDescriptions = all.Count(a => a.GetAttributeValue<string>("new_description") == null);
+
+        var results = await Service.Queryable("new_customaccount")
+            .Where(x => string.IsNullOrEmpty(x.GetAttributeValue<string>("new_description")))
+            .ToListAsync();
+
+        results.Should().HaveCount(nullDescriptions);
+    }
+
+    // -------------------------------------------------------------------------
+    // Select — unbound entity with GetAttributeValue
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ToListAsync_UnboundEntity_SelectWithGetAttributeValue_ReturnsProjectedValues()
+    {
+        var results = await Service.Queryable("new_customaccount")
+            .Select(x => new { Name = x.GetAttributeValue<string>("new_name") })
+            .ToListAsync();
+
+        results.Should().HaveCount(150);
+        results.Should().AllSatisfy(r => r.Name.Should().NotBeNullOrEmpty());
+    }
+
+    [Fact]
+    public async Task ToListAsync_UnboundEntity_WhereAndSelect_ReturnsFilteredProjection()
+    {
+        var results = await Service.Queryable("new_customaccount")
+            .Where(x => !string.IsNullOrEmpty(x.GetAttributeValue<string>("new_description")))
+            .Select(x => new { Name = x.GetAttributeValue<string>("new_name"), Description = x.GetAttributeValue<string>("new_description") })
+            .ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Should().AllSatisfy(r =>
+        {
+            r.Name.Should().NotBeNullOrEmpty();
+            r.Description.Should().NotBeNullOrEmpty();
+        });
+    }
+
+    [Fact]
+    public async Task ToListAsync_UnboundEntity_SelectMatchesTypedQuery()
+    {
+        var typed = await (from a in Service.Queryable<CustomAccount>()
+                           select new { a.Name, a.Website }).ToListAsync();
+
+        var unbound = await Service.Queryable("new_customaccount")
+            .Select(x => new { Name = x.GetAttributeValue<string>("new_name"), Website = x.GetAttributeValue<string>("new_website") })
+            .ToListAsync();
+
+        unbound.Should().HaveSameCount(typed);
+        unbound.Select(u => u.Name).Should().BeEquivalentTo(typed.Select(t => t.Name));
+    }
 }

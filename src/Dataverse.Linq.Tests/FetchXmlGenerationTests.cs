@@ -172,7 +172,7 @@ public class FetchXmlGenerationTests
               <entity name="new_customaccount">
                 <attribute name="new_name" />
                 <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="outer" />
-                <filter>
+                <filter type="and">
                   <condition entityname="c" attribute="new_customcontactid" operator="null" />
                 </filter>
               </entity>
@@ -288,6 +288,160 @@ public class FetchXmlGenerationTests
                 <attribute name="new_name" />
                 <attribute name="new_website" />
                 <order attribute="new_name" descending="false" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    // -------------------------------------------------------------------------
+    // Where — GetAttributeValue (unbound)
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_UnboundEntity_WhereNotIsNullOrEmpty_GeneratesNotNullAndNotEmptyFilter()
+    {
+        var fetchXml = _service.Queryable("new_customaccount")
+            .Where(x => !string.IsNullOrEmpty(x.GetAttributeValue<string>("new_name")))
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_name" operator="not-null" />
+                  <condition attribute="new_name" operator="ne" value="" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_UnboundEntity_WhereIsNullOrEmpty_GeneratesNullOrEmptyFilter()
+    {
+        var fetchXml = _service.Queryable("new_customaccount")
+            .Where(x => string.IsNullOrEmpty(x.GetAttributeValue<string>("new_name")))
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <filter type="or">
+                  <condition attribute="new_name" operator="null" />
+                  <condition attribute="new_name" operator="eq" value="" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    // -------------------------------------------------------------------------
+    // Where — typed proxy
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_WhereEqualToValue_GeneratesEqFilter()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Where(a => a.Name == "Test")
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_name" operator="eq" value="Test" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WhereNotEqualToNull_GeneratesNotNullFilter()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Where(a => a.Name != null)
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_name" operator="not-null" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WhereEqualToNull_GeneratesNullFilter()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Where(a => a.Name == null)
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_name" operator="null" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    // -------------------------------------------------------------------------
+    // Select — GetAttributeValue (unbound)
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_UnboundEntity_SelectWithGetAttributeValue_GeneratesAttributes()
+    {
+        var fetchXml = _service.Queryable("new_customaccount")
+            .Select(x => new { Name = x.GetAttributeValue<string>("new_name") })
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_UnboundEntity_WhereAndSelect_GeneratesFilterAndAttributes()
+    {
+        var fetchXml = _service.Queryable("new_customaccount")
+            .Where(x => !string.IsNullOrEmpty(x.GetAttributeValue<string>("new_name")))
+            .Select(x => new { Name = x.GetAttributeValue<string>("new_name"), Website = x.GetAttributeValue<string>("new_website") })
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+                <attribute name="new_website" />
+                <filter type="and">
+                  <condition attribute="new_name" operator="not-null" />
+                  <condition attribute="new_name" operator="ne" value="" />
+                </filter>
               </entity>
             </fetch>
             """);

@@ -137,7 +137,7 @@ internal static class FetchXmlQueryTranslator
     }
 
     // -------------------------------------------------------------------------
-    // Where — predicate translation (currently: null checks for left joins)
+    // Where — predicate translation
     // -------------------------------------------------------------------------
 
     private static void HandleWhere(MethodCallExpression call, TranslationContext ctx)
@@ -158,9 +158,147 @@ internal static class FetchXmlQueryTranslator
             return;
         }
 
-        throw new NotSupportedException(
-            "General Where predicates are not yet supported. " +
-            "Currently only null-checks on joined entities (where c == null) are handled.");
+        // General predicate
+        var rootFilter = ctx.Query.Filter ??= new FetchFilter();
+        TranslatePredicate(lambda.Body, rootFilter);
+    }
+
+    private static void TranslatePredicate(Expression expr, FetchFilter filter)
+    {
+        switch (expr)
+        {
+            // !expr → negate
+            case UnaryExpression { NodeType: ExpressionType.Not, Operand: var operand }:
+                TranslateNegatedPredicate(operand, filter);
+                return;
+
+            // string.IsNullOrEmpty(x.Attr) → null OR eq ""
+            case MethodCallExpression { Method: { Name: "IsNullOrEmpty", DeclaringType: var dt } } isNullCall
+                when dt == typeof(string):
+            {
+                var attr = GetAttributeName(isNullCall.Arguments[0])
+                    ?? throw new NotSupportedException(
+                        "string.IsNullOrEmpty argument must resolve to an attribute.");
+                filter.Type = FilterType.Or;
+                filter.Conditions.Add(new FetchCondition { Attribute = attr, Operator = "null" });
+                filter.Conditions.Add(new FetchCondition { Attribute = attr, Operator = "eq", Value = "" });
+                return;
+            }
+
+            // x.Attr == value / x.Attr != value / x.Attr == null / etc.
+            case BinaryExpression binary:
+                TranslateBinaryPredicate(binary, filter);
+                return;
+
+            default:
+                throw new NotSupportedException(
+                    $"Unsupported Where predicate: {expr.NodeType}");
+        }
+    }
+
+    private static void TranslateNegatedPredicate(Expression expr, FetchFilter filter)
+    {
+        switch (expr)
+        {
+            // !string.IsNullOrEmpty(x.Attr) → not-null AND ne ""
+            case MethodCallExpression { Method: { Name: "IsNullOrEmpty", DeclaringType: var dt } } isNullCall
+                when dt == typeof(string):
+            {
+                var attr = GetAttributeName(isNullCall.Arguments[0])
+                    ?? throw new NotSupportedException(
+                        "string.IsNullOrEmpty argument must resolve to an attribute.");
+                filter.Type = FilterType.And;
+                filter.Conditions.Add(new FetchCondition { Attribute = attr, Operator = "not-null" });
+                filter.Conditions.Add(new FetchCondition { Attribute = attr, Operator = "ne", Value = "" });
+                return;
+            }
+
+            default:
+                throw new NotSupportedException(
+                    $"Unsupported negated Where predicate: {expr.NodeType}");
+        }
+    }
+
+    private static void TranslateBinaryPredicate(BinaryExpression binary, FetchFilter filter)
+    {
+        var (op, negate) = binary.NodeType switch
+        {
+            ExpressionType.Equal => ("eq", false),
+            ExpressionType.NotEqual => ("ne", false),
+            ExpressionType.LessThan => ("lt", false),
+            ExpressionType.LessThanOrEqual => ("le", false),
+            ExpressionType.GreaterThan => ("gt", false),
+            ExpressionType.GreaterThanOrEqual => ("ge", false),
+            ExpressionType.AndAlso => ("and", false),
+            ExpressionType.OrElse => ("or", false),
+            _ => throw new NotSupportedException(
+                $"Unsupported binary operator in Where: {binary.NodeType}")
+        };
+
+        // && and || → nested filter
+        if (op is "and" or "or")
+        {
+            var subFilter = new FetchFilter
+            {
+                Type = op == "and" ? FilterType.And : FilterType.Or
+            };
+            TranslatePredicate(binary.Left, subFilter);
+            TranslatePredicate(binary.Right, subFilter);
+            filter.Filters.Add(subFilter);
+            return;
+        }
+
+        // Determine which side is the attribute and which is the value
+        var (attrExpr, valueExpr) = ResolveAttributeAndValue(binary.Left, binary.Right);
+
+        var attribute = GetAttributeName(attrExpr)
+            ?? throw new NotSupportedException(
+                "One side of a comparison must resolve to an attribute.");
+
+        // null comparison → null / not-null
+        if (IsNullConstant(valueExpr))
+        {
+            filter.Conditions.Add(new FetchCondition
+            {
+                Attribute = attribute,
+                Operator = op == "eq" ? "null" : "not-null"
+            });
+            return;
+        }
+
+        var value = EvaluateValue(valueExpr);
+        filter.Conditions.Add(new FetchCondition
+        {
+            Attribute = attribute,
+            Operator = op,
+            Value = value
+        });
+    }
+
+    private static (Expression Attr, Expression Value) ResolveAttributeAndValue(
+        Expression left, Expression right)
+    {
+        // Try left as attribute first
+        if (GetAttributeName(left) is not null)
+            return (left, right);
+        if (GetAttributeName(right) is not null)
+            return (right, left);
+
+        return (left, right);
+    }
+
+    private static bool IsNullConstant(Expression expr) =>
+        expr is ConstantExpression { Value: null }
+        || (expr is UnaryExpression { NodeType: ExpressionType.Convert } convert
+            && convert.Operand is ConstantExpression { Value: null });
+
+    private static object? EvaluateValue(Expression expr)
+    {
+        if (expr is ConstantExpression constant)
+            return constant.Value;
+
+        // Evaluate captured variables / closures
+        return Expression.Lambda(expr).Compile().DynamicInvoke();
     }
 
     // -------------------------------------------------------------------------
@@ -555,13 +693,22 @@ internal static class FetchXmlQueryTranslator
 
     /// <summary>
     /// Resolves an expression to a Dataverse attribute logical name.
-    /// Handles direct property access (<c>a.AccountId</c>) and two-level
-    /// EntityReference access (<c>c.ParentAccount.Id</c>).
+    /// Handles direct property access (<c>a.AccountId</c>), two-level
+    /// EntityReference access (<c>c.ParentAccount.Id</c>), and
+    /// <see cref="Entity.GetAttributeValue{T}"/> calls with a string-constant argument.
     /// </summary>
     private static string? GetAttributeName(Expression expr)
     {
         if (expr is UnaryExpression { NodeType: ExpressionType.Convert } convert)
             expr = convert.Operand;
+
+        // Entity.GetAttributeValue<T>("name")
+        if (expr is MethodCallExpression { Method.Name: nameof(Entity.GetAttributeValue) } getAttr
+            && getAttr.Arguments.Count == 1
+            && getAttr.Arguments[0] is ConstantExpression { Value: string constName })
+        {
+            return constName;
+        }
 
         if (expr is not MemberExpression memberExpr)
             return null;
