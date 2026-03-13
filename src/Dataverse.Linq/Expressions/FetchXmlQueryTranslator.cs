@@ -553,6 +553,14 @@ internal static class FetchXmlQueryTranslator
         // Both sides are attributes → column-to-column comparison (valueof)
         if (leftResolved is not null && rightResolved is not null)
         {
+            var leftType = UnwrapExpressionType(binary.Left);
+            var rightType = UnwrapExpressionType(binary.Right);
+            if (leftType != rightType)
+                throw new NotSupportedException(
+                    $"Column-to-column comparison requires both sides to have the same type. " +
+                    $"Left '{leftResolved.Value.Name}' is {leftType.Name}, " +
+                    $"right '{rightResolved.Value.Name}' is {rightType.Name}.");
+
             var left = leftResolved.Value;
             var right = rightResolved.Value;
             var valueOfRef = right.EntityAlias is not null
@@ -608,6 +616,17 @@ internal static class FetchXmlQueryTranslator
             Operator = op,
             Value = value
         });
+    }
+
+    /// <summary>
+    /// Unwraps Convert nodes and Nullable&lt;T&gt; to get the underlying CLR type of an expression.
+    /// </summary>
+    private static Type UnwrapExpressionType(Expression expr)
+    {
+        while (expr is UnaryExpression { NodeType: ExpressionType.Convert } convert)
+            expr = convert.Operand;
+        var type = expr.Type;
+        return Nullable.GetUnderlyingType(type) ?? type;
     }
 
     private static bool IsNullConstant(Expression expr) =>

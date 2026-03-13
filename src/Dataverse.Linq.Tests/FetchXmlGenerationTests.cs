@@ -1751,4 +1751,15 @@ public class FetchXmlGenerationTests
             </fetch>
             """);
     }
+
+    [Fact]
+    public void ToFetchXml_WhereColumnComparisonTypeMismatch_ThrowsNotSupportedException()
+    {
+        var act = () => _service.Queryable<CustomAccount>()
+            .Where(a => a.GetAttributeValue<int?>("new_numberofemployees") == a.GetAttributeValue<decimal?>("new_percentcomplete"))
+            .ToFetchXml();
+
+        act.Should().Throw<NotSupportedException>()
+            .WithMessage("*same type*");
+    }
 }
