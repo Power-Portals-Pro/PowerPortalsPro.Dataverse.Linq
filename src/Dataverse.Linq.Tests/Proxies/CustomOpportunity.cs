@@ -16,32 +16,32 @@ using System.Runtime.Serialization;
 namespace Dataverse.Linq.Tests.Proxies
 {
     /// <summary>
-    /// Proxy class that represents the 'new_customcontact' D365 table
+    /// Proxy class that represents the 'new_customopportunity' D365 table
     /// </summary>
-    [EntityLogicalNameAttribute("new_customcontact")]
+    [EntityLogicalNameAttribute("new_customopportunity")]
     [GeneratedCode("XrmToolkit", "8.3.4.0")]
     [DataContract(Name = "Entity", Namespace = "http://schemas.microsoft.com/xrm/2011/Contracts")]
     [DebuggerNonUserCode]
     [ExcludeFromCodeCoverage]
-    public partial class CustomContact : BaseProxyClass
+    public partial class CustomOpportunity : BaseProxyClass
     {
-        public new const string LogicalName = "new_customcontact";
-        public const int ObjectTypeCode = 11140;
-        public const string PrimaryIdAttribute = "new_customcontactid";
+        public new const string LogicalName = "new_customopportunity";
+        public const int ObjectTypeCode = 12054;
+        public const string PrimaryIdAttribute = "new_customopportunityid";
         public const string PrimaryNameAttribute = "new_name";
         
-        static CustomContact()
+        static CustomOpportunity()
         {
-            BaseProxyClass.RegisterProxyType(typeof(CustomContact), "new_customcontact");
+            BaseProxyClass.RegisterProxyType(typeof(CustomOpportunity), "new_customopportunity");
             _textOptions = new Dictionary<string, eTextOptions>();
             _numberOptions = new Dictionary<string, eNumberOptions>();
             _errorStrings = new Dictionary<string, string>();
             TextError = "The value for attribute '{0}' cannot be longer than {3} characters. The length of the value is {2} characters.";
             NumberError = "The value for attribute '{0}' must be between {2} and {3}. The value is {1}";
         }
-        public CustomContact() : base(new Entity("new_customcontact")) { }
-        public CustomContact(Entity original) : base(original) { }
-        public static string GetLogicalName() { return BaseProxyClass.GetLogicalName<CustomContact>(); }
+        public CustomOpportunity() : base(new Entity("new_customopportunity")) { }
+        public CustomOpportunity(Entity original) : base(original) { }
+        public static string GetLogicalName() { return BaseProxyClass.GetLogicalName<CustomOpportunity>(); }
 
         /// <summary>
         /// Action to perform when the string value is greater than the allowed length.
@@ -148,54 +148,104 @@ namespace Dataverse.Linq.Tests.Proxies
         /// </summary>
         public static string NumberError { get; set; }
         /// <summary>
-        /// Logical Name: new_contactrating
+        /// <para>Logical Name: new_actualclosedate</para>
         /// </summary>
-        [AttributeLogicalName("new_contactrating")]
-        public AccountRating_Enum? ContactRating
+        [AttributeLogicalName("new_actualclosedate")]
+        public DateTime? ActualCloseDate
         {
             get
             {
-                if (ContactRating_OptionSetValue != null) { return (AccountRating_Enum)ContactRating_OptionSetValue.Value; }
+                return this.GetPropertyValue<DateTime?>("new_actualclosedate");
+            }
+            set
+            {
+                this.SetPropertyValue<DateTime?>("new_actualclosedate", value, nameof(ActualCloseDate));
+            }
+        }
+
+        /// <summary>
+        /// <para>Logical Name: new_actualrevenue</para>
+        /// <para>Minimum Value: -922337203685477</para>
+        /// <para>Maximum Value: 922337203685477</para>
+        /// <para>Precision: 2</para>
+        /// </summary>
+        [AttributeLogicalName("new_actualrevenue")]
+        public decimal? ActualRevenue
+        {
+            get
+            {
+                if (ActualRevenueMoney != null) { return ActualRevenueMoney.Value; }
                 return null;
             }
             set
             {
-                if (value != null) { this.ContactRating_OptionSetValue = new OptionSetValue((int)value); }
-                else this.ContactRating_OptionSetValue = null;
+                if (value != null) { this.ActualRevenueMoney = new Money(value.Value); }
+                else this.ActualRevenueMoney = null;
             }
         }
         /// <summary>
-        /// <para>Logical Name: new_contactrating</para>
+        /// <para>Logical Name: new_actualrevenue</para>
+        /// <para>Minimum Value: -922337203685477</para>
+        /// <para>Maximum Value: 922337203685477</para>
+        /// <para>Precision: 2</para>
         /// </summary>
-        [AttributeLogicalName("new_contactrating")]
-        public OptionSetValue ContactRating_OptionSetValue
+        [AttributeLogicalName("new_actualrevenue")]
+        public Money ActualRevenueMoney
         {
             get
             {
-                return this.GetPropertyValue<OptionSetValue>("new_contactrating");
+                return this.GetPropertyValue<Money>("new_actualrevenue");
             }
             set
             {
-                this.SetPropertyValue<OptionSetValue>("new_contactrating", value, nameof(ContactRating_OptionSetValue));
+                this.SetPropertyValue("new_actualrevenue", (Money)value, (decimal)-922337203685477, (decimal)922337203685477, nameof(ActualRevenueMoney));
+            }
+        }
+
+        /// <summary>
+        /// <para>Logical Name: new_actualrevenue_base</para>
+        /// <para>Minimum Value: -922337203685477</para>
+        /// <para>Maximum Value: 922337203685477</para>
+        /// <para>Precision: 2</para>
+        /// </summary>
+        [AttributeLogicalName("new_actualrevenue_base")]
+        public decimal? ActualRevenue_Base
+        {
+            get
+            {
+                if (ActualRevenue_BaseMoney != null) { return ActualRevenue_BaseMoney.Value; }
+                return null;
             }
         }
         /// <summary>
-        /// Retrieves the current value's text in the user's language.
+        /// <para>Logical Name: new_actualrevenue_base</para>
+        /// <para>Minimum Value: -922337203685477</para>
+        /// <para>Maximum Value: 922337203685477</para>
+        /// <para>Precision: 2</para>
         /// </summary>
-        /// <param name="service">D365 Organization Service</param>
-        /// <returns></returns>
-        public string ContactRating_Text(IOrganizationService service)
+        [AttributeLogicalName("new_actualrevenue_base")]
+        public Money ActualRevenue_BaseMoney
         {
-            return this.ContactRating_OptionSetValue.GetOptionSetText(service, this, "new_contactrating");
+            get
+            {
+                return this.GetPropertyValue<Money>("new_actualrevenue_base");
+            }
         }
+
         /// <summary>
-        /// Retrieves the current value's text in the user's language.
+        /// <para>Logical Name: new_contact</para>
         /// </summary>
-        /// <param name="attributeMetadata">The attribute metadata previously retrieved using the 'GetAttributeMetadata' extension method on the IOrganizationService object.</param>
-        /// <returns></returns>
-        public string ContactRating_Text(EnumAttributeMetadata attributeMetadata)
+        [AttributeLogicalName("new_contact")]
+        public EntityReference Contact
         {
-            return attributeMetadata.GetOptionSetText(this.ContactRating_OptionSetValue.Value);
+            get
+            {
+                return this.GetPropertyValue<EntityReference>("new_contact");
+            }
+            set
+            {
+                this.SetPropertyValue<EntityReference>("new_contact", value, nameof(Contact));
+            }
         }
 
         /// <summary>
@@ -304,20 +354,89 @@ namespace Dataverse.Linq.Tests.Proxies
 
         /// <summary>
         /// <para>Key Property (Uniqueidentifier)</para>
-        /// <para>Logical Name: new_customcontactid</para>
+        /// <para>Logical Name: new_customopportunityid</para>
         /// </summary>
-        [AttributeLogicalName("new_customcontactid")]
-        public Guid CustomContactId
+        [AttributeLogicalName("new_customopportunityid")]
+        public Guid CustomOpportunityId
         {
             get
             {
-                return base.Attributes.Contains("new_customcontactid") ? this.GetAttributeValue<Guid>("new_customcontactid") : base.Id;
+                return base.Attributes.Contains("new_customopportunityid") ? this.GetAttributeValue<Guid>("new_customopportunityid") : base.Id;
             }
             set
             {
                 base.Id = value;
-                base.Attributes["new_customcontactid"] = value;
-                base.SetPropertyValue("new_customcontactid", value, nameof(CustomContactId));
+                base.Attributes["new_customopportunityid"] = value;
+                base.SetPropertyValue("new_customopportunityid", value, nameof(CustomOpportunityId));
+            }
+        }
+
+        /// <summary>
+        /// <para>Logical Name: new_estimatedrevenue</para>
+        /// <para>Minimum Value: -922337203685477</para>
+        /// <para>Maximum Value: 922337203685477</para>
+        /// <para>Precision: 2</para>
+        /// </summary>
+        [AttributeLogicalName("new_estimatedrevenue")]
+        public decimal? EstimatedRevenue
+        {
+            get
+            {
+                if (EstimatedRevenueMoney != null) { return EstimatedRevenueMoney.Value; }
+                return null;
+            }
+            set
+            {
+                if (value != null) { this.EstimatedRevenueMoney = new Money(value.Value); }
+                else this.EstimatedRevenueMoney = null;
+            }
+        }
+        /// <summary>
+        /// <para>Logical Name: new_estimatedrevenue</para>
+        /// <para>Minimum Value: -922337203685477</para>
+        /// <para>Maximum Value: 922337203685477</para>
+        /// <para>Precision: 2</para>
+        /// </summary>
+        [AttributeLogicalName("new_estimatedrevenue")]
+        public Money EstimatedRevenueMoney
+        {
+            get
+            {
+                return this.GetPropertyValue<Money>("new_estimatedrevenue");
+            }
+            set
+            {
+                this.SetPropertyValue("new_estimatedrevenue", (Money)value, (decimal)-922337203685477, (decimal)922337203685477, nameof(EstimatedRevenueMoney));
+            }
+        }
+
+        /// <summary>
+        /// <para>Logical Name: new_estimatedrevenue_base</para>
+        /// <para>Minimum Value: -922337203685477</para>
+        /// <para>Maximum Value: 922337203685477</para>
+        /// <para>Precision: 2</para>
+        /// </summary>
+        [AttributeLogicalName("new_estimatedrevenue_base")]
+        public decimal? EstimatedRevenue_Base
+        {
+            get
+            {
+                if (EstimatedRevenue_BaseMoney != null) { return EstimatedRevenue_BaseMoney.Value; }
+                return null;
+            }
+        }
+        /// <summary>
+        /// <para>Logical Name: new_estimatedrevenue_base</para>
+        /// <para>Minimum Value: -922337203685477</para>
+        /// <para>Maximum Value: 922337203685477</para>
+        /// <para>Precision: 2</para>
+        /// </summary>
+        [AttributeLogicalName("new_estimatedrevenue_base")]
+        public Money EstimatedRevenue_BaseMoney
+        {
+            get
+            {
+                return this.GetPropertyValue<Money>("new_estimatedrevenue_base");
             }
         }
 
@@ -337,56 +456,6 @@ namespace Dataverse.Linq.Tests.Proxies
         }
 
         /// <summary>
-        /// Logical Name: new_favoritecolors
-        /// </summary>
-        [AttributeLogicalName("new_favoritecolors")]
-        public List<Color> FavoriteColors
-        {
-            get
-            {
-                if (FavoriteColors_OptionSetValues != null) { return FavoriteColors_OptionSetValues.Select(o => (Color)o.Value).ToList(); }
-                return null;
-            }
-            set
-            {
-                if (value != null) { this.FavoriteColors_OptionSetValues = new OptionSetValueCollection(value.Select(o => new OptionSetValue((int)o)).ToList()); }
-                else this.FavoriteColors_OptionSetValues = null;
-            }
-        }
-        /// <summary>
-        /// <para>Logical Name: new_favoritecolors</para>
-        /// </summary>
-        [AttributeLogicalName("new_favoritecolors")]
-        public OptionSetValueCollection FavoriteColors_OptionSetValues
-        {
-            get
-            {
-                return this.GetPropertyValue<OptionSetValueCollection>("new_favoritecolors");
-            }
-            set
-            {
-                this.SetPropertyValue<OptionSetValueCollection>("new_favoritecolors", value, nameof(FavoriteColors_OptionSetValues));
-            }
-        }
-
-        /// <summary>
-        /// <para>Logical Name: new_firstname</para>
-        /// <para>Max Length: 100 characters</para>
-        /// </summary>
-        [AttributeLogicalName("new_firstname")]
-        public string FirstName
-        {
-            get
-            {
-                return this.GetPropertyValue<string>("new_firstname");
-            }
-            set
-            {
-                this.SetPropertyValue("new_firstname", value, 100, nameof(FirstName));
-            }
-        }
-
-        /// <summary>
         /// <para>Logical Name: importsequencenumber</para>
         /// <para>Minimum Value: -2147483648</para>
         /// <para>Maximum Value: 2147483647</para>
@@ -401,23 +470,6 @@ namespace Dataverse.Linq.Tests.Proxies
             set
             {
                 this.SetPropertyValue("importsequencenumber", (int?)value, (int)-2147483648, (int)2147483647, nameof(ImportSequenceNumber));
-            }
-        }
-
-        /// <summary>
-        /// <para>Logical Name: new_lastname</para>
-        /// <para>Max Length: 100 characters</para>
-        /// </summary>
-        [AttributeLogicalName("new_lastname")]
-        public string LastName
-        {
-            get
-            {
-                return this.GetPropertyValue<string>("new_lastname");
-            }
-            set
-            {
-                this.SetPropertyValue("new_lastname", value, 100, nameof(LastName));
             }
         }
 
@@ -526,18 +578,16 @@ namespace Dataverse.Linq.Tests.Proxies
             }
         }
 
-
-
         /// <summary>
-        /// <para>Logical Name: new_parentaccountname</para>
+        /// <para>Logical Name: new_contactname</para>
         /// <para>Max Length: 850 characters</para>
         /// </summary>
-        [AttributeLogicalName("new_parentaccountname")]
-        public string new_ParentAccountName
+        [AttributeLogicalName("new_contactname")]
+        public string new_ContactName
         {
             get
             {
-                return this.GetPropertyValue<string>("new_parentaccountname");
+                return this.GetPropertyValue<string>("new_contactname");
             }
         }
 
@@ -649,22 +699,6 @@ namespace Dataverse.Linq.Tests.Proxies
         }
 
         /// <summary>
-        /// <para>Logical Name: new_parentaccount</para>
-        /// </summary>
-        [AttributeLogicalName("new_parentaccount")]
-        public EntityReference ParentAccount
-        {
-            get
-            {
-                return this.GetPropertyValue<EntityReference>("new_parentaccount");
-            }
-            set
-            {
-                this.SetPropertyValue<EntityReference>("new_parentaccount", value, nameof(ParentAccount));
-            }
-        }
-
-        /// <summary>
         /// <para>Logical Name: overriddencreatedon</para>
         /// </summary>
         [AttributeLogicalName("overriddencreatedon")]
@@ -685,11 +719,11 @@ namespace Dataverse.Linq.Tests.Proxies
         /// Logical Name: statecode
         /// </summary>
         [AttributeLogicalName("statecode")]
-        public CustomContact_Status? Status
+        public CustomOpportunity_Status? Status
         {
             get
             {
-                if (Status_OptionSetValue != null) { return (CustomContact_Status)Status_OptionSetValue.Value; }
+                if (Status_OptionSetValue != null) { return (CustomOpportunity_Status)Status_OptionSetValue.Value; }
                 return null;
             }
             set
@@ -736,11 +770,11 @@ namespace Dataverse.Linq.Tests.Proxies
         /// Logical Name: statuscode
         /// </summary>
         [AttributeLogicalName("statuscode")]
-        public CustomContact_StatusReason? StatusReason
+        public CustomOpportunity_StatusReason? StatusReason
         {
             get
             {
-                if (StatusReason_OptionSetValue != null) { return (CustomContact_StatusReason)StatusReason_OptionSetValue.Value; }
+                if (StatusReason_OptionSetValue != null) { return (CustomOpportunity_StatusReason)StatusReason_OptionSetValue.Value; }
                 return null;
             }
             set
@@ -848,211 +882,92 @@ namespace Dataverse.Linq.Tests.Proxies
 
         /// <summary>
         /// <para><b>Entity (Regarding)</b></para>
-        /// <para>Schema Name: new_customcontact_AsyncOperations</para>
+        /// <para>Schema Name: new_customopportunity_AsyncOperations</para>
         /// </summary>
         public List<Entity> GetSystemJobs_Regarding(IOrganizationService service, params string[] columns) { return BaseProxyClass.GetRelatedOneToManyEntities(service, this.Id, "asyncoperation", "regardingobjectid", columns); }
 
         /// <summary>
         /// <para><b>Entity (Regarding)</b></para>
-        /// <para>Schema Name: new_customcontact_AsyncOperations</para>
+        /// <para>Schema Name: new_customopportunity_AsyncOperations</para>
         /// </summary>
         public List<Entity> GetSystemJobs_Regarding(IOrganizationService service, ColumnSet columns) { return BaseProxyClass.GetRelatedOneToManyEntities(service, this.Id, "asyncoperation", "regardingobjectid", columns); }
 
         /// <summary>
         /// <para><b>Entity (Name)</b></para>
-        /// <para>Schema Name: new_customcontact_BulkDeleteFailures</para>
+        /// <para>Schema Name: new_customopportunity_BulkDeleteFailures</para>
         /// </summary>
         public List<Entity> GetBulkDeleteFailures_Name(IOrganizationService service, params string[] columns) { return BaseProxyClass.GetRelatedOneToManyEntities(service, this.Id, "bulkdeletefailure", "regardingobjectid", columns); }
 
         /// <summary>
         /// <para><b>Entity (Name)</b></para>
-        /// <para>Schema Name: new_customcontact_BulkDeleteFailures</para>
+        /// <para>Schema Name: new_customopportunity_BulkDeleteFailures</para>
         /// </summary>
         public List<Entity> GetBulkDeleteFailures_Name(IOrganizationService service, ColumnSet columns) { return BaseProxyClass.GetRelatedOneToManyEntities(service, this.Id, "bulkdeletefailure", "regardingobjectid", columns); }
 
         /// <summary>
         /// <para><b>Entity (Regarding Object Id)</b></para>
-        /// <para>Schema Name: new_customcontact_MailboxTrackingFolders</para>
+        /// <para>Schema Name: new_customopportunity_MailboxTrackingFolders</para>
         /// </summary>
         public List<Entity> GetMailboxAutoTrackingFolders_RegardingObjectId(IOrganizationService service, params string[] columns) { return BaseProxyClass.GetRelatedOneToManyEntities(service, this.Id, "mailboxtrackingfolder", "regardingobjectid", columns); }
 
         /// <summary>
         /// <para><b>Entity (Regarding Object Id)</b></para>
-        /// <para>Schema Name: new_customcontact_MailboxTrackingFolders</para>
+        /// <para>Schema Name: new_customopportunity_MailboxTrackingFolders</para>
         /// </summary>
         public List<Entity> GetMailboxAutoTrackingFolders_RegardingObjectId(IOrganizationService service, ColumnSet columns) { return BaseProxyClass.GetRelatedOneToManyEntities(service, this.Id, "mailboxtrackingfolder", "regardingobjectid", columns); }
 
         /// <summary>
-        /// <para><b>CustomAccount (Primary Contact)</b></para>
-        /// <para>Schema Name: new_customaccount_PrimaryContact_new_customcontact</para>
-        /// </summary>
-        public List<CustomAccount> GetCustomAccounts_PrimaryContact(IOrganizationService service, params string[] columns) { return BaseProxyClass.GetRelatedOneToManyEntities<CustomAccount>(service, this.Id, "new_customaccount", "new_primarycontact", columns); }
-
-        /// <summary>
-        /// <para><b>CustomAccount (Primary Contact)</b></para>
-        /// <para>Schema Name: new_customaccount_PrimaryContact_new_customcontact</para>
-        /// </summary>
-        public List<CustomAccount> GetCustomAccounts_PrimaryContact(IOrganizationService service, ColumnSet columns) { return BaseProxyClass.GetRelatedOneToManyEntities<CustomAccount>(service, this.Id, "new_customaccount", "new_primarycontact", columns); }
-
-        /// <summary>
-        /// <para><b>CustomOpportunity (Contact)</b></para>
-        /// <para>Schema Name: new_customopportunity_Contact_new_customcontact</para>
-        /// </summary>
-        public List<CustomOpportunity> GetCustomOpportunities_Contact(IOrganizationService service, params string[] columns) { return BaseProxyClass.GetRelatedOneToManyEntities<CustomOpportunity>(service, this.Id, "new_customopportunity", "new_contact", columns); }
-
-        /// <summary>
-        /// <para><b>CustomOpportunity (Contact)</b></para>
-        /// <para>Schema Name: new_customopportunity_Contact_new_customcontact</para>
-        /// </summary>
-        public List<CustomOpportunity> GetCustomOpportunities_Contact(IOrganizationService service, ColumnSet columns) { return BaseProxyClass.GetRelatedOneToManyEntities<CustomOpportunity>(service, this.Id, "new_customopportunity", "new_contact", columns); }
-
-        /// <summary>
         /// <para><b>Entity (Entity instance)</b></para>
-        /// <para>Schema Name: new_customcontact_PrincipalObjectAttributeAccesses</para>
+        /// <para>Schema Name: new_customopportunity_PrincipalObjectAttributeAccesses</para>
         /// </summary>
         public List<Entity> GetFieldSharing_EntityInstance(IOrganizationService service, params string[] columns) { return BaseProxyClass.GetRelatedOneToManyEntities(service, this.Id, "principalobjectattributeaccess", "objectid", columns); }
 
         /// <summary>
         /// <para><b>Entity (Entity instance)</b></para>
-        /// <para>Schema Name: new_customcontact_PrincipalObjectAttributeAccesses</para>
+        /// <para>Schema Name: new_customopportunity_PrincipalObjectAttributeAccesses</para>
         /// </summary>
         public List<Entity> GetFieldSharing_EntityInstance(IOrganizationService service, ColumnSet columns) { return BaseProxyClass.GetRelatedOneToManyEntities(service, this.Id, "principalobjectattributeaccess", "objectid", columns); }
 
         /// <summary>
         /// <para><b>Entity (Regarding)</b></para>
-        /// <para>Schema Name: new_customcontact_ProcessSession</para>
+        /// <para>Schema Name: new_customopportunity_ProcessSession</para>
         /// </summary>
         public List<Entity> GetProcessSessions_Regarding(IOrganizationService service, params string[] columns) { return BaseProxyClass.GetRelatedOneToManyEntities(service, this.Id, "processsession", "regardingobjectid", columns); }
 
         /// <summary>
         /// <para><b>Entity (Regarding)</b></para>
-        /// <para>Schema Name: new_customcontact_ProcessSession</para>
+        /// <para>Schema Name: new_customopportunity_ProcessSession</para>
         /// </summary>
         public List<Entity> GetProcessSessions_Regarding(IOrganizationService service, ColumnSet columns) { return BaseProxyClass.GetRelatedOneToManyEntities(service, this.Id, "processsession", "regardingobjectid", columns); }
 
         /// <summary>
         /// <para><b>Entity (Record)</b></para>
-        /// <para>Schema Name: new_customcontact_SyncErrors</para>
+        /// <para>Schema Name: new_customopportunity_SyncErrors</para>
         /// </summary>
         public List<Entity> GetSyncErrors_Record(IOrganizationService service, params string[] columns) { return BaseProxyClass.GetRelatedOneToManyEntities(service, this.Id, "syncerror", "regardingobjectid", columns); }
 
         /// <summary>
         /// <para><b>Entity (Record)</b></para>
-        /// <para>Schema Name: new_customcontact_SyncErrors</para>
+        /// <para>Schema Name: new_customopportunity_SyncErrors</para>
         /// </summary>
         public List<Entity> GetSyncErrors_Record(IOrganizationService service, ColumnSet columns) { return BaseProxyClass.GetRelatedOneToManyEntities(service, this.Id, "syncerror", "regardingobjectid", columns); }
 
         /// <summary>
         /// <para><b>Entity (Object Id)</b></para>
-        /// <para>Schema Name: new_customcontact_UserEntityInstanceDatas</para>
+        /// <para>Schema Name: new_customopportunity_UserEntityInstanceDatas</para>
         /// </summary>
         public List<Entity> GetUserEntityInstanceData_ObjectId(IOrganizationService service, params string[] columns) { return BaseProxyClass.GetRelatedOneToManyEntities(service, this.Id, "userentityinstancedata", "objectid", columns); }
 
         /// <summary>
         /// <para><b>Entity (Object Id)</b></para>
-        /// <para>Schema Name: new_customcontact_UserEntityInstanceDatas</para>
+        /// <para>Schema Name: new_customopportunity_UserEntityInstanceDatas</para>
         /// </summary>
         public List<Entity> GetUserEntityInstanceData_ObjectId(IOrganizationService service, ColumnSet columns) { return BaseProxyClass.GetRelatedOneToManyEntities(service, this.Id, "userentityinstancedata", "objectid", columns); }
 
 
         
         
-        public enum AccountRating_Enum
-        {
-            /// <summary>
-            /// <para>Cold</para>
-            /// <para>Value = 100000000</para>
-            /// </summary>
-            [Description("Cold")]
-            Cold = 100000000,
-
-            /// <summary>
-            /// <para>Warm</para>
-            /// <para>Value = 100000001</para>
-            /// </summary>
-            [Description("Warm")]
-            Warm = 100000001,
-
-            /// <summary>
-            /// <para>Hot</para>
-            /// <para>Value = 100000002</para>
-            /// </summary>
-            [Description("Hot")]
-            Hot = 100000002,
-        }
-        public enum Color
-        {
-            /// <summary>
-            /// <para>Red</para>
-            /// <para>Value = 100000000</para>
-            /// </summary>
-            [Description("Red")]
-            Red = 100000000,
-
-            /// <summary>
-            /// <para>Orange</para>
-            /// <para>Value = 100000001</para>
-            /// </summary>
-            [Description("Orange")]
-            Orange = 100000001,
-
-            /// <summary>
-            /// <para>Blue</para>
-            /// <para>Value = 100000002</para>
-            /// </summary>
-            [Description("Blue")]
-            Blue = 100000002,
-
-            /// <summary>
-            /// <para>Black</para>
-            /// <para>Value = 100000003</para>
-            /// </summary>
-            [Description("Black")]
-            Black = 100000003,
-
-            /// <summary>
-            /// <para>White</para>
-            /// <para>Value = 100000004</para>
-            /// </summary>
-            [Description("White")]
-            White = 100000004,
-
-            /// <summary>
-            /// <para>Yellow</para>
-            /// <para>Value = 100000005</para>
-            /// </summary>
-            [Description("Yellow")]
-            Yellow = 100000005,
-
-            /// <summary>
-            /// <para>Purple</para>
-            /// <para>Value = 100000006</para>
-            /// </summary>
-            [Description("Purple")]
-            Purple = 100000006,
-
-            /// <summary>
-            /// <para>Pink</para>
-            /// <para>Value = 100000007</para>
-            /// </summary>
-            [Description("Pink")]
-            Pink = 100000007,
-
-            /// <summary>
-            /// <para>Green</para>
-            /// <para>Value = 100000008</para>
-            /// </summary>
-            [Description("Green")]
-            Green = 100000008,
-
-            /// <summary>
-            /// <para>Brown</para>
-            /// <para>Value = 100000009</para>
-            /// </summary>
-            [Description("Brown")]
-            Brown = 100000009,
-        }
-        public enum CustomContact_Status
+        public enum CustomOpportunity_Status
         {
             /// <summary>
             /// <para>Active</para>
@@ -1068,7 +983,7 @@ namespace Dataverse.Linq.Tests.Proxies
             [Description("Inactive")]
             Inactive = 1,
         }
-        public enum CustomContact_StatusReason
+        public enum CustomOpportunity_StatusReason
         {
             /// <summary>
             /// <para>Active</para>
@@ -1078,17 +993,24 @@ namespace Dataverse.Linq.Tests.Proxies
             Active = 1,
 
             /// <summary>
-            /// <para>Inactive</para>
+            /// <para>Won</para>
             /// <para>Value = 2</para>
             /// </summary>
-            [Description("Inactive")]
+            [Description("Won")]
             Inactive = 2,
+
+            /// <summary>
+            /// <para>Lost</para>
+            /// <para>Value = 100000001</para>
+            /// </summary>
+            [Description("Lost")]
+            Lost = 100000001,
         }
-        public void SetState(IOrganizationService service, CustomContact_Status state, CustomContact_StatusReason status)
+        public void SetState(IOrganizationService service, CustomOpportunity_Status state, CustomOpportunity_StatusReason status)
         {
             service.SetState(this, (int)state, (int)status);
         }
-        public async System.Threading.Tasks.Task SetStateAsync(IOrganizationService service, CustomContact_Status state, CustomContact_StatusReason status)
+        public async System.Threading.Tasks.Task SetStateAsync(IOrganizationService service, CustomOpportunity_Status state, CustomOpportunity_StatusReason status)
         {
             await service.SetStateAsync(this, (int)state, (int)status);
         }
@@ -1096,10 +1018,28 @@ namespace Dataverse.Linq.Tests.Proxies
         public static class Properties
         {
             /// <summary>
-            /// <para>Contact Rating</para>
-            /// <para>Logical Name = new_contactrating</para>
+            /// <para>Actual Close Date</para>
+            /// <para>Logical Name = new_actualclosedate</para>
             /// </summary>
-            public const string ContactRating = "new_contactrating";
+            public const string ActualCloseDate = "new_actualclosedate";
+
+            /// <summary>
+            /// <para>Actual Revenue</para>
+            /// <para>Logical Name = new_actualrevenue</para>
+            /// </summary>
+            public const string ActualRevenue = "new_actualrevenue";
+
+            /// <summary>
+            /// <para>Actual Revenue (Base)</para>
+            /// <para>Logical Name = new_actualrevenue_base</para>
+            /// </summary>
+            public const string ActualRevenue_Base = "new_actualrevenue_base";
+
+            /// <summary>
+            /// <para>Contact</para>
+            /// <para>Logical Name = new_contact</para>
+            /// </summary>
+            public const string Contact = "new_contact";
 
             /// <summary>
             /// <para>Created By</para>
@@ -1150,10 +1090,22 @@ namespace Dataverse.Linq.Tests.Proxies
             public const string Currency = "transactioncurrencyid";
 
             /// <summary>
-            /// <para>Custom Contact</para>
-            /// <para>Logical Name = new_customcontactid</para>
+            /// <para>Custom Opportunity</para>
+            /// <para>Logical Name = new_customopportunityid</para>
             /// </summary>
-            public const string CustomContactId = "new_customcontactid";
+            public const string CustomOpportunityId = "new_customopportunityid";
+
+            /// <summary>
+            /// <para>Estimated Revenue</para>
+            /// <para>Logical Name = new_estimatedrevenue</para>
+            /// </summary>
+            public const string EstimatedRevenue = "new_estimatedrevenue";
+
+            /// <summary>
+            /// <para>Estimated Revenue (Base)</para>
+            /// <para>Logical Name = new_estimatedrevenue_base</para>
+            /// </summary>
+            public const string EstimatedRevenue_Base = "new_estimatedrevenue_base";
 
             /// <summary>
             /// <para>Exchange Rate</para>
@@ -1162,28 +1114,10 @@ namespace Dataverse.Linq.Tests.Proxies
             public const string ExchangeRate = "exchangerate";
 
             /// <summary>
-            /// <para>Favorite Colors</para>
-            /// <para>Logical Name = new_favoritecolors</para>
-            /// </summary>
-            public const string FavoriteColors = "new_favoritecolors";
-
-            /// <summary>
-            /// <para>First Name</para>
-            /// <para>Logical Name = new_firstname</para>
-            /// </summary>
-            public const string FirstName = "new_firstname";
-
-            /// <summary>
             /// <para>Import Sequence Number</para>
             /// <para>Logical Name = importsequencenumber</para>
             /// </summary>
             public const string ImportSequenceNumber = "importsequencenumber";
-
-            /// <summary>
-            /// <para>Last Name</para>
-            /// <para>Logical Name = new_lastname</para>
-            /// </summary>
-            public const string LastName = "new_lastname";
 
             /// <summary>
             /// <para>Modified By</para>
@@ -1234,22 +1168,10 @@ namespace Dataverse.Linq.Tests.Proxies
             public const string Name = "new_name";
 
             /// <summary>
-            /// <para>new_contactratingName</para>
-            /// <para>Logical Name = new_contactratingname</para>
+            /// <para>new_ContactName</para>
+            /// <para>Logical Name = new_contactname</para>
             /// </summary>
-            public const string new_contactratingName = "new_contactratingname";
-
-            /// <summary>
-            /// <para>new_favoritecolorsName</para>
-            /// <para>Logical Name = new_favoritecolorsname</para>
-            /// </summary>
-            public const string new_favoritecolorsName = "new_favoritecolorsname";
-
-            /// <summary>
-            /// <para>new_ParentAccountName</para>
-            /// <para>Logical Name = new_parentaccountname</para>
-            /// </summary>
-            public const string new_ParentAccountName = "new_parentaccountname";
+            public const string new_ContactName = "new_contactname";
 
             /// <summary>
             /// <para>Owner</para>
@@ -1298,12 +1220,6 @@ namespace Dataverse.Linq.Tests.Proxies
             /// <para>Logical Name = owningbusinessunitname</para>
             /// </summary>
             public const string OwningBusinessUnitName = "owningbusinessunitname";
-
-            /// <summary>
-            /// <para>Parent Account</para>
-            /// <para>Logical Name = new_parentaccount</para>
-            /// </summary>
-            public const string ParentAccount = "new_parentaccount";
 
             /// <summary>
             /// <para>Record Created On</para>
