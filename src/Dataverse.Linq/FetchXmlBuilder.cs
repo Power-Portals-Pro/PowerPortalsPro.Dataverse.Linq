@@ -1,57 +1,59 @@
-using Dataverse.Linq.Expressions;
+using Dataverse.Linq.Model;
 using System.Xml.Linq;
 
 namespace Dataverse.Linq;
 
+/// <summary>
+/// Pure model-to-XML transformer. Converts a <see cref="FetchXmlQuery"/> into
+/// a FetchXml string with no expression logic.
+/// </summary>
 internal static class FetchXmlBuilder
 {
-    internal static string Build(string entityName, IReadOnlyList<string>? columns = null) =>
-        BuildFetchXml(entityName, columns, link: null, nullFilter: null);
-
-    internal static string BuildJoin(JoinInfo join) =>
-        BuildFetchXml(
-            join.OuterEntityLogicalName,
-            join.OuterColumns,
-            new LinkSpec(join.InnerEntityLogicalName, join.InnerKeyAttribute, join.OuterKeyAttribute, join.InnerAlias,
-                join.IsOuterJoin ? "outer" : "inner",
-                join.InnerColumns),
-            join.FilterWhereInnerIsNull
-                ? new NullFilterSpec(join.InnerAlias, join.InnerEntityLogicalName + "id")
-                : null);
-
     // -------------------------------------------------------------------------
-    // Core builder
+    // New model-based entry point
     // -------------------------------------------------------------------------
 
-    private static string BuildFetchXml(
-        string entityName,
-        IReadOnlyList<string>? columns,
-        LinkSpec? link,
-        NullFilterSpec? nullFilter)
+    internal static string Build(FetchXmlQuery query)
     {
-        var entity = CreateEntityElement(entityName, columns);
+        var fetchElement = new XElement("fetch", new XAttribute("mapping", "logical"));
 
-        if (link is not null)
-            entity.Add(CreateLinkEntityElement(link));
+        if (query.Top.HasValue)
+            fetchElement.Add(new XAttribute("top", query.Top.Value));
+        if (query.Distinct)
+            fetchElement.Add(new XAttribute("distinct", "true"));
+        if (query.Aggregate)
+            fetchElement.Add(new XAttribute("aggregate", "true"));
 
-        if (nullFilter is not null)
-            entity.Add(CreateNullFilterElement(nullFilter));
-
-        return new XElement("fetch", new XAttribute("mapping", "logical"), entity).ToString();
+        fetchElement.Add(BuildEntity(query));
+        return fetchElement.ToString();
     }
 
     // -------------------------------------------------------------------------
-    // Element builders
+    // Entity
     // -------------------------------------------------------------------------
 
-    private static XElement CreateEntityElement(string name, IReadOnlyList<string>? columns)
+    private static XElement BuildEntity(FetchXmlQuery query)
     {
-        var element = new XElement("entity", new XAttribute("name", name));
-        AddColumns(element, columns);
+        var element = new XElement("entity", new XAttribute("name", query.EntityLogicalName));
+        AddAttributes(element, query.Attributes, query.AllAttributes);
+
+        foreach (var link in query.Links)
+            element.Add(BuildLinkEntity(link));
+
+        foreach (var order in query.Orders)
+            element.Add(BuildOrder(order));
+
+        if (query.Filter is not null)
+            element.Add(BuildFilter(query.Filter));
+
         return element;
     }
 
-    private static XElement CreateLinkEntityElement(LinkSpec link)
+    // -------------------------------------------------------------------------
+    // Link entity
+    // -------------------------------------------------------------------------
+
+    private static XElement BuildLinkEntity(FetchLinkEntity link)
     {
         var element = new XElement("link-entity",
             new XAttribute("name", link.Name),
@@ -59,33 +61,86 @@ internal static class FetchXmlBuilder
             new XAttribute("to", link.To),
             new XAttribute("alias", link.Alias),
             new XAttribute("link-type", link.LinkType));
-        AddColumns(element, link.Columns);
+
+        AddAttributes(element, link.Attributes, link.AllAttributes);
+
+        if (link.Filter is not null)
+            element.Add(BuildFilter(link.Filter));
+
+        foreach (var nested in link.Links)
+            element.Add(BuildLinkEntity(nested));
+
         return element;
     }
 
-    private static XElement CreateNullFilterElement(NullFilterSpec filter) =>
-        new XElement("filter",
-            new XElement("condition",
-                new XAttribute("entityname", filter.Alias),
-                new XAttribute("attribute", filter.Attribute),
-                new XAttribute("operator", "null")));
+    // -------------------------------------------------------------------------
+    // Filter / Condition
+    // -------------------------------------------------------------------------
 
-    private static void AddColumns(XElement element, IReadOnlyList<string>? columns)
+    private static XElement BuildFilter(FetchFilter filter)
     {
-        if (columns is { Count: > 0 })
-            foreach (var col in columns)
-                element.Add(new XElement("attribute", new XAttribute("name", col)));
-        else
+        var element = new XElement("filter");
+
+        if (filter.Type == FilterType.Or)
+            element.Add(new XAttribute("type", "or"));
+
+        foreach (var condition in filter.Conditions)
+            element.Add(BuildCondition(condition));
+
+        foreach (var nested in filter.Filters)
+            element.Add(BuildFilter(nested));
+
+        return element;
+    }
+
+    private static XElement BuildCondition(FetchCondition condition)
+    {
+        var element = new XElement("condition");
+
+        if (condition.EntityAlias is not null)
+            element.Add(new XAttribute("entityname", condition.EntityAlias));
+
+        element.Add(new XAttribute("attribute", condition.Attribute));
+        element.Add(new XAttribute("operator", condition.Operator));
+
+        if (condition.Value is not null)
+            element.Add(new XAttribute("value", condition.Value));
+
+        foreach (var val in condition.Values)
+            element.Add(new XElement("value", val));
+
+        return element;
+    }
+
+    // -------------------------------------------------------------------------
+    // Order / Attribute
+    // -------------------------------------------------------------------------
+
+    private static XElement BuildOrder(FetchOrder order) =>
+        new("order",
+            new XAttribute("attribute", order.Attribute),
+            new XAttribute("descending", order.Descending ? "true" : "false"));
+
+    private static XElement BuildAttribute(FetchAttribute attr)
+    {
+        var element = new XElement("attribute", new XAttribute("name", attr.Name));
+
+        if (attr.Alias is not null)
+            element.Add(new XAttribute("alias", attr.Alias));
+        if (attr.Aggregate is not null)
+            element.Add(new XAttribute("aggregate", attr.Aggregate));
+        if (attr.GroupBy)
+            element.Add(new XAttribute("groupby", "true"));
+
+        return element;
+    }
+
+    private static void AddAttributes(XElement element, List<FetchAttribute> attributes, bool allAttributes)
+    {
+        if (allAttributes)
             element.Add(new XElement("all-attributes"));
+        else
+            foreach (var attr in attributes)
+                element.Add(BuildAttribute(attr));
     }
 }
-
-internal sealed record LinkSpec(
-    string Name,
-    string From,
-    string To,
-    string Alias,
-    string LinkType,
-    IReadOnlyList<string>? Columns = null);
-
-internal sealed record NullFilterSpec(string Alias, string Attribute);

@@ -1,9 +1,9 @@
 using Dataverse.Linq.Expressions;
+using Dataverse.Linq.Model;
 using Microsoft.EntityFrameworkCore.Query;
 using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
-using System.Collections;
 using System.Linq.Expressions;
 using System.Reflection;
 using System.Xml.Linq;
@@ -38,7 +38,7 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
         return new DataverseProjectedQueryable<TElement>(this, expression);
     }
 
-    public object? Execute(Expression expression) => ExecuteList(expression);
+    public object? Execute(Expression expression) => Execute<List<T>>(expression);
 
     /// <summary>
     /// Synchronous execution — used by <see cref="DataverseProjectedQueryable{TElement}.GetEnumerator"/>.
@@ -46,25 +46,16 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
     /// </summary>
     public TResult Execute<TResult>(Expression expression)
     {
-        var joinInfo = JoinExpressionParser.TryParse(expression);
-        if (joinInfo is not null)
-        {
-            var elementType = typeof(TResult).GetGenericArguments()[0];
-            var method = GetPrivateMethod(nameof(FetchJoinList)).MakeGenericMethod(elementType);
-            return (TResult)method.Invoke(this, [joinInfo])!;
-        }
+        var query = FetchXmlQueryTranslator.Translate<T>(expression, Columns);
+        var fetchXml = FetchXmlBuilder.Build(query);
+        var entities = RetrieveAll(fetchXml);
 
-        var (selectColumns, projector) = SelectExpressionParser.Parse(expression);
-        var columns = selectColumns ?? Columns;
-        var entities = FetchList(columns);
+        var elementType = typeof(TResult).IsGenericType
+            ? typeof(TResult).GetGenericArguments()[0]
+            : typeof(T);
 
-        if (projector is not null)
-            return BuildProjectedList<TResult>(entities, projector);
-
-        if (entities is TResult directResult)
-            return directResult;
-
-        throw new InvalidCastException($"Cannot convert List<{typeof(T).Name}> to {typeof(TResult).Name}.");
+        var method = GetPrivateMethod(nameof(ProjectEntities)).MakeGenericMethod(elementType);
+        return (TResult)method.Invoke(this, [entities, query])!;
     }
 
     // -------------------------------------------------------------------------
@@ -77,45 +68,37 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
     {
         // TResult = Task<List<TElement>>
         var elementType = typeof(TResult).GetGenericArguments()[0].GetGenericArguments()[0];
-
-        var joinInfo = JoinExpressionParser.TryParse(expression);
-        if (joinInfo is not null)
-        {
-            var method = GetPrivateMethod(nameof(FetchJoinListAsync)).MakeGenericMethod(elementType);
-            return (TResult)method.Invoke(this, [joinInfo, cancellationToken])!;
-        }
-
-        var (selectColumns, projector) = SelectExpressionParser.Parse(expression);
-        var columns = selectColumns ?? Columns;
-
-        if (projector is null)
-            return (TResult)(object)FetchListAsync(columns, cancellationToken);
-
-        var projectedMethod = GetPrivateMethod(nameof(FetchProjectedListAsync)).MakeGenericMethod(elementType);
-        return (TResult)projectedMethod.Invoke(this, [columns, projector, cancellationToken])!;
+        var query = FetchXmlQueryTranslator.Translate<T>(expression, Columns);
+        var method = GetPrivateMethod(nameof(ExecuteQueryAsync)).MakeGenericMethod(elementType);
+        return (TResult)method.Invoke(this, [query, cancellationToken])!;
     }
 
     // -------------------------------------------------------------------------
-    // Internal
+    // Internal — used by DataverseQueryable<T>.GetEnumerator()
     // -------------------------------------------------------------------------
 
-    internal List<T> ExecuteList(Expression expression) => FetchList(Columns);
-
-    // -------------------------------------------------------------------------
-    // Sync fetch
-    // -------------------------------------------------------------------------
-
-    private List<T> FetchList(IReadOnlyList<string>? columns)
+    internal List<T> ExecuteList(Expression expression)
     {
-        var fetchXml = FetchXmlBuilder.Build(EntityLogicalName, columns);
+        var query = FetchXmlQueryTranslator.Translate<T>(expression, Columns);
+        var fetchXml = FetchXmlBuilder.Build(query);
         return RetrieveAll(fetchXml).Select(e => e.ToEntity<T>()).ToList();
     }
 
-    private List<TElement> FetchJoinList<TElement>(JoinInfo joinInfo)
+    // -------------------------------------------------------------------------
+    // Async execution
+    // -------------------------------------------------------------------------
+
+    private async Task<List<TElement>> ExecuteQueryAsync<TElement>(
+        FetchXmlQuery query, CancellationToken cancellationToken)
     {
-        var entities = RetrieveAll(FetchXmlBuilder.BuildJoin(joinInfo));
-        return entities.Select(e => ProjectJoinEntity<TElement>(e, joinInfo)).ToList();
+        var fetchXml = FetchXmlBuilder.Build(query);
+        var entities = await RetrieveAllAsync(fetchXml, cancellationToken);
+        return ProjectEntities<TElement>(entities, query);
     }
+
+    // -------------------------------------------------------------------------
+    // Paged retrieval
+    // -------------------------------------------------------------------------
 
     private List<Entity> RetrieveAll(string baseFetchXml)
     {
@@ -142,32 +125,6 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
         }
 
         return results;
-    }
-
-    // -------------------------------------------------------------------------
-    // Async fetch
-    // -------------------------------------------------------------------------
-
-    private async Task<List<T>> FetchListAsync(IReadOnlyList<string>? columns, CancellationToken cancellationToken)
-    {
-        var fetchXml = FetchXmlBuilder.Build(EntityLogicalName, columns);
-        var entities = await RetrieveAllAsync(fetchXml, cancellationToken);
-        return entities.Select(e => e.ToEntity<T>()).ToList();
-    }
-
-    private async Task<List<TElement>> FetchProjectedListAsync<TElement>(
-        IReadOnlyList<string>? columns, Delegate projector, CancellationToken cancellationToken)
-    {
-        var fetchXml = FetchXmlBuilder.Build(EntityLogicalName, columns);
-        var entities = await RetrieveAllAsync(fetchXml, cancellationToken);
-        return entities.Select(e => (TElement)projector.DynamicInvoke(e.ToEntity<T>())!).ToList();
-    }
-
-    private async Task<List<TElement>> FetchJoinListAsync<TElement>(
-        JoinInfo joinInfo, CancellationToken cancellationToken)
-    {
-        var entities = await RetrieveAllAsync(FetchXmlBuilder.BuildJoin(joinInfo), cancellationToken);
-        return entities.Select(e => ProjectJoinEntity<TElement>(e, joinInfo)).ToList();
     }
 
     private async Task<List<Entity>> RetrieveAllAsync(string baseFetchXml, CancellationToken cancellationToken)
@@ -202,21 +159,34 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Projects a raw Dataverse entity row to <typeparamref name="TElement"/> based on the join type.
-    /// For outer joins the outer entity is passed to <see cref="JoinInfo.Projector"/>;
-    /// for inner joins both entities are passed to <see cref="JoinInfo.ResultSelector"/>.
+    /// Projects raw Dataverse entity rows into <typeparamref name="TElement"/> based
+    /// on the query model: inner join (2-param projector), simple/left join (1-param
+    /// projector), or no projection (typed entity).
     /// </summary>
-    private TElement ProjectJoinEntity<TElement>(Entity e, JoinInfo joinInfo)
+    private List<TElement> ProjectEntities<TElement>(List<Entity> entities, FetchXmlQuery query)
     {
-        var outer = e.ToEntity<T>();
+        // Inner join: 2-param result selector (outer, inner) → TElement
+        if (query.InnerEntityType is not null && query.Projector is not null)
+        {
+            var link = query.Links[0];
+            return entities.Select(e =>
+            {
+                var outer = e.ToEntity<T>();
+                var inner = ExtractLinkedEntity(e, link.Alias, link.Name, query.InnerEntityType);
+                return (TElement)query.Projector.DynamicInvoke(outer, inner)!;
+            }).ToList();
+        }
 
-        if (joinInfo.IsOuterJoin)
-            return joinInfo.Projector is not null
-                ? (TElement)joinInfo.Projector.DynamicInvoke(outer)!
-                : (TElement)(object)outer;
+        // Simple select / left join: 1-param projector (entity) → TElement
+        if (query.Projector is not null)
+        {
+            return entities.Select(e =>
+                (TElement)query.Projector.DynamicInvoke(e.ToEntity<T>())!
+            ).ToList();
+        }
 
-        var inner = ExtractLinkedEntity(e, joinInfo.InnerAlias, joinInfo.InnerEntityLogicalName, joinInfo.InnerEntityType!);
-        return (TElement)joinInfo.ResultSelector!.DynamicInvoke(outer, inner)!;
+        // No projection: return typed entities
+        return entities.Select(e => (TElement)(object)e.ToEntity<T>()).ToList();
     }
 
     /// <summary>
@@ -241,17 +211,6 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
         return typeof(Entity).GetMethod(nameof(Entity.ToEntity))!
             .MakeGenericMethod(innerType)
             .Invoke(inner, null)!;
-    }
-
-    private static TResult BuildProjectedList<TResult>(List<T> entities, Delegate projector)
-    {
-        var elementType = typeof(TResult).GetGenericArguments()[0];
-        var list = (IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(elementType))!;
-
-        foreach (var entity in entities)
-            list.Add(projector.DynamicInvoke(entity));
-
-        return (TResult)(object)list;
     }
 
     private static MethodInfo GetPrivateMethod(string name) =>

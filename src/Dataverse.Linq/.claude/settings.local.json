@@ -21,7 +21,10 @@
       "Bash(find \"D:\\\\Code\\\\EFCore\" -type f \\\\\\( -name \"*.md\" -o -name \"*.txt\" \\\\\\) -path \"*query*\" 2>/dev/null | head -20)",
       "Bash(find \"D:\\\\Code\\\\EFCore/src/EFCore.Relational\" -name \"*SqlTranslatingExpressionVisitor*\" 2>/dev/null | head -3)",
       "Bash(cd \"D:/Code/XrmToolkit - Dev/src/XrmToolkit/Dataverse.Linq\" && dotnet build --no-restore 2>&1 | tail -5)",
-      "Bash(cd \"D:/Code/XrmToolkit - Dev/src/XrmToolkit/Dataverse.Linq\" && dotnet build --no-restore 2>&1 | tail -15)"
+      "Bash(cd \"D:/Code/XrmToolkit - Dev/src/XrmToolkit/Dataverse.Linq\" && dotnet build --no-restore 2>&1 | tail -15)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev/src/XrmToolkit/Dataverse.Linq.Tests\" && dotnet build --no-restore 2>&1 | tail -15)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev/src/XrmToolkit/Dataverse.Linq\" && dotnet build --no-restore 2>&1 | tail -10)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev/src/XrmToolkit/Dataverse.Linq.Tests\" && dotnet build --no-restore 2>&1 | tail -10)"
     ]
   }
 }
