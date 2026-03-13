@@ -1426,16 +1426,47 @@ public class QueryableIntegrationTests : IntegrationTestBase
                                     || a.PercentComplete < 30)
                               select new
                               {
-                                  a.Name,
-                                  Combined = $"{c.FirstName} {c.LastName}",
+                                  AccountName = a.Name,
+                                  ContactFullName = $"{c.FirstName} {c.LastName}",
                               }).ToListAsync();
 
         accounts.Should().NotBeEmpty();
         accounts.Should().AllSatisfy(r =>
         {
-            r.Name.Should().NotBeNullOrEmpty();
-            r.Combined.Should().NotBeNullOrEmpty();
+            r.AccountName.Should().NotBeNullOrEmpty();
+            r.ContactFullName.Should().NotBeNullOrEmpty();
         });
+    }
+
+    [Fact]
+    public async Task ToListAsync_JoinWithComplexWhereOrderByAndInterpolation_ReturnsOrderedResults()
+    {
+        var accounts = await (from a in Service.Queryable<CustomAccount>()
+                              join c in Service.Queryable<CustomContact>()
+                                on a.CustomAccountId equals c.ParentAccount.Id
+                              where a.PercentComplete != null
+                                && (c.LastName.StartsWith("Last1")
+                                    || c.LastName.StartsWith("Last2"))
+                                && (a.NumberOfEmployees > 30
+                                    || a.PercentComplete < 30)
+                              orderby
+                                a.Name
+                                , c.LastName descending
+                              select new
+                              {
+                                  AccountName = a.Name,
+                                  ContactFullName = $"{c.FirstName} {c.LastName}",
+                              }).ToListAsync();
+
+        accounts.Should().NotBeEmpty();
+        accounts.Should().AllSatisfy(r =>
+        {
+            r.AccountName.Should().NotBeNullOrEmpty();
+            r.ContactFullName.Should().NotBeNullOrEmpty();
+        });
+
+        // Verify primary ordering by AccountName ascending
+        accounts.Select(r => r.AccountName).Should().BeInAscendingOrder();
     }
 
 }
