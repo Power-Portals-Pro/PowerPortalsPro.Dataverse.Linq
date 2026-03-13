@@ -888,4 +888,51 @@ public class QueryableIntegrationTests : IntegrationTestBase
         results.Should().HaveCount(all.Count - allInBu.Count);
     }
 
+    // -------------------------------------------------------------------------
+    // Where — ContainValues / DoesNotContainValues (multi-select option set)
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ToListAsync_WhereContainValues_ReturnsMatchingRecords()
+    {
+        var red = (int)CustomContact.Color.Red;
+        var results = await Service.Queryable<CustomContact>()
+            .Where(c => c.FavoriteColors_OptionSetValues.ContainValues(red))
+            .ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Should().OnlyContain(r =>
+            r.FavoriteColors_OptionSetValues != null
+            && r.FavoriteColors_OptionSetValues.Any(o => o.Value == red));
+    }
+
+    [Fact]
+    public async Task ToListAsync_WhereContainValuesMultiple_ReturnsMatchingRecords()
+    {
+        var red = (int)CustomContact.Color.Red;
+        var blue = (int)CustomContact.Color.Blue;
+        var results = await Service.Queryable<CustomContact>()
+            .Where(c => c.FavoriteColors_OptionSetValues.ContainValues(red, blue))
+            .ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Should().OnlyContain(r =>
+            r.FavoriteColors_OptionSetValues != null
+            && r.FavoriteColors_OptionSetValues.Any(o => o.Value == red || o.Value == blue));
+    }
+
+    [Fact]
+    public async Task ToListAsync_WhereDoesNotContainValues_ExcludesMatchingRecords()
+    {
+        var red = (int)CustomContact.Color.Red;
+        var results = await Service.Queryable<CustomContact>()
+            .Where(c => c.FavoriteColors_OptionSetValues.DoesNotContainValues(red))
+            .ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Should().OnlyContain(r =>
+            r.FavoriteColors_OptionSetValues == null
+            || r.FavoriteColors_OptionSetValues.All(o => o.Value != red));
+    }
+
 }

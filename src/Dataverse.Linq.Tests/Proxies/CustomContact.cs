@@ -255,6 +255,39 @@ namespace Dataverse.Linq.Tests.Proxies
         }
 
         /// <summary>
+        /// Logical Name: new_favoritecolors
+        /// </summary>
+        [AttributeLogicalName("new_favoritecolors")]
+        public List<Color> FavoriteColors
+        {
+            get
+            {
+                if (FavoriteColors_OptionSetValues != null) { return FavoriteColors_OptionSetValues.Select(o => (Color)o.Value).ToList(); }
+                return null;
+            }
+            set
+            {
+                if (value != null) { this.FavoriteColors_OptionSetValues = new OptionSetValueCollection(value.Select(o => new OptionSetValue((int)o)).ToList()); }
+                else this.FavoriteColors_OptionSetValues = null;
+            }
+        }
+        /// <summary>
+        /// <para>Logical Name: new_favoritecolors</para>
+        /// </summary>
+        [AttributeLogicalName("new_favoritecolors")]
+        public OptionSetValueCollection FavoriteColors_OptionSetValues
+        {
+            get
+            {
+                return this.GetPropertyValue<OptionSetValueCollection>("new_favoritecolors");
+            }
+            set
+            {
+                this.SetPropertyValue<OptionSetValueCollection>("new_favoritecolors", value, nameof(FavoriteColors_OptionSetValues));
+            }
+        }
+
+        /// <summary>
         /// <para>Logical Name: new_firstname</para>
         /// <para>Max Length: 100 characters</para>
         /// </summary>
@@ -410,6 +443,7 @@ namespace Dataverse.Linq.Tests.Proxies
                 this.SetPropertyValue("new_name", value, 850, nameof(Name));
             }
         }
+
 
         /// <summary>
         /// <para>Logical Name: new_parentaccountname</para>
@@ -815,6 +849,78 @@ namespace Dataverse.Linq.Tests.Proxies
 
         
         
+        public enum Color
+        {
+            /// <summary>
+            /// <para>Red</para>
+            /// <para>Value = 100000000</para>
+            /// </summary>
+            [Description("Red")]
+            Red = 100000000,
+
+            /// <summary>
+            /// <para>Orange</para>
+            /// <para>Value = 100000001</para>
+            /// </summary>
+            [Description("Orange")]
+            Orange = 100000001,
+
+            /// <summary>
+            /// <para>Blue</para>
+            /// <para>Value = 100000002</para>
+            /// </summary>
+            [Description("Blue")]
+            Blue = 100000002,
+
+            /// <summary>
+            /// <para>Black</para>
+            /// <para>Value = 100000003</para>
+            /// </summary>
+            [Description("Black")]
+            Black = 100000003,
+
+            /// <summary>
+            /// <para>White</para>
+            /// <para>Value = 100000004</para>
+            /// </summary>
+            [Description("White")]
+            White = 100000004,
+
+            /// <summary>
+            /// <para>Yellow</para>
+            /// <para>Value = 100000005</para>
+            /// </summary>
+            [Description("Yellow")]
+            Yellow = 100000005,
+
+            /// <summary>
+            /// <para>Purple</para>
+            /// <para>Value = 100000006</para>
+            /// </summary>
+            [Description("Purple")]
+            Purple = 100000006,
+
+            /// <summary>
+            /// <para>Pink</para>
+            /// <para>Value = 100000007</para>
+            /// </summary>
+            [Description("Pink")]
+            Pink = 100000007,
+
+            /// <summary>
+            /// <para>Green</para>
+            /// <para>Value = 100000008</para>
+            /// </summary>
+            [Description("Green")]
+            Green = 100000008,
+
+            /// <summary>
+            /// <para>Brown</para>
+            /// <para>Value = 100000009</para>
+            /// </summary>
+            [Description("Brown")]
+            Brown = 100000009,
+        }
         public enum CustomContact_Status
         {
             /// <summary>
@@ -907,6 +1013,12 @@ namespace Dataverse.Linq.Tests.Proxies
             public const string CustomContactId = "new_customcontactid";
 
             /// <summary>
+            /// <para>Favorite Colors</para>
+            /// <para>Logical Name = new_favoritecolors</para>
+            /// </summary>
+            public const string FavoriteColors = "new_favoritecolors";
+
+            /// <summary>
             /// <para>First Name</para>
             /// <para>Logical Name = new_firstname</para>
             /// </summary>
@@ -971,6 +1083,12 @@ namespace Dataverse.Linq.Tests.Proxies
             /// <para>Logical Name = new_name</para>
             /// </summary>
             public const string Name = "new_name";
+
+            /// <summary>
+            /// <para>new_favoritecolorsName</para>
+            /// <para>Logical Name = new_favoritecolorsname</para>
+            /// </summary>
+            public const string new_favoritecolorsName = "new_favoritecolorsname";
 
             /// <summary>
             /// <para>new_ParentAccountName</para>

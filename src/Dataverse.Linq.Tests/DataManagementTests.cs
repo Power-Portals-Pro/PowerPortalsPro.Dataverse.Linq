@@ -60,6 +60,15 @@ public class DataManagementTests : IntegrationTestBase
     private static readonly CustomAccount.AccountRating_Enum[] Ratings =
         [CustomAccount.AccountRating_Enum.Cold, CustomAccount.AccountRating_Enum.Warm, CustomAccount.AccountRating_Enum.Hot];
 
+    private static readonly CustomContact.Color[][] ColorSets =
+    [
+        [CustomContact.Color.Red, CustomContact.Color.Blue],
+        [CustomContact.Color.Green, CustomContact.Color.Yellow, CustomContact.Color.Red],
+        [CustomContact.Color.Black, CustomContact.Color.White],
+        [CustomContact.Color.Purple, CustomContact.Color.Pink, CustomContact.Color.Orange],
+        [CustomContact.Color.Blue, CustomContact.Color.Green],
+    ];
+
     private async Task<List<Guid>> SeedAccountsAsync(int count)
     {
         var requests = new ExecuteMultipleRequest
@@ -129,6 +138,16 @@ public class DataManagementTests : IntegrationTestBase
                     ["new_lastname"] = $"Last{c}",
                     ["new_parentaccount"] = new EntityReference(CustomAccount.LogicalName, accountIds[a])
                 };
+
+                // Assign favorite colors — cycle through ColorSets; skip every 6th contact
+                var contactIndex = a * contactsPerAccount + c;
+                if (contactIndex % 6 != 0)
+                {
+                    var colors = ColorSets[(contactIndex - 1) % ColorSets.Length];
+                    contact["new_favoritecolors"] = new OptionSetValueCollection(
+                        colors.Select(clr => new OptionSetValue((int)clr)).ToList());
+                }
+
                 requests.Requests.Add(new CreateRequest { Target = contact });
             }
         }

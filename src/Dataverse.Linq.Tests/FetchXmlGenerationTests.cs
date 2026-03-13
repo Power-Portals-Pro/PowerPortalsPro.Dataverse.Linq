@@ -1364,4 +1364,100 @@ public class FetchXmlGenerationTests
             </fetch>
             """);
     }
+
+    // -------------------------------------------------------------------------
+    // Where — ContainValues / DoesNotContainValues (multi-select option set)
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_WhereContainValues_GeneratesContainValuesFilter()
+    {
+        var fetchXml = _service.Queryable<CustomContact>()
+            .Where(c => c.FavoriteColors_OptionSetValues.ContainValues(1, 2, 3))
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customcontact">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_favoritecolors" operator="contain-values">
+                    <value>1</value>
+                    <value>2</value>
+                    <value>3</value>
+                  </condition>
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WhereDoesNotContainValues_GeneratesNotContainValuesFilter()
+    {
+        var fetchXml = _service.Queryable<CustomContact>()
+            .Where(c => c.FavoriteColors_OptionSetValues.DoesNotContainValues(4, 5))
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customcontact">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_favoritecolors" operator="not-contain-values">
+                    <value>4</value>
+                    <value>5</value>
+                  </condition>
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WhereNegatedContainValues_GeneratesNotContainValuesFilter()
+    {
+        var fetchXml = _service.Queryable<CustomContact>()
+            .Where(c => !c.FavoriteColors_OptionSetValues.ContainValues(1, 2))
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customcontact">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_favoritecolors" operator="not-contain-values">
+                    <value>1</value>
+                    <value>2</value>
+                  </condition>
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WhereContainValuesSingleValue_GeneratesContainValuesFilter()
+    {
+        var fetchXml = _service.Queryable<CustomContact>()
+            .Where(c => c.FavoriteColors_OptionSetValues.ContainValues(42))
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customcontact">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_favoritecolors" operator="contain-values">
+                    <value>42</value>
+                  </condition>
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
 }

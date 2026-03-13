@@ -83,6 +83,12 @@ internal static class FetchXmlQueryTranslator
         ["NotEqualBusinessId"] = ConditionOperator.NotEqualBusinessId,
     };
 
+    private static readonly Dictionary<string, ConditionOperator> MultiSelectOperatorMap = new()
+    {
+        ["ContainValues"] = ConditionOperator.ContainValues,
+        ["DoesNotContainValues"] = ConditionOperator.DoesNotContainValues,
+    };
+
     private static bool TryGetExtensionOperator(Type? declaringType, string methodName, out ConditionOperator op)
     {
         if (declaringType == typeof(Extensions.DateTimeExtensions))
@@ -91,9 +97,18 @@ internal static class FetchXmlQueryTranslator
             return HierarchyOperatorMap.TryGetValue(methodName, out op);
         if (declaringType == typeof(Extensions.UserExtensions))
             return UserOperatorMap.TryGetValue(methodName, out op);
+        if (declaringType == typeof(Extensions.MultiSelectExtensions))
+            return MultiSelectOperatorMap.TryGetValue(methodName, out op);
         op = default;
         return false;
     }
+
+    private static ConditionOperator NegateOperator(ConditionOperator op) => op switch
+    {
+        ConditionOperator.ContainValues => ConditionOperator.DoesNotContainValues,
+        ConditionOperator.DoesNotContainValues => ConditionOperator.ContainValues,
+        _ => throw new NotSupportedException($"Negation of the '{op}' operator is not supported.")
+    };
 
     /// <summary>
     /// Entry point. Translates the given expression into a <see cref="FetchXmlQuery"/>.
@@ -359,22 +374,32 @@ internal static class FetchXmlQueryTranslator
                 return;
             }
 
-            // Extension method operators (DateTime, hierarchy) → condition operators
+            // Extension method operators (DateTime, hierarchy, multi-select) → condition operators
             case MethodCallExpression { Method.DeclaringType: var declType } dateCall
                 when TryGetExtensionOperator(declType, dateCall.Method.Name, out var dateOp):
             {
                 var resolved = ResolveMethodAttribute(dateCall, ctx);
+                var effectiveOp = negated ? NegateOperator(dateOp) : dateOp;
                 var condition = new FetchCondition
                 {
                     Attribute = resolved.Name,
                     EntityAlias = resolved.EntityAlias,
-                    Operator = dateOp
+                    Operator = effectiveOp
                 };
-                // arg[0] is the 'this' DateTime; remaining args are values
+                // arg[0] is the 'this' parameter; remaining args are values
                 var extraArgs = dateCall.Arguments.Count - 1;
                 if (extraArgs == 1)
                 {
-                    condition.Value = EvaluateValue(dateCall.Arguments[1]);
+                    var value = EvaluateValue(dateCall.Arguments[1]);
+                    if (value is System.Collections.IEnumerable enumerable and not string)
+                    {
+                        foreach (var item in enumerable)
+                            condition.Values.Add(item!);
+                    }
+                    else
+                    {
+                        condition.Value = value;
+                    }
                 }
                 else if (extraArgs > 1)
                 {
