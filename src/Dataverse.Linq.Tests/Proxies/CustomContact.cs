@@ -148,6 +148,57 @@ namespace Dataverse.Linq.Tests.Proxies
         /// </summary>
         public static string NumberError { get; set; }
         /// <summary>
+        /// Logical Name: new_contactrating
+        /// </summary>
+        [AttributeLogicalName("new_contactrating")]
+        public AccountRating_Enum? ContactRating
+        {
+            get
+            {
+                if (ContactRating_OptionSetValue != null) { return (AccountRating_Enum)ContactRating_OptionSetValue.Value; }
+                return null;
+            }
+            set
+            {
+                if (value != null) { this.ContactRating_OptionSetValue = new OptionSetValue((int)value); }
+                else this.ContactRating_OptionSetValue = null;
+            }
+        }
+        /// <summary>
+        /// <para>Logical Name: new_contactrating</para>
+        /// </summary>
+        [AttributeLogicalName("new_contactrating")]
+        public OptionSetValue ContactRating_OptionSetValue
+        {
+            get
+            {
+                return this.GetPropertyValue<OptionSetValue>("new_contactrating");
+            }
+            set
+            {
+                this.SetPropertyValue<OptionSetValue>("new_contactrating", value, nameof(ContactRating_OptionSetValue));
+            }
+        }
+        /// <summary>
+        /// Retrieves the current value's text in the user's language.
+        /// </summary>
+        /// <param name="service">D365 Organization Service</param>
+        /// <returns></returns>
+        public string ContactRating_Text(IOrganizationService service)
+        {
+            return this.ContactRating_OptionSetValue.GetOptionSetText(service, this, "new_contactrating");
+        }
+        /// <summary>
+        /// Retrieves the current value's text in the user's language.
+        /// </summary>
+        /// <param name="attributeMetadata">The attribute metadata previously retrieved using the 'GetAttributeMetadata' extension method on the IOrganizationService object.</param>
+        /// <returns></returns>
+        public string ContactRating_Text(EnumAttributeMetadata attributeMetadata)
+        {
+            return attributeMetadata.GetOptionSetText(this.ContactRating_OptionSetValue.Value);
+        }
+
+        /// <summary>
         /// <para>Logical Name: createdby</para>
         /// </summary>
         [AttributeLogicalName("createdby")]
@@ -443,6 +494,7 @@ namespace Dataverse.Linq.Tests.Proxies
                 this.SetPropertyValue("new_name", value, 850, nameof(Name));
             }
         }
+
 
 
         /// <summary>
@@ -849,6 +901,29 @@ namespace Dataverse.Linq.Tests.Proxies
 
         
         
+        public enum AccountRating_Enum
+        {
+            /// <summary>
+            /// <para>Cold</para>
+            /// <para>Value = 100000000</para>
+            /// </summary>
+            [Description("Cold")]
+            Cold = 100000000,
+
+            /// <summary>
+            /// <para>Warm</para>
+            /// <para>Value = 100000001</para>
+            /// </summary>
+            [Description("Warm")]
+            Warm = 100000001,
+
+            /// <summary>
+            /// <para>Hot</para>
+            /// <para>Value = 100000002</para>
+            /// </summary>
+            [Description("Hot")]
+            Hot = 100000002,
+        }
         public enum Color
         {
             /// <summary>
@@ -964,6 +1039,12 @@ namespace Dataverse.Linq.Tests.Proxies
 
         public static class Properties
         {
+            /// <summary>
+            /// <para>Contact Rating</para>
+            /// <para>Logical Name = new_contactrating</para>
+            /// </summary>
+            public const string ContactRating = "new_contactrating";
+
             /// <summary>
             /// <para>Created By</para>
             /// <para>Logical Name = createdby</para>
@@ -1083,6 +1164,12 @@ namespace Dataverse.Linq.Tests.Proxies
             /// <para>Logical Name = new_name</para>
             /// </summary>
             public const string Name = "new_name";
+
+            /// <summary>
+            /// <para>new_contactratingName</para>
+            /// <para>Logical Name = new_contactratingname</para>
+            /// </summary>
+            public const string new_contactratingName = "new_contactratingname";
 
             /// <summary>
             /// <para>new_favoritecolorsName</para>

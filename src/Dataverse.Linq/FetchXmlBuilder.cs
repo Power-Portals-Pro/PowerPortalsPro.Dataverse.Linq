@@ -104,7 +104,9 @@ internal static class FetchXmlBuilder
         element.Add(new XAttribute("attribute", condition.Attribute));
         element.Add(new XAttribute("operator", condition.Operator.ToFetchXml()));
 
-        if (condition.Value is not null)
+        if (condition.ValueOf is not null)
+            element.Add(new XAttribute("valueof", condition.ValueOf));
+        else if (condition.Value is not null)
             element.Add(new XAttribute("value", condition.Value));
 
         foreach (var val in condition.Values)

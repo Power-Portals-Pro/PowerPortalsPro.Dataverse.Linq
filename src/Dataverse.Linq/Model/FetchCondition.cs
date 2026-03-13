@@ -20,6 +20,13 @@ internal sealed class FetchCondition
     public object? Value { get; set; }
 
     /// <summary>
+    /// When set, compares the attribute against another column value
+    /// using the FetchXml <c>valueof</c> attribute instead of <c>value</c>.
+    /// For cross-table comparisons, use the format "alias.columnname".
+    /// </summary>
+    public string? ValueOf { get; set; }
+
+    /// <summary>
     /// Multiple values for in / not-in operators.
     /// </summary>
     public List<object> Values { get; } = [];

@@ -550,6 +550,25 @@ internal static class FetchXmlQueryTranslator
         var leftResolved = ResolveAttribute(binary.Left, ctx);
         var rightResolved = ResolveAttribute(binary.Right, ctx);
 
+        // Both sides are attributes → column-to-column comparison (valueof)
+        if (leftResolved is not null && rightResolved is not null)
+        {
+            var left = leftResolved.Value;
+            var right = rightResolved.Value;
+            var valueOfRef = right.EntityAlias is not null
+                ? $"{right.EntityAlias}.{right.Name}"
+                : right.Name;
+
+            filter.Conditions.Add(new FetchCondition
+            {
+                Attribute = left.Name,
+                EntityAlias = left.EntityAlias,
+                Operator = op,
+                ValueOf = valueOfRef
+            });
+            return;
+        }
+
         ResolvedAttribute attr;
         Expression valueExpr;
 

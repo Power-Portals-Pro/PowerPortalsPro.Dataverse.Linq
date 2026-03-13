@@ -1189,4 +1189,81 @@ public class QueryableIntegrationTests : IntegrationTestBase
         negatedContain.Select(r => r.CustomContactId).Should().BeEquivalentTo(doesNotContain.Select(r => r.CustomContactId));
     }
 
+    // -------------------------------------------------------------------------
+    // Column-to-column comparison (valueof)
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ToListAsync_WhereSameTableColumnsEqual_ReturnsOnlyMatchingRecords()
+    {
+        // Seeded contacts have different FirstName and LastName values,
+        // so no records should match FirstName == LastName.
+        var results = await Service.Queryable<CustomContact>()
+            .Where(c => c.FirstName == c.LastName)
+            .ToListAsync();
+
+        results.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ToListAsync_WhereSameTableColumnsNotEqual_ReturnsNonMatchingRecords()
+    {
+        // Seeded contacts have different FirstName and LastName values,
+        // so all records should match FirstName != LastName.
+        var allContacts = await Service.Queryable<CustomContact>().ToListAsync();
+        var results = await Service.Queryable<CustomContact>()
+            .Where(c => c.FirstName != c.LastName)
+            .ToListAsync();
+
+        results.Should().HaveCount(allContacts.Count);
+    }
+
+    [Fact]
+    public async Task ToListAsync_WhereCrossTableColumnEqual_ReturnsOnlyMatchingRecords()
+    {
+        // Seeded data: Account.Name = "Custom Account 001" etc,
+        // Contact.FirstName = "First001" etc — never equal.
+        var results = await (from a in Service.Queryable<CustomAccount>()
+                             join c in Service.Queryable<CustomContact>()
+                                 on a.CustomAccountId equals c.ParentAccount.Id
+                             where a.Name == c.FirstName
+                             select new { a.Name, c.FirstName }).ToListAsync();
+
+        results.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ToListAsync_WhereCrossTableRatingEqual_ReturnsMatchingRecords()
+    {
+        // Accounts and contacts both have ratings assigned from the same enum
+        // with different modulus patterns, so some match and some don't.
+        var matches = await (from a in Service.Queryable<CustomAccount>()
+                             join c in Service.Queryable<CustomContact>()
+                                 on a.CustomAccountId equals c.ParentAccount.Id
+                             where a.AccountRating_OptionSetValue == c.ContactRating_OptionSetValue
+                             select new { a.Name, a.AccountRating, c.FirstName, c.ContactRating }).ToListAsync();
+
+        matches.Should().NotBeEmpty();
+        matches.Should().AllSatisfy(r =>
+            ((int?)r.AccountRating).Should().Be((int?)r.ContactRating));
+    }
+
+    [Fact]
+    public async Task ToListAsync_WhereCrossTableRatingNotEqual_ReturnsNonMatchingRecords()
+    {
+        var nonMatches = await (from a in Service.Queryable<CustomAccount>()
+                                join c in Service.Queryable<CustomContact>()
+                                    on a.CustomAccountId equals c.ParentAccount.Id
+                                where a.AccountRating_OptionSetValue != c.ContactRating_OptionSetValue
+                                select new { a.Name, a.AccountRating, c.FirstName, c.ContactRating }).ToListAsync();
+
+        nonMatches.Should().NotBeEmpty();
+        nonMatches.Should().AllSatisfy(r =>
+        {
+            // Either side may be null (null != value is true in FetchXml)
+            if (r.AccountRating is not null && r.ContactRating is not null)
+                ((int)r.AccountRating).Should().NotBe((int)r.ContactRating);
+        });
+    }
+
 }

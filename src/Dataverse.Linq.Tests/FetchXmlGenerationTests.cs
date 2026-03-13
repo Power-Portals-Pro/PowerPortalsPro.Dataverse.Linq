@@ -1682,4 +1682,73 @@ public class FetchXmlGenerationTests
             </fetch>
             """);
     }
+
+    // -------------------------------------------------------------------------
+    // Where — Column-to-column comparison (valueof)
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_WhereSameTableColumnEqual_GeneratesValueOfCondition()
+    {
+        var fetchXml = _service.Queryable<CustomContact>()
+            .Where(c => c.FirstName == c.LastName)
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customcontact">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_firstname" operator="eq" valueof="new_lastname" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WhereSameTableColumnNotEqual_GeneratesValueOfCondition()
+    {
+        var fetchXml = _service.Queryable<CustomContact>()
+            .Where(c => c.FirstName != c.LastName)
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customcontact">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_firstname" operator="ne" valueof="new_lastname" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WhereCrossTableColumnEqual_GeneratesValueOfWithAlias()
+    {
+        var fetchXml = (from a in _service.Queryable<CustomAccount>()
+                        join c in _service.Queryable<CustomContact>()
+                            on a.CustomAccountId equals c.ParentAccount.Id
+                        where a.Name == c.FirstName
+                        select new { a.Name, c.FirstName }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+                <filter type="and">
+                  <condition attribute="new_name" operator="eq" valueof="c.new_firstname" />
+                </filter>
+                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="inner">
+                  <attribute name="new_firstname" />
+                </link-entity>
+              </entity>
+            </fetch>
+            """);
+    }
 }

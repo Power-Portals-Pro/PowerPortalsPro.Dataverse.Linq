@@ -132,15 +132,22 @@ public class DataManagementTests : IntegrationTestBase
         {
             for (var c = 1; c <= contactsPerAccount; c++)
             {
+                var firstName = $"First{a + 1:D3}";
+                var lastName = $"Last{c}";
                 var contact = new Entity(CustomContact.LogicalName)
                 {
-                    ["new_firstname"] = $"First{a + 1:D3}",
-                    ["new_lastname"] = $"Last{c}",
+                    ["new_firstname"] = firstName,
+                    ["new_lastname"] = lastName,
+                    ["new_name"] = $"{firstName} {lastName}",
                     ["new_parentaccount"] = new EntityReference(CustomAccount.LogicalName, accountIds[a])
                 };
 
-                // Assign favorite colors — cycle through ColorSets; skip every 6th contact
+                // Assign contact rating — cycle through Ratings; skip every 4th contact
                 var contactIndex = a * contactsPerAccount + c;
+                if (contactIndex % 4 != 0)
+                    contact["new_contactrating"] = new OptionSetValue((int)Ratings[contactIndex % 3]);
+
+                // Assign favorite colors — cycle through ColorSets; skip every 6th contact
                 if (contactIndex % 6 != 0)
                 {
                     var colors = ColorSets[(contactIndex - 1) % ColorSets.Length];
