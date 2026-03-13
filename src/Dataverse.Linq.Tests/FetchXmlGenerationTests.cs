@@ -1423,6 +1423,48 @@ public class FetchXmlGenerationTests
     }
 
     // -------------------------------------------------------------------------
+    // WithPageSize
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_WithPageSize_GeneratesCountAttribute()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .WithPageSize(50)
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" count="50">
+              <entity name="new_customaccount">
+                <all-attributes />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WithPageSizeAndWhere_GeneratesCountAndFilter()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Where(a => a.Name != null)
+            .WithPageSize(25)
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" count="25">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_name" operator="not-null" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    // -------------------------------------------------------------------------
     // Terminal operators — First / FirstOrDefault / Single / SingleOrDefault
     // -------------------------------------------------------------------------
 

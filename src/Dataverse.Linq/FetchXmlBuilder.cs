@@ -20,6 +20,8 @@ internal static class FetchXmlBuilder
 
         if (query.Top.HasValue)
             fetchElement.Add(new XAttribute("top", query.Top.Value));
+        if (query.PageSize.HasValue)
+            fetchElement.Add(new XAttribute("count", query.PageSize.Value));
         if (query.Distinct)
             fetchElement.Add(new XAttribute("distinct", "true"));
         if (query.Aggregate)

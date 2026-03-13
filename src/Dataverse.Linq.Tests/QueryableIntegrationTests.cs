@@ -925,6 +925,38 @@ public class QueryableIntegrationTests : IntegrationTestBase
     }
 
     // -------------------------------------------------------------------------
+    // WithPageSize
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ToListAsync_WithPageSize_ReturnsAllRecords()
+    {
+        var all = await Service.Queryable<CustomAccount>().ToListAsync();
+
+        var results = await Service.Queryable<CustomAccount>()
+            .WithPageSize(10)
+            .ToListAsync();
+
+        results.Should().HaveCount(all.Count);
+    }
+
+    [Fact]
+    public async Task ToListAsync_WithPageSizeAndWhere_ReturnsAllFilteredRecords()
+    {
+        var all = await Service.Queryable<CustomAccount>()
+            .Where(a => a.Name != null)
+            .ToListAsync();
+
+        var results = await Service.Queryable<CustomAccount>()
+            .Where(a => a.Name != null)
+            .WithPageSize(5)
+            .ToListAsync();
+
+        results.Should().HaveCount(all.Count);
+        results.Should().OnlyContain(r => r.Name != null);
+    }
+
+    // -------------------------------------------------------------------------
     // Terminal operators — First / FirstOrDefault / Single / SingleOrDefault
     // -------------------------------------------------------------------------
 

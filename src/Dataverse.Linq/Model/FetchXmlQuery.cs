@@ -26,6 +26,7 @@ internal sealed class FetchXmlQuery
     public List<FetchOrder> Orders { get; } = [];
     public List<FetchLinkEntity> Links { get; } = [];
     public int? Top { get; set; }
+    public int? PageSize { get; set; }
     public int? Skip { get; set; }
     public bool Distinct { get; set; }
     public bool Aggregate { get; set; }

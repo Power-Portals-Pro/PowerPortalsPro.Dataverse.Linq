@@ -33,6 +33,23 @@ public static class ServiceClientExtensions
     }
 
     /// <summary>
+    /// Sets the page size for the query by adding the FetchXml <c>count</c> attribute.
+    /// </summary>
+    public static IQueryable<TElement> WithPageSize<TElement>(
+        this IQueryable<TElement> queryable,
+        int pageSize)
+    {
+        var expression = Expression.Call(
+            typeof(ServiceClientExtensions),
+            nameof(WithPageSize),
+            [typeof(TElement)],
+            queryable.Expression,
+            Expression.Constant(pageSize));
+
+        return queryable.Provider.CreateQuery<TElement>(expression);
+    }
+
+    /// <summary>
     /// Asynchronously executes the query and returns all results as a <see cref="List{T}"/>.
     /// Works on both root queryables and projected queryables (e.g. after a Select clause).
     /// Handles paging automatically.

@@ -197,6 +197,13 @@ internal static class FetchXmlQueryTranslator
                             $"LINQ operator '{call.Method.Name}' is not supported.");
                 }
 
+            case MethodCallExpression { Method: { Name: nameof(ServiceClientExtensions.WithPageSize),
+                    DeclaringType: var dt } } pageSizeCall
+                when dt == typeof(ServiceClientExtensions):
+                TranslateCore(pageSizeCall.Arguments[0], ctx);
+                ctx.Query.PageSize = (int)((ConstantExpression)pageSizeCall.Arguments[1]).Value!;
+                return;
+
             default:
                 throw new NotSupportedException(
                     $"Unsupported expression type: {expression.NodeType}");
