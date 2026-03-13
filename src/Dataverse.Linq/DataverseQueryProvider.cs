@@ -46,6 +46,16 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
     /// </summary>
     public TResult Execute<TResult>(Expression expression)
     {
+        var leftJoinInfo = LeftJoinExpressionParser.TryParse(expression);
+        if (leftJoinInfo is not null)
+        {
+            var elementType = typeof(TResult).GetGenericArguments()[0];
+            var method = typeof(DataverseQueryProvider<T>)
+                .GetMethod(nameof(FetchLeftJoinList), BindingFlags.NonPublic | BindingFlags.Instance)!
+                .MakeGenericMethod(elementType);
+            return (TResult)method.Invoke(this, [leftJoinInfo])!;
+        }
+
         var joinInfo = JoinExpressionParser.TryParse(expression);
         if (joinInfo is not null)
         {
@@ -79,6 +89,15 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
     {
         // TResult = Task<List<TElement>>
         var elementType = typeof(TResult).GetGenericArguments()[0].GetGenericArguments()[0];
+
+        var leftJoinInfo = LeftJoinExpressionParser.TryParse(expression);
+        if (leftJoinInfo is not null)
+        {
+            var method = typeof(DataverseQueryProvider<T>)
+                .GetMethod(nameof(FetchLeftJoinListAsync), BindingFlags.NonPublic | BindingFlags.Instance)!
+                .MakeGenericMethod(elementType);
+            return (TResult)method.Invoke(this, [leftJoinInfo, cancellationToken])!;
+        }
 
         var joinInfo = JoinExpressionParser.TryParse(expression);
         if (joinInfo is not null)
@@ -119,6 +138,18 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
     {
         var fetchXml = FetchXmlBuilder.Build(EntityLogicalName, columns);
         return RetrieveAll(fetchXml).Select(e => e.ToEntity<T>()).ToList();
+    }
+
+    private List<TElement> FetchLeftJoinList<TElement>(LeftJoinInfo joinInfo)
+    {
+        var fetchXml = FetchXmlBuilder.BuildLeftJoin(joinInfo);
+        return RetrieveAll(fetchXml).Select(e =>
+        {
+            var outer = e.ToEntity<T>();
+            return joinInfo.Projector is not null
+                ? (TElement)joinInfo.Projector.DynamicInvoke(outer)!
+                : (TElement)(object)outer;
+        }).ToList();
     }
 
     private List<TElement> FetchJoinedList<TInner, TElement>(JoinInfo joinInfo)
@@ -182,6 +213,20 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
             .Select(e => e.ToEntity<T>())
             .Select(e => (TElement)projector.DynamicInvoke(e)!)
             .ToList();
+    }
+
+    private async Task<List<TElement>> FetchLeftJoinListAsync<TElement>(
+        LeftJoinInfo joinInfo, CancellationToken cancellationToken)
+    {
+        var fetchXml = FetchXmlBuilder.BuildLeftJoin(joinInfo);
+        var entities = await RetrieveAllAsync(fetchXml, cancellationToken);
+        return entities.Select(e =>
+        {
+            var outer = e.ToEntity<T>();
+            return joinInfo.Projector is not null
+                ? (TElement)joinInfo.Projector.DynamicInvoke(outer)!
+                : (TElement)(object)outer;
+        }).ToList();
     }
 
     private async Task<List<TElement>> FetchJoinedListAsync<TInner, TElement>(

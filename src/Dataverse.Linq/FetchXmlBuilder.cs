@@ -45,4 +45,35 @@ internal static class FetchXmlBuilder
 
         return new XElement("fetch", new XAttribute("mapping", "logical"), entityElement).ToString();
     }
+
+    internal static string BuildLeftJoin(LeftJoinInfo join)
+    {
+        var entityElement = new XElement("entity", new XAttribute("name", join.OuterEntityLogicalName));
+
+        if (join.OuterColumns is { Count: > 0 })
+            foreach (var col in join.OuterColumns)
+                entityElement.Add(new XElement("attribute", new XAttribute("name", col)));
+        else
+            entityElement.Add(new XElement("all-attributes"));
+
+        var linkElement = new XElement("link-entity",
+            new XAttribute("name", join.InnerEntityLogicalName),
+            new XAttribute("from", join.InnerKeyAttribute),
+            new XAttribute("to", join.OuterKeyAttribute),
+            new XAttribute("alias", join.InnerAlias),
+            new XAttribute("link-type", "outer"));
+
+        entityElement.Add(linkElement);
+
+        if (join.FilterWhereInnerIsNull)
+        {
+            entityElement.Add(new XElement("filter",
+                new XElement("condition",
+                    new XAttribute("entityname", join.InnerAlias),
+                    new XAttribute("attribute", join.InnerEntityLogicalName + "id"),
+                    new XAttribute("operator", "null"))));
+        }
+
+        return new XElement("fetch", new XAttribute("mapping", "logical"), entityElement).ToString();
+    }
 }

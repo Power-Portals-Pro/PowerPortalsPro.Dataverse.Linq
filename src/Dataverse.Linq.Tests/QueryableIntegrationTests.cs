@@ -190,6 +190,38 @@ public class QueryableIntegrationTests : IntegrationTestBase
                .Should().AllSatisfy(g => g.Should().HaveCount(5));
     }
 
+    // -------------------------------------------------------------------------
+    // Left joins
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ToListAsync_WithLeftJoin_WhereInnerIsNull_ReturnsAccountsWithNoContacts()
+    {
+        var results = await (from a in Service.Queryable<CustomAccount>()
+                             join c in Service.Queryable<CustomContact>()
+                                 on a.AccountId equals c.ParentAccount.Id into contacts
+                             from c in contacts.DefaultIfEmpty()
+                             where c == null
+                             select new { a.Name }).ToListAsync();
+
+        // All accounts in the seed data have contacts, so no accounts should be returned
+        results.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ToListAsync_WithLeftJoin_ReturnsAllAccountsIncludingThoseWithNoContacts()
+    {
+        var results = await (from a in Service.Queryable<CustomAccount>()
+                             join c in Service.Queryable<CustomContact>()
+                                 on a.AccountId equals c.ParentAccount.Id into contacts
+                             from c in contacts.DefaultIfEmpty()
+                             select new { a.Name }).ToListAsync();
+
+        // Left join with no filter should return all 500 matched rows
+        results.Should().HaveCount(500);
+        results.Should().AllSatisfy(r => r.Name.Should().NotBeNullOrEmpty());
+    }
+
     [Fact]
     public async Task ToListAsync_WithJoin_NamesMatchSeedDataPattern()
     {
@@ -204,5 +236,17 @@ public class QueryableIntegrationTests : IntegrationTestBase
             r.FirstName.Should().StartWith("First");
             r.LastName.Should().StartWith("Last");
         });
+    }
+
+    [Fact]
+    public async Task ToListAsync_WithLeftJoin_NamesMatchSeedDataPattern()
+    {
+        var results = await (from a in Service.Queryable<CustomAccount>()
+                             join c in Service.Queryable<CustomContact>()
+                                 on a.AccountId equals c.ParentAccount.Id into contacts
+                             from c in contacts.DefaultIfEmpty()
+                             select new { a.Name }).ToListAsync();
+
+        results.Should().AllSatisfy(r => r.Name.Should().StartWith("Custom Account"));
     }
 }
