@@ -15,6 +15,55 @@ namespace Dataverse.Linq.Expressions;
 /// </summary>
 internal static class FetchXmlQueryTranslator
 {
+    private static readonly Dictionary<string, ConditionOperator> DateTimeOperatorMap = new()
+    {
+        ["Last7Days"] = ConditionOperator.Last7Days,
+        ["LastFiscalPeriod"] = ConditionOperator.LastFiscalPeriod,
+        ["LastFiscalYear"] = ConditionOperator.LastFiscalYear,
+        ["LastMonth"] = ConditionOperator.LastMonth,
+        ["LastWeek"] = ConditionOperator.LastWeek,
+        ["LastYear"] = ConditionOperator.LastYear,
+        ["LastXDays"] = ConditionOperator.LastXDays,
+        ["LastXFiscalPeriods"] = ConditionOperator.LastXFiscalPeriods,
+        ["LastXFiscalYears"] = ConditionOperator.LastXFiscalYears,
+        ["LastXHours"] = ConditionOperator.LastXHours,
+        ["LastXMonths"] = ConditionOperator.LastXMonths,
+        ["LastXWeeks"] = ConditionOperator.LastXWeeks,
+        ["LastXYears"] = ConditionOperator.LastXYears,
+        ["Next7Days"] = ConditionOperator.Next7Days,
+        ["NextFiscalPeriod"] = ConditionOperator.NextFiscalPeriod,
+        ["NextFiscalYear"] = ConditionOperator.NextFiscalYear,
+        ["NextMonth"] = ConditionOperator.NextMonth,
+        ["NextWeek"] = ConditionOperator.NextWeek,
+        ["NextYear"] = ConditionOperator.NextYear,
+        ["NextXDays"] = ConditionOperator.NextXDays,
+        ["NextXFiscalPeriods"] = ConditionOperator.NextXFiscalPeriods,
+        ["NextXFiscalYears"] = ConditionOperator.NextXFiscalYears,
+        ["NextXHours"] = ConditionOperator.NextXHours,
+        ["NextXMonths"] = ConditionOperator.NextXMonths,
+        ["NextXWeeks"] = ConditionOperator.NextXWeeks,
+        ["NextXYears"] = ConditionOperator.NextXYears,
+        ["InFiscalPeriod"] = ConditionOperator.InFiscalPeriod,
+        ["InFiscalPeriodAndYear"] = ConditionOperator.InFiscalPeriodAndYear,
+        ["InFiscalYear"] = ConditionOperator.InFiscalYear,
+        ["InOrAfterFiscalPeriodAndYear"] = ConditionOperator.InOrAfterFiscalPeriodAndYear,
+        ["InOrBeforeFiscalPeriodAndYear"] = ConditionOperator.InOrBeforeFiscalPeriodAndYear,
+        ["OlderThanXMonths"] = ConditionOperator.OlderThanXMonths,
+        ["On"] = ConditionOperator.On,
+        ["OnOrAfter"] = ConditionOperator.OnOrAfter,
+        ["OnOrBefore"] = ConditionOperator.OnOrBefore,
+        ["ThisFiscalPeriod"] = ConditionOperator.ThisFiscalPeriod,
+        ["ThisFiscalYear"] = ConditionOperator.ThisFiscalYear,
+        ["ThisMonth"] = ConditionOperator.ThisMonth,
+        ["ThisWeek"] = ConditionOperator.ThisWeek,
+        ["ThisYear"] = ConditionOperator.ThisYear,
+        ["Today"] = ConditionOperator.Today,
+        ["Tomorrow"] = ConditionOperator.Tomorrow,
+        ["Yesterday"] = ConditionOperator.Yesterday,
+        ["Between"] = ConditionOperator.Between,
+        ["NotBetween"] = ConditionOperator.NotBetween,
+    };
+
     /// <summary>
     /// Entry point. Translates the given expression into a <see cref="FetchXmlQuery"/>.
     /// </summary>
@@ -279,6 +328,33 @@ internal static class FetchXmlQueryTranslator
                 return;
             }
 
+            // DateTime extension methods → date/time condition operators
+            case MethodCallExpression { Method.DeclaringType: var declType } dateCall
+                when declType == typeof(Extensions.DateTimeExtensions)
+                    && DateTimeOperatorMap.TryGetValue(dateCall.Method.Name, out var dateOp):
+            {
+                var resolved = ResolveMethodAttribute(dateCall, ctx);
+                var condition = new FetchCondition
+                {
+                    Attribute = resolved.Name,
+                    EntityAlias = resolved.EntityAlias,
+                    Operator = dateOp
+                };
+                // arg[0] is the 'this' DateTime; remaining args are values
+                var extraArgs = dateCall.Arguments.Count - 1;
+                if (extraArgs == 1)
+                {
+                    condition.Value = EvaluateValue(dateCall.Arguments[1]);
+                }
+                else if (extraArgs > 1)
+                {
+                    for (var i = 1; i < dateCall.Arguments.Count; i++)
+                        condition.Values.Add(EvaluateValue(dateCall.Arguments[i])!);
+                }
+                filter.Conditions.Add(condition);
+                return;
+            }
+
             // && → AND filter (flatten if parent is already AND)
             case BinaryExpression { NodeType: ExpressionType.AndAlso } andExpr:
                 TranslateLogicalPredicate(andExpr, filter, FilterType.And, ctx);
@@ -495,6 +571,13 @@ internal static class FetchXmlQueryTranslator
             var target = methodCall.Object is not null ? EvaluateValue(methodCall.Object) : null;
             var args = methodCall.Arguments.Select(a => EvaluateValue(a)).ToArray();
             return methodCall.Method.Invoke(target, args);
+        }
+
+        // Constructor call (e.g. new DateTime(2020, 1, 1))
+        if (expr is NewExpression newExpr && newExpr.Constructor is not null)
+        {
+            var args = newExpr.Arguments.Select(a => EvaluateValue(a)).ToArray();
+            return newExpr.Constructor.Invoke(args);
         }
 
         throw new NotSupportedException(

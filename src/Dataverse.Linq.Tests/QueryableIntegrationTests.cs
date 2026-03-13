@@ -1,3 +1,4 @@
+using Dataverse.Linq.Extensions;
 using Dataverse.Linq.Tests.Proxies;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
@@ -723,5 +724,107 @@ public class QueryableIntegrationTests : IntegrationTestBase
 
         results.Should().NotBeEmpty();
         results.Should().NotContain(r => excludedIds.Contains(r.CustomAccountId));
+    }
+
+    // -------------------------------------------------------------------------
+    // Where — DateTime operators (parameterless)
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ToListAsync_WhereOlderThanXMonths_ReturnsMatchingRecords()
+    {
+        // Seed dates range from 2001–2024; OlderThanXMonths(12) should return most of them
+        var results = await Service.Queryable<CustomAccount>()
+            .Where(a => a.DateCompanyWasOrganized.OlderThanXMonths(12))
+            .ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Should().OnlyContain(r =>
+            r.DateCompanyWasOrganized.HasValue
+            && r.DateCompanyWasOrganized.Value < DateTime.UtcNow.AddMonths(-12));
+    }
+
+    // -------------------------------------------------------------------------
+    // Where — DateTime operators (On / OnOrBefore / OnOrAfter)
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ToListAsync_WhereOnOrAfter_ReturnsMatchingRecords()
+    {
+        // Seed: dates go up to 2024; OnOrAfter 2020-01-01 should return a subset
+        var cutoff = new DateTime(2020, 1, 1);
+        var results = await Service.Queryable<CustomAccount>()
+            .Where(a => a.DateCompanyWasOrganized.OnOrAfter(cutoff))
+            .ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Should().OnlyContain(r =>
+            r.DateCompanyWasOrganized.HasValue
+            && r.DateCompanyWasOrganized.Value >= cutoff);
+    }
+
+    [Fact]
+    public async Task ToListAsync_WhereOnOrBefore_ReturnsMatchingRecords()
+    {
+        var cutoff = new DateTime(2005, 12, 31);
+        var results = await Service.Queryable<CustomAccount>()
+            .Where(a => a.DateCompanyWasOrganized.OnOrBefore(cutoff))
+            .ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Should().OnlyContain(r =>
+            r.DateCompanyWasOrganized.HasValue
+            && r.DateCompanyWasOrganized.Value <= cutoff);
+    }
+
+    // -------------------------------------------------------------------------
+    // Where — DateTime operators (Between / NotBetween)
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ToListAsync_WhereBetween_ReturnsMatchingRecords()
+    {
+        var from = new DateTime(2010, 1, 1);
+        var to = new DateTime(2015, 12, 31);
+        var results = await Service.Queryable<CustomAccount>()
+            .Where(a => a.DateCompanyWasOrganized.Between(from, to))
+            .ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Should().OnlyContain(r =>
+            r.DateCompanyWasOrganized.HasValue
+            && r.DateCompanyWasOrganized.Value >= from
+            && r.DateCompanyWasOrganized.Value <= to);
+    }
+
+    [Fact]
+    public async Task ToListAsync_WhereNotBetween_ReturnsMatchingRecords()
+    {
+        var from = new DateTime(2010, 1, 1);
+        var to = new DateTime(2015, 12, 31);
+        var results = await Service.Queryable<CustomAccount>()
+            .Where(a => a.DateCompanyWasOrganized.NotBetween(from, to))
+            .ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Should().OnlyContain(r =>
+            r.DateCompanyWasOrganized.HasValue
+            && (r.DateCompanyWasOrganized.Value < from || r.DateCompanyWasOrganized.Value > to));
+    }
+
+    // -------------------------------------------------------------------------
+    // Where — DateTime operators (LastXDays)
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ToListAsync_WhereLastXDays_ReturnsMatchingRecords()
+    {
+        // Seed dates are in the past (2001–2024), so LastXDays(1) should return nothing or very few
+        // Use a large value to ensure we get results
+        var results = await Service.Queryable<CustomAccount>()
+            .Where(a => a.DateCompanyWasOrganized.LastXDays(365 * 30))
+            .ToListAsync();
+
+        results.Should().NotBeEmpty();
     }
 }
