@@ -237,9 +237,7 @@ internal static class FetchXmlQueryTranslator
             case MethodCallExpression { Method: { Name: "IsNullOrEmpty", DeclaringType: var dt } } isNullCall
                 when dt == typeof(string):
             {
-                var resolved = ResolveAttribute(isNullCall.Arguments[0], ctx)
-                    ?? throw new NotSupportedException(
-                        "string.IsNullOrEmpty argument must resolve to an attribute.");
+                var resolved = ResolveMethodAttribute(isNullCall, ctx);
                 var subFilter = new FetchFilter { Type = FilterType.Or };
                 subFilter.Conditions.Add(new FetchCondition { Attribute = resolved.Name, EntityAlias = resolved.EntityAlias, Operator = ConditionOperator.Null });
                 subFilter.Conditions.Add(new FetchCondition { Attribute = resolved.Name, EntityAlias = resolved.EntityAlias, Operator = ConditionOperator.Equal, Value = "" });
@@ -251,17 +249,7 @@ internal static class FetchXmlQueryTranslator
             case MethodCallExpression { Method: { Name: "Contains" or "StartsWith" or "EndsWith" } } stringCall
                 when stringCall.Method.DeclaringType == typeof(string) && stringCall.Object is not null:
             {
-                var resolved = ResolveAttribute(stringCall.Object, ctx)
-                    ?? throw new NotSupportedException(
-                        "String method target must resolve to an attribute.");
-                var value = EvaluateValue(stringCall.Arguments[0]);
-                var pattern = stringCall.Method.Name switch
-                {
-                    "Contains" => $"%{value}%",
-                    "StartsWith" => $"{value}%",
-                    "EndsWith" => $"%{value}",
-                    _ => throw new NotSupportedException()
-                };
+                var (resolved, pattern) = ResolveStringMethodAttribute(stringCall, ctx);
                 filter.Conditions.Add(new FetchCondition
                 {
                     Attribute = resolved.Name,
@@ -301,9 +289,7 @@ internal static class FetchXmlQueryTranslator
             case MethodCallExpression { Method: { Name: "IsNullOrEmpty", DeclaringType: var dt } } isNullCall
                 when dt == typeof(string):
             {
-                var resolved = ResolveAttribute(isNullCall.Arguments[0], ctx)
-                    ?? throw new NotSupportedException(
-                        "string.IsNullOrEmpty argument must resolve to an attribute.");
+                var resolved = ResolveMethodAttribute(isNullCall, ctx);
                 var subFilter = new FetchFilter { Type = FilterType.And };
                 subFilter.Conditions.Add(new FetchCondition { Attribute = resolved.Name, EntityAlias = resolved.EntityAlias, Operator = ConditionOperator.NotNull });
                 subFilter.Conditions.Add(new FetchCondition { Attribute = resolved.Name, EntityAlias = resolved.EntityAlias, Operator = ConditionOperator.NotEqual, Value = "" });
@@ -315,17 +301,7 @@ internal static class FetchXmlQueryTranslator
             case MethodCallExpression { Method: { Name: "Contains" or "StartsWith" or "EndsWith" } } stringCall
                 when stringCall.Method.DeclaringType == typeof(string) && stringCall.Object is not null:
             {
-                var resolved = ResolveAttribute(stringCall.Object, ctx)
-                    ?? throw new NotSupportedException(
-                        "String method target must resolve to an attribute.");
-                var value = EvaluateValue(stringCall.Arguments[0]);
-                var pattern = stringCall.Method.Name switch
-                {
-                    "Contains" => $"%{value}%",
-                    "StartsWith" => $"{value}%",
-                    "EndsWith" => $"%{value}",
-                    _ => throw new NotSupportedException()
-                };
+                var (resolved, pattern) = ResolveStringMethodAttribute(stringCall, ctx);
                 filter.Conditions.Add(new FetchCondition
                 {
                     Attribute = resolved.Name,
@@ -340,6 +316,29 @@ internal static class FetchXmlQueryTranslator
                 throw new NotSupportedException(
                     $"Unsupported negated Where predicate: {expr.NodeType}");
         }
+    }
+
+    private static ResolvedAttribute ResolveMethodAttribute(MethodCallExpression call, TranslationContext ctx)
+    {
+        var attrExpr = call.Object ?? call.Arguments[0];
+        return ResolveAttribute(attrExpr, ctx)
+            ?? throw new NotSupportedException(
+                $"{call.Method.DeclaringType!.Name}.{call.Method.Name} argument must resolve to an attribute.");
+    }
+
+    private static (ResolvedAttribute Resolved, string Pattern) ResolveStringMethodAttribute(
+        MethodCallExpression call, TranslationContext ctx)
+    {
+        var resolved = ResolveMethodAttribute(call, ctx);
+        var value = EvaluateValue(call.Arguments[0]);
+        var pattern = call.Method.Name switch
+        {
+            "Contains" => $"%{value}%",
+            "StartsWith" => $"{value}%",
+            "EndsWith" => $"%{value}",
+            _ => throw new NotSupportedException()
+        };
+        return (resolved, pattern);
     }
 
     private static void TranslateLogicalPredicate(
