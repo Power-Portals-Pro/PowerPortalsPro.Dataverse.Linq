@@ -46,8 +46,7 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
     /// </summary>
     public TResult Execute<TResult>(Expression expression)
     {
-        var joinInfo = LeftJoinExpressionParser.TryParse(expression)
-            ?? JoinExpressionParser.TryParse(expression);
+        var joinInfo = JoinExpressionParser.TryParse(expression);
 
         if (joinInfo is not null)
         {
@@ -93,8 +92,7 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
         // TResult = Task<List<TElement>>
         var elementType = typeof(TResult).GetGenericArguments()[0].GetGenericArguments()[0];
 
-        var joinInfo = LeftJoinExpressionParser.TryParse(expression)
-            ?? JoinExpressionParser.TryParse(expression);
+        var joinInfo = JoinExpressionParser.TryParse(expression);
 
         if (joinInfo is not null)
         {
