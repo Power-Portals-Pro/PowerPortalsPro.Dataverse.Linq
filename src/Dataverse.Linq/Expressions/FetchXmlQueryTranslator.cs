@@ -1,3 +1,4 @@
+using Dataverse.Linq.Extensions;
 using Dataverse.Linq.Model;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Client;
@@ -192,6 +193,10 @@ internal static class FetchXmlQueryTranslator
                         HandleTerminalOperator(call, ctx);
                         return;
 
+                    case nameof(Queryable.GroupBy):
+                        HandleGroupBy(call, ctx);
+                        return;
+
                     case nameof(Queryable.Min):
                     case nameof(Queryable.Max):
                     case nameof(Queryable.Sum):
@@ -226,6 +231,12 @@ internal static class FetchXmlQueryTranslator
     private static void HandleSelect(MethodCallExpression call, TranslationContext ctx)
     {
         var lambda = ExtractLambda(call.Arguments[1]);
+
+        if (ctx.IsGrouped)
+        {
+            HandleGroupedSelect(lambda, ctx);
+            return;
+        }
 
         if (ctx.JoinMappings is not null)
         {
@@ -963,6 +974,18 @@ internal static class FetchXmlQueryTranslator
                 return new ResolvedAttribute(attrName, mapping2.LinkAlias);
         }
 
+        // x.entity.MoneyProp.Value or x.entity.OptionSetProp.Value through TI
+        if (expr is MemberExpression { Member: { Name: "Value", DeclaringType: var valueType } } valueExpr
+            && (valueType == typeof(Money) || valueType == typeof(OptionSetValue))
+            && valueExpr.Expression is MemberExpression { Member: PropertyInfo containerProp } containerExpr
+            && containerExpr.Expression is MemberExpression { Expression: ParameterExpression } entityAccess4
+            && joinMappings.TryGetValue(entityAccess4.Member.Name, out var mapping4))
+        {
+            var attrName = containerProp.GetCustomAttribute<AttributeLogicalNameAttribute>()?.LogicalName;
+            if (attrName is not null)
+                return new ResolvedAttribute(attrName, mapping4.LinkAlias);
+        }
+
         // x.entity.GetAttributeValue<T>("name")
         if (expr is MethodCallExpression { Method.Name: nameof(Entity.GetAttributeValue) } getAttr
             && getAttr.Arguments.Count == 1
@@ -985,6 +1008,14 @@ internal static class FetchXmlQueryTranslator
         var lambda = ExtractLambda(call.Arguments[1]);
         var descending = call.Method.Name is nameof(Queryable.OrderByDescending)
                                            or nameof(Queryable.ThenByDescending);
+
+        // Grouped aggregate ordering by g.Key — defer until Select assigns aliases
+        if (ctx.IsGrouped && lambda.Body is MemberExpression { Member.Name: "Key" })
+        {
+            ctx.DeferredGroupOrders ??= [];
+            ctx.DeferredGroupOrders.Add(descending);
+            return;
+        }
 
         var resolved = ResolveAttribute(lambda.Body, ctx)
             ?? throw new NotSupportedException(
@@ -1116,6 +1147,195 @@ internal static class FetchXmlQueryTranslator
         ctx.Query.Aggregate = true;
         ctx.Query.Projector = null;
         ctx.Query.ProjectionType = null;
+    }
+
+    // -------------------------------------------------------------------------
+    // GroupBy — grouped aggregate queries
+    // -------------------------------------------------------------------------
+
+    private static void HandleGroupBy(MethodCallExpression call, TranslationContext ctx)
+    {
+        // Recurse into the source expression
+        TranslateCore(call.Arguments[0], ctx);
+
+        // Extract key selector
+        var keySelector = ExtractLambda(call.Arguments[1]);
+        var (attrName, dateGrouping) = ResolveGroupKey(keySelector.Body, ctx);
+
+        ctx.IsGrouped = true;
+        ctx.GroupKeyAttributeName = attrName;
+        ctx.GroupKeyDateGrouping = dateGrouping;
+        ctx.Query.Aggregate = true;
+        ctx.Query.AllAttributes = false;
+        ctx.Query.Attributes.Clear();
+
+        // Clear join mappings — subsequent Select/OrderBy operate on IGrouping, not TI
+        ctx.JoinMappings = null;
+    }
+
+    private static void HandleGroupedSelect(LambdaExpression lambda, TranslationContext ctx)
+    {
+        var body = lambda.Body;
+
+        if (body is not NewExpression ne || ne.Members is null)
+            throw new NotSupportedException("Grouped query must project into an anonymous type.");
+
+        var entityParam = Expression.Parameter(typeof(Entity), "e");
+        var extractMethod = typeof(AggregateProjection).GetMethod(nameof(AggregateProjection.ExtractValue))!;
+        var constructorArgs = new List<Expression>();
+        string? groupKeyAlias = null;
+
+        for (var i = 0; i < ne.Arguments.Count; i++)
+        {
+            var arg = ne.Arguments[i];
+            var member = ne.Members[i];
+            // Anonymous type members may be PropertyInfo or getter MethodInfo (get_Xxx)
+            var memberName = member is MethodInfo { Name: ['g', 'e', 't', '_', ..] } getter
+                ? getter.Name[4..] : member.Name;
+            var alias = memberName.ToLowerInvariant();
+            var memberType = member is PropertyInfo pi ? pi.PropertyType
+                : member is MethodInfo mi ? mi.ReturnType
+                : throw new NotSupportedException($"Unexpected member type: {member.GetType().Name}");
+
+            if (arg is MemberExpression { Member.Name: "Key" })
+            {
+                // Group key
+                groupKeyAlias = alias;
+                ctx.Query.Attributes.Add(new FetchAttribute
+                {
+                    Name = ctx.GroupKeyAttributeName!,
+                    Alias = alias,
+                    GroupBy = true,
+                    DateGrouping = ctx.GroupKeyDateGrouping
+                });
+            }
+            else if (arg is MethodCallExpression mc)
+            {
+                var (attrName, aggregateFunc) = ResolveGroupAggregate(mc, ctx);
+                ctx.Query.Attributes.Add(new FetchAttribute
+                {
+                    Name = attrName,
+                    Alias = alias,
+                    Aggregate = aggregateFunc
+                });
+            }
+            else
+            {
+                throw new NotSupportedException(
+                    $"Unsupported expression in grouped projection at member '{ne.Members[i].Name}'.");
+            }
+
+            // Build projector argument
+            constructorArgs.Add(
+                Expression.Call(
+                    extractMethod.MakeGenericMethod(memberType),
+                    entityParam,
+                    Expression.Constant(alias)));
+        }
+
+        // Add deferred orders (from OrderBy on g.Key processed before this Select)
+        if (ctx.DeferredGroupOrders is not null && groupKeyAlias is not null)
+        {
+            foreach (var descending in ctx.DeferredGroupOrders)
+            {
+                ctx.Query.Orders.Add(new FetchOrder
+                {
+                    Alias = groupKeyAlias,
+                    Descending = descending
+                });
+            }
+        }
+
+        // Compile projector: (Entity e) => new AnonType(ExtractValue<T>(e, "alias"), ...)
+        var newExpr = Expression.New(ne.Constructor!, constructorArgs, ne.Members);
+        ctx.Query.Projector = Expression.Lambda(newExpr, entityParam).Compile();
+        ctx.Query.ProjectionType = ne.Type;
+    }
+
+    /// <summary>
+    /// Resolves a group key expression to an attribute name and optional date grouping.
+    /// Handles <c>o.Date.Value.Year</c>, <c>o.Date.Week()</c>, etc.
+    /// </summary>
+    private static (string AttrName, string? DateGrouping) ResolveGroupKey(
+        Expression expr, TranslationContext ctx)
+    {
+        string? dateGrouping = null;
+
+        // Standard DateTime properties: Year, Month, Day
+        if (expr is MemberExpression { Member.Name: var propName } me
+            && propName is "Year" or "Month" or "Day"
+            && (me.Expression?.Type == typeof(DateTime) || me.Expression?.Type == typeof(DateTime?)))
+        {
+            dateGrouping = propName.ToLowerInvariant();
+            expr = me.Expression;
+        }
+        // Extension method date grouping: Week(), Quarter(), FiscalPeriod(), FiscalYear()
+        else if (expr is MethodCallExpression
+                 {
+                     Method: { Name: var methodName, DeclaringType: var dt }
+                 } mc
+                 && dt == typeof(DateTimeExtensions)
+                 && methodName is "Week" or "Quarter" or "FiscalPeriod" or "FiscalYear")
+        {
+            dateGrouping = methodName switch
+            {
+                "Week" => "week",
+                "Quarter" => "quarter",
+                "FiscalPeriod" => "fiscal-period",
+                "FiscalYear" => "fiscal-year",
+                _ => throw new NotSupportedException()
+            };
+            expr = mc.Arguments[0]; // 'this' parameter of extension method
+        }
+
+        // Unwrap Nullable<T>.Value
+        if (expr is MemberExpression { Member.Name: "Value" } valueAccess
+            && valueAccess.Expression is not null
+            && Nullable.GetUnderlyingType(valueAccess.Expression.Type) is not null)
+        {
+            expr = valueAccess.Expression;
+        }
+
+        // Resolve to attribute name
+        var resolved = ResolveAttribute(expr, ctx)
+            ?? throw new NotSupportedException(
+                "Group key must resolve to an entity attribute.");
+
+        return (resolved.Name, dateGrouping);
+    }
+
+    /// <summary>
+    /// Resolves an aggregate method call within a grouped select (e.g. <c>g.Count()</c>,
+    /// <c>g.Sum(x =&gt; x.Revenue)</c>) to an attribute name and FetchXml aggregate function.
+    /// </summary>
+    private static (string AttrName, string AggregateFunc) ResolveGroupAggregate(
+        MethodCallExpression mc, TranslationContext ctx)
+    {
+        var methodName = mc.Method.Name;
+        var aggregateFunc = methodName switch
+        {
+            "Count" => "count",
+            "LongCount" => "count",
+            "Sum" => "sum",
+            "Average" => "avg",
+            "Min" => "min",
+            "Max" => "max",
+            _ => throw new NotSupportedException($"Unsupported group aggregate '{methodName}'.")
+        };
+
+        // Count() / LongCount() with no selector — use entity primary key
+        if (methodName is "Count" or "LongCount" && mc.Arguments.Count == 1)
+        {
+            return (ctx.Query.EntityLogicalName + "id", aggregateFunc);
+        }
+
+        // Aggregate with selector — extract attribute from the lambda
+        var selectorLambda = ExtractLambda(mc.Arguments[1]);
+        var attrName = GetAttributeName(selectorLambda.Body)
+            ?? throw new NotSupportedException(
+                $"Could not resolve attribute for grouped {methodName}.");
+
+        return (attrName, aggregateFunc);
     }
 
     // -------------------------------------------------------------------------
@@ -1593,6 +1813,14 @@ internal static class FetchXmlQueryTranslator
             return moneyProp.GetCustomAttribute<AttributeLogicalNameAttribute>()?.LogicalName;
         }
 
+        // Two-level OptionSetValue access: a.StatusReason_OptionSetValue.Value → [AttributeLogicalName]
+        if (memberExpr.Member.Name == nameof(OptionSetValue.Value) &&
+            memberExpr.Member.DeclaringType == typeof(OptionSetValue) &&
+            memberExpr.Expression is MemberExpression { Member: PropertyInfo optionProp })
+        {
+            return optionProp.GetCustomAttribute<AttributeLogicalNameAttribute>()?.LogicalName;
+        }
+
         return null;
     }
 
@@ -1630,6 +1858,24 @@ internal static class FetchXmlQueryTranslator
         /// transparent-identifier type to their entity info (root or link entity).
         /// </summary>
         public Dictionary<string, JoinEntityInfo>? JoinMappings { get; set; }
+
+        /// <summary>
+        /// After a GroupBy: indicates that subsequent Select/OrderBy operate on
+        /// <c>IGrouping&lt;TKey, TElement&gt;</c> rather than entity types.
+        /// </summary>
+        public bool IsGrouped { get; set; }
+
+        /// <summary>The Dataverse attribute name used as the group key.</summary>
+        public string? GroupKeyAttributeName { get; set; }
+
+        /// <summary>FetchXml date grouping value (year, month, day, week, quarter, fiscal-period, fiscal-year).</summary>
+        public string? GroupKeyDateGrouping { get; set; }
+
+        /// <summary>
+        /// Orders requested on <c>g.Key</c> before the Select assigns aliases.
+        /// Each entry is the <c>descending</c> flag.
+        /// </summary>
+        public List<bool>? DeferredGroupOrders { get; set; }
     }
 
     private sealed class JoinEntityInfo

@@ -116,7 +116,17 @@
       "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"FullyQualifiedName~JoinWithComplexWhereAndInterpolation\" --no-restore --logger \"console;verbosity=detailed\" 2>&1 | grep -A 30 \"System.Exception\")",
       "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"FullyQualifiedName~JoinWithComplex\" --no-restore --logger \"console;verbosity=detailed\" 2>&1 | grep -E \"FAIL|Passed\\\\b|Exception|Error\" | head -20)",
       "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"FullyQualifiedName~JoinWithComplex\" --no-restore --logger \"console;verbosity=detailed\" 2>&1 | grep -E \"FAIL|Passed\\\\b|Expected|but found|differ\" | head -20)",
-      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"FullyQualifiedName~JoinWithComplexWhereOrderBy\" --no-restore --logger \"console;verbosity=detailed\" 2>&1 | grep -A 25 \"System.Exception\")"
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"FullyQualifiedName~JoinWithComplexWhereOrderBy\" --no-restore --logger \"console;verbosity=detailed\" 2>&1 | grep -A 25 \"System.Exception\")",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"FullyQualifiedName~FetchXmlGenerationTests\" --no-build 2>&1 | tail -20)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"FullyQualifiedName~GroupBy\" --no-build 2>&1)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"FullyQualifiedName~GroupBy\" 2>&1 | tail -15)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"FullyQualifiedName~FetchXmlGenerationTests\" --no-build 2>&1 | tail -5)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"FullyQualifiedName!~IntegrationTest&FullyQualifiedName!~DataManagement\" --no-build 2>&1 | tail -5)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"FullyQualifiedName~FetchXmlGenerationTests\" 2>&1 | tail -5)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"FullyQualifiedName~GroupBy\" 2>&1 | tail -5)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet build src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --no-restore -q 2>&1 | tail -5)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet build src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj -q 2>&1 | tail -5)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet build src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj 2>&1 | grep -E \"error|Error\" | head -10)"
     ]
   }
 }

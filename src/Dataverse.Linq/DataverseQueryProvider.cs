@@ -326,6 +326,14 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
     /// </summary>
     private List<TElement> ProjectEntities<TElement>(List<Entity> entities, FetchXmlQuery query)
     {
+        // Grouped aggregate: projector takes raw Entity (not typed)
+        if (query.Aggregate && query.Projector is not null)
+        {
+            return entities.Select(e =>
+                (TElement)query.Projector.DynamicInvoke(e)!
+            ).ToList();
+        }
+
         // Inner join: 2-param result selector (outer, inner) → TElement
         if (query.InnerEntityType is not null && query.Projector is not null)
         {

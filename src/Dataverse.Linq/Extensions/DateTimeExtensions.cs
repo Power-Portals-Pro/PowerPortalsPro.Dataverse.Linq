@@ -10,6 +10,25 @@ public static class DateTimeExtensions
     private static bool Throw() =>
         throw new NotImplementedException("This method is a placeholder for the Dataverse LINQ query provider and cannot be invoked directly.");
 
+    private static int ThrowInt() =>
+        throw new NotImplementedException("This method is a placeholder for the Dataverse LINQ query provider and cannot be invoked directly.");
+
+    // -------------------------------------------------------------------------
+    // Date grouping methods (return int for use as group-by keys in LINQ)
+    // -------------------------------------------------------------------------
+
+    public static int Week(this DateTime dateTime) => ThrowInt();
+    public static int Week(this DateTime? dateTime) => ThrowInt();
+
+    public static int Quarter(this DateTime dateTime) => ThrowInt();
+    public static int Quarter(this DateTime? dateTime) => ThrowInt();
+
+    public static int FiscalPeriod(this DateTime dateTime) => ThrowInt();
+    public static int FiscalPeriod(this DateTime? dateTime) => ThrowInt();
+
+    public static int FiscalYear(this DateTime dateTime) => ThrowInt();
+    public static int FiscalYear(this DateTime? dateTime) => ThrowInt();
+
     // -------------------------------------------------------------------------
     // No-arg operators (parameterless — the attribute is the 'this' parameter)
     // -------------------------------------------------------------------------

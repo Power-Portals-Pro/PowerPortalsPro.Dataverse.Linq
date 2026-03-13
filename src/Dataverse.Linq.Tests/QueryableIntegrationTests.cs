@@ -1469,4 +1469,57 @@ public class QueryableIntegrationTests : IntegrationTestBase
         accounts.Select(r => r.AccountName).Should().BeInAscendingOrder();
     }
 
+    // -------------------------------------------------------------------------
+    // GroupBy — grouped aggregate queries
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ToListAsync_GroupByDateYear_ReturnsGroupedResults()
+    {
+        var results = (from o in Service.Queryable<CustomOpportunity>()
+                       join c in Service.Queryable<CustomContact>()
+                           on o.Contact.Id equals c.CustomContactId
+                       where c.FirstName.Contains("First")
+                       where o.StatusReason == CustomOpportunity.CustomOpportunity_StatusReason.Won
+                       group o by o.ActualCloseDate!.Value.Year into g
+                       orderby g.Key ascending
+                       select new
+                       {
+                           Year = g.Key,
+                           Count = g.Count(),
+                           TotalRevenue = g.Sum(x => x.ActualRevenue),
+                           AverageRevenue = g.Average(x => x.ActualRevenue),
+                           TotalEstimatedRevenue = g.Sum(x => x.EstimatedRevenue),
+                       }).ToList();
+
+        results.Should().NotBeEmpty();
+        results.Should().AllSatisfy(r =>
+        {
+            r.Year.Should().BeGreaterThan(2000);
+            r.Count.Should().BeGreaterThan(0);
+        });
+
+        // Verify ascending order by Year
+        results.Select(r => r.Year).Should().BeInAscendingOrder();
+    }
+
+    [Fact]
+    public void GroupBy_SimpleCount_ReturnsGroupedCounts()
+    {
+        var results = (from a in Service.Queryable<CustomAccount>()
+                       where a.AccountRating_OptionSetValue != null
+                       group a by a.AccountRating_OptionSetValue.Value into g
+                       select new
+                       {
+                           Rating = g.Key,
+                           Count = g.Count(),
+                       }).ToList();
+
+        results.Should().NotBeEmpty();
+        results.Should().AllSatisfy(r =>
+        {
+            r.Count.Should().BeGreaterThan(0);
+        });
+    }
+
 }

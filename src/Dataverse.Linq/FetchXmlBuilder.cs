@@ -124,9 +124,14 @@ internal static class FetchXmlBuilder
 
     private static XElement BuildOrder(FetchOrder order)
     {
-        var element = new XElement("order",
-            new XAttribute("attribute", order.Attribute),
-            new XAttribute("descending", order.Descending ? "true" : "false"));
+        var element = new XElement("order");
+
+        if (order.Alias is not null)
+            element.Add(new XAttribute("alias", order.Alias));
+        else
+            element.Add(new XAttribute("attribute", order.Attribute));
+
+        element.Add(new XAttribute("descending", order.Descending ? "true" : "false"));
 
         if (order.EntityAlias is not null)
             element.Add(new XAttribute("entityname", order.EntityAlias));
@@ -144,6 +149,8 @@ internal static class FetchXmlBuilder
             element.Add(new XAttribute("aggregate", attr.Aggregate));
         if (attr.GroupBy)
             element.Add(new XAttribute("groupby", "true"));
+        if (attr.DateGrouping is not null)
+            element.Add(new XAttribute("dategrouping", attr.DateGrouping));
 
         return element;
     }

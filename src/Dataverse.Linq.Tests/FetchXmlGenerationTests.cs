@@ -2151,4 +2151,69 @@ public class FetchXmlGenerationTests
             </fetch>
             """);
     }
+
+    // -------------------------------------------------------------------------
+    // GroupBy — grouped aggregate queries
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_GroupByWithDateYear_GeneratesGroupedAggregate()
+    {
+        var fetchXml = (from o in _service.Queryable<CustomOpportunity>()
+                        join c in _service.Queryable<CustomContact>()
+                            on o.Contact.Id equals c.CustomContactId
+                        where c.FirstName.Contains("Jane")
+                        where o.StatusReason_OptionSetValue.Value == (int)CustomOpportunity.CustomOpportunity_StatusReason.Won
+                        group o by o.ActualCloseDate.Value.Year into g
+                        orderby g.Key ascending
+                        select new
+                        {
+                            Year = g.Key,
+                            Count = g.Count(),
+                            TotalRevenue = g.Sum(x => x.ActualRevenue),
+                            AverageRevenue = g.Average(x => x.ActualRevenue),
+                            TotalEstimatedRevenue = g.Sum(x => x.EstimatedRevenue),
+                        }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="new_customopportunity">
+                <attribute name="new_actualclosedate" alias="year" groupby="true" dategrouping="year" />
+                <attribute name="new_customopportunityid" alias="count" aggregate="count" />
+                <attribute name="new_actualrevenue" alias="totalrevenue" aggregate="sum" />
+                <attribute name="new_actualrevenue" alias="averagerevenue" aggregate="avg" />
+                <attribute name="new_estimatedrevenue" alias="totalestimatedrevenue" aggregate="sum" />
+                <order alias="year" descending="false" />
+                <filter type="and">
+                  <condition entityname="c" attribute="new_firstname" operator="like" value="%Jane%" />
+                  <condition attribute="statuscode" operator="eq" value="2" />
+                </filter>
+                <link-entity name="new_customcontact" from="new_customcontactid" to="new_contact" alias="c" link-type="inner" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_SimpleGroupBy_GeneratesGroupedAggregate()
+    {
+        var fetchXml = (from a in _service.Queryable<CustomAccount>()
+                        group a by a.AccountRating_OptionSetValue.Value into g
+                        select new
+                        {
+                            Rating = g.Key,
+                            Count = g.Count(),
+                        }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="new_customaccount">
+                <attribute name="new_accountrating" alias="rating" groupby="true" />
+                <attribute name="new_customaccountid" alias="count" aggregate="count" />
+              </entity>
+            </fetch>
+            """);
+    }
 }

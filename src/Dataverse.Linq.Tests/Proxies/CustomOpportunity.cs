@@ -997,7 +997,7 @@ namespace Dataverse.Linq.Tests.Proxies
             /// <para>Value = 2</para>
             /// </summary>
             [Description("Won")]
-            Inactive = 2,
+            Won = 2,
 
             /// <summary>
             /// <para>Lost</para>

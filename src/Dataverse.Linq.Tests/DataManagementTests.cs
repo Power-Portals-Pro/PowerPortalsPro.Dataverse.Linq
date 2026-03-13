@@ -17,11 +17,13 @@ public class DataManagementTests : IntegrationTestBase
     {
         await DeleteAllAsync(CustomAccount.LogicalName);
         await DeleteAllAsync(CustomContact.LogicalName);
+        await DeleteAllAsync(CustomOpportunity.LogicalName);
 
         var accountIds = await SeedAccountsAsync(100);
         var contactIds = await SeedContactsAsync(accountIds);
         await LinkContactsToAccountsAsync(accountIds, contactIds);
         await SeedAccountsWithoutContactsAsync(50);
+        await SeedOpportunitiesAsync(contactIds);
     }
 
     //[Fact]
@@ -30,6 +32,7 @@ public class DataManagementTests : IntegrationTestBase
     {
         await DeleteAllAsync(CustomAccount.LogicalName);
         await DeleteAllAsync(CustomContact.LogicalName);
+        await DeleteAllAsync(CustomOpportunity.LogicalName);
     }
 
     // -------------------------------------------------------------------------
@@ -186,6 +189,85 @@ public class DataManagementTests : IntegrationTestBase
         }
 
         await Service.ExecuteAsync(requests);
+    }
+
+    private static readonly CustomOpportunity.CustomOpportunity_StatusReason[] OpportunityStatuses =
+        [CustomOpportunity.CustomOpportunity_StatusReason.Active,
+         CustomOpportunity.CustomOpportunity_StatusReason.Won,
+         CustomOpportunity.CustomOpportunity_StatusReason.Lost];
+
+    private async Task SeedOpportunitiesAsync(List<Guid> contactIds, int count = 100)
+    {
+        var total = Math.Min(count, contactIds.Count);
+
+        // Step 1: Create all opportunities as Active
+        var createRequests = new ExecuteMultipleRequest
+        {
+            Settings = new ExecuteMultipleSettings { ContinueOnError = false, ReturnResponses = true },
+            Requests = new OrganizationRequestCollection()
+        };
+
+        var targetStatuses = new List<CustomOpportunity.CustomOpportunity_StatusReason>();
+
+        for (var i = 0; i < total; i++)
+        {
+            var statusReason = OpportunityStatuses[i % 3];
+            targetStatuses.Add(statusReason);
+
+            var opportunity = new CustomOpportunity
+            {
+                Name = $"Opportunity {i + 1:D3}",
+                Contact = new EntityReference(CustomContact.LogicalName, contactIds[i]),
+                ActualCloseDate = new DateTime(2020 + (i % 5), (i % 12) + 1, (i % 28) + 1),
+                ActualRevenueMoney = new Money((i + 1) * 1000m + 500m),
+                EstimatedRevenueMoney = new Money((i + 1) * 1500m + 250m),
+            };
+
+            createRequests.Requests.Add(new CreateRequest { Target = opportunity });
+        }
+
+        var createResults = (ExecuteMultipleResponse)await Service.ExecuteAsync(createRequests);
+        if (createResults.Responses.Any(r => r.Fault != null))
+        {
+            var errors = createResults.Responses.Where(r => r.Fault != null)
+                .Select(r => $"Request {r.RequestIndex}: {r.Fault.Message}");
+            throw new Exception($"Errors occurred during opportunity creation:\n{(string.Join("\n", errors))}");
+        }
+
+        // Step 2: Update non-Active records to their target state
+        var updateRequests = new ExecuteMultipleRequest
+        {
+            Settings = new ExecuteMultipleSettings { ContinueOnError = false, ReturnResponses = false },
+            Requests = new OrganizationRequestCollection()
+        };
+
+        for (var i = 0; i < total; i++)
+        {
+            var statusReason = targetStatuses[i];
+            if (statusReason == CustomOpportunity.CustomOpportunity_StatusReason.Active)
+                continue;
+
+            var id = ((CreateResponse)createResults.Responses[i].Response).id;
+            var update = new CustomOpportunity
+            {
+                Id = id,
+                Status = CustomOpportunity.CustomOpportunity_Status.Inactive,
+                StatusReason = statusReason,
+            };
+
+            updateRequests.Requests.Add(new UpdateRequest { Target = update });
+        }
+
+        if (updateRequests.Requests.Count > 0)
+        {
+            var updateResults = (ExecuteMultipleResponse)await Service.ExecuteAsync(updateRequests);
+            if (updateResults.Responses.Any(r => r.Fault != null))
+            {
+                var errors = updateResults.Responses.Where(r => r.Fault != null)
+                    .Select(r => $"Request {r.RequestIndex}: {r.Fault.Message}");
+                throw new Exception($"Errors occurred during opportunity state update:\n{(string.Join("\n", errors))}");
+            }
+        }
     }
 
     // -------------------------------------------------------------------------

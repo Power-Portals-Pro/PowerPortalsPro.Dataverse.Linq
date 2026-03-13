@@ -9,4 +9,5 @@ internal sealed class FetchAttribute
     public string? Alias { get; set; }
     public string? Aggregate { get; set; }
     public bool GroupBy { get; set; }
+    public string? DateGrouping { get; set; }
 }
