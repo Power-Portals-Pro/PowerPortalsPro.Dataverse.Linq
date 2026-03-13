@@ -126,7 +126,14 @@
       "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"FullyQualifiedName~GroupBy\" 2>&1 | tail -5)",
       "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet build src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --no-restore -q 2>&1 | tail -5)",
       "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet build src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj -q 2>&1 | tail -5)",
-      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet build src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj 2>&1 | grep -E \"error|Error\" | head -10)"
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet build src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj 2>&1 | grep -E \"error|Error\" | head -10)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet build src/XrmToolkit/Dataverse.Linq/Dataverse.Linq.csproj -q 2>&1 | tail -5)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"ClassName~FetchXmlGenerationTests\" --no-restore -q 2>&1 | tail -10)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"ClassName~FetchXmlGenerationTests\" -q 2>&1 | tail -10)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet clean src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj -q 2>&1 && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"ClassName~FetchXmlGenerationTests\" -q 2>&1 | tail -10)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"ClassName~FetchXmlGenerationTests\" 2>&1 | grep -E \"\\(Passed|Failed|Total|Error\\)\" | tail -10)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"ClassName~FetchXmlGenerationTests\" 2>&1 | tail -20)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"FullyQualifiedName~FetchXml\" --list-tests 2>&1 | tail -10)"
     ]
   }
 }

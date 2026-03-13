@@ -90,6 +90,16 @@ internal static class FetchXmlQueryTranslator
         ["DoesNotContainValues"] = ConditionOperator.DoesNotContainValues,
     };
 
+    private static readonly Dictionary<string, string> AggregateFunctionMap = new()
+    {
+        [nameof(Queryable.Count)] = "count",
+        [nameof(Queryable.LongCount)] = "count",
+        [nameof(Queryable.Sum)] = "sum",
+        [nameof(Queryable.Average)] = "avg",
+        [nameof(Queryable.Min)] = "min",
+        [nameof(Queryable.Max)] = "max",
+    };
+
     private static bool TryGetExtensionOperator(Type? declaringType, string methodName, out ConditionOperator op)
     {
         if (declaringType == typeof(Extensions.DateTimeExtensions))
@@ -953,47 +963,14 @@ internal static class FetchXmlQueryTranslator
     private static ResolvedAttribute? ResolveJoinAttribute(
         Expression expr, Dictionary<string, JoinEntityInfo> joinMappings)
     {
-        // x.entity.Property (property with [AttributeLogicalName])
-        if (expr is MemberExpression { Member: PropertyInfo prop } me
-            && me.Expression is MemberExpression { Expression: ParameterExpression } entityAccess
+        var result = ResolveAttributeAccess(expr);
+        if (result is not { } access)
+            return null;
+
+        if (access.EntityExpression is MemberExpression { Expression: ParameterExpression } entityAccess
             && joinMappings.TryGetValue(entityAccess.Member.Name, out var mapping))
         {
-            var attrName = prop.GetCustomAttribute<AttributeLogicalNameAttribute>()?.LogicalName;
-            if (attrName is not null)
-                return new ResolvedAttribute(attrName, mapping.LinkAlias);
-        }
-
-        // x.entity.RefProp.Id (EntityReference.Id through TI)
-        if (expr is MemberExpression { Member.Name: "Id" } idExpr
-            && idExpr.Expression is MemberExpression { Member: PropertyInfo refProp } refExpr
-            && refExpr.Expression is MemberExpression { Expression: ParameterExpression } entityAccess2
-            && joinMappings.TryGetValue(entityAccess2.Member.Name, out var mapping2))
-        {
-            var attrName = refProp.GetCustomAttribute<AttributeLogicalNameAttribute>()?.LogicalName;
-            if (attrName is not null)
-                return new ResolvedAttribute(attrName, mapping2.LinkAlias);
-        }
-
-        // x.entity.MoneyProp.Value or x.entity.OptionSetProp.Value through TI
-        if (expr is MemberExpression { Member: { Name: "Value", DeclaringType: var valueType } } valueExpr
-            && (valueType == typeof(Money) || valueType == typeof(OptionSetValue))
-            && valueExpr.Expression is MemberExpression { Member: PropertyInfo containerProp } containerExpr
-            && containerExpr.Expression is MemberExpression { Expression: ParameterExpression } entityAccess4
-            && joinMappings.TryGetValue(entityAccess4.Member.Name, out var mapping4))
-        {
-            var attrName = containerProp.GetCustomAttribute<AttributeLogicalNameAttribute>()?.LogicalName;
-            if (attrName is not null)
-                return new ResolvedAttribute(attrName, mapping4.LinkAlias);
-        }
-
-        // x.entity.GetAttributeValue<T>("name")
-        if (expr is MethodCallExpression { Method.Name: nameof(Entity.GetAttributeValue) } getAttr
-            && getAttr.Arguments.Count == 1
-            && getAttr.Arguments[0] is ConstantExpression { Value: string constName }
-            && getAttr.Object is MemberExpression { Expression: ParameterExpression } entityAccess3
-            && joinMappings.TryGetValue(entityAccess3.Member.Name, out var mapping3))
-        {
-            return new ResolvedAttribute(constName, mapping3.LinkAlias);
+            return new ResolvedAttribute(access.AttributeName, mapping.LinkAlias);
         }
 
         return null;
@@ -1080,15 +1057,7 @@ internal static class FetchXmlQueryTranslator
             _ => throw new NotSupportedException($"Unsupported aggregate method '{methodName}'.")
         };
 
-        var fetchXmlFunction = ctx.Query.TerminalOperator switch
-        {
-            QueryTerminalOperator.Min => "min",
-            QueryTerminalOperator.Max => "max",
-            QueryTerminalOperator.Sum => "sum",
-            QueryTerminalOperator.Average => "avg",
-            QueryTerminalOperator.Count or QueryTerminalOperator.LongCount => "count",
-            _ => throw new NotSupportedException()
-        };
+        var fetchXmlFunction = AggregateFunctionMap[methodName];
 
         // Recurse into the source expression
         TranslateCore(call.Arguments[0], ctx);
@@ -1312,16 +1281,8 @@ internal static class FetchXmlQueryTranslator
         MethodCallExpression mc, TranslationContext ctx)
     {
         var methodName = mc.Method.Name;
-        var aggregateFunc = methodName switch
-        {
-            "Count" => "count",
-            "LongCount" => "count",
-            "Sum" => "sum",
-            "Average" => "avg",
-            "Min" => "min",
-            "Max" => "max",
-            _ => throw new NotSupportedException($"Unsupported group aggregate '{methodName}'.")
-        };
+        if (!AggregateFunctionMap.TryGetValue(methodName, out var aggregateFunc))
+            throw new NotSupportedException($"Unsupported group aggregate '{methodName}'.");
 
         // Count() / LongCount() with no selector — use entity primary key
         if (methodName is "Count" or "LongCount" && mc.Arguments.Count == 1)
@@ -1770,12 +1731,13 @@ internal static class FetchXmlQueryTranslator
             : (LambdaExpression)expr;
 
     /// <summary>
-    /// Resolves an expression to a Dataverse attribute logical name.
-    /// Handles direct property access (<c>a.AccountId</c>), two-level
-    /// EntityReference access (<c>c.ParentAccount.Id</c>), and
-    /// <see cref="Entity.GetAttributeValue{T}"/> calls with a string-constant argument.
+    /// Resolves an expression to an attribute name and the entity expression it's accessed on.
+    /// Handles direct property access, EntityReference.Id, Money.Value, OptionSetValue.Value,
+    /// and <see cref="Entity.GetAttributeValue{T}"/> calls with a string-constant argument.
+    /// Used by both <see cref="GetAttributeName"/> (simple) and
+    /// <see cref="ResolveJoinAttribute"/> (through transparent identifiers).
     /// </summary>
-    private static string? GetAttributeName(Expression expr)
+    private static (string AttributeName, Expression EntityExpression)? ResolveAttributeAccess(Expression expr)
     {
         if (expr is UnaryExpression { NodeType: ExpressionType.Convert } convert)
             expr = convert.Operand;
@@ -1783,46 +1745,48 @@ internal static class FetchXmlQueryTranslator
         // Entity.GetAttributeValue<T>("name")
         if (expr is MethodCallExpression { Method.Name: nameof(Entity.GetAttributeValue) } getAttr
             && getAttr.Arguments.Count == 1
-            && getAttr.Arguments[0] is ConstantExpression { Value: string constName })
+            && getAttr.Arguments[0] is ConstantExpression { Value: string constName }
+            && getAttr.Object is not null)
         {
-            return constName;
+            return (constName, getAttr.Object);
         }
 
-        if (expr is not MemberExpression memberExpr)
+        if (expr is not MemberExpression memberExpr || memberExpr.Expression is null)
             return null;
 
-        // Direct property: a.AccountId → [AttributeLogicalName]
+        // Direct property with [AttributeLogicalName]
         if (memberExpr.Member is PropertyInfo directProp)
         {
             var attrName = directProp.GetCustomAttribute<AttributeLogicalNameAttribute>()?.LogicalName;
-            if (attrName is not null) return attrName;
+            if (attrName is not null)
+                return (attrName, memberExpr.Expression);
         }
 
-        // Two-level EntityReference access: c.ParentAccount.Id → [AttributeLogicalName] on ParentAccount
-        if (memberExpr.Member.Name == nameof(Entity.Id) &&
-            memberExpr.Expression is MemberExpression { Member: PropertyInfo refProp })
+        // Two-level: unwrap .Id (EntityReference) or .Value (Money/OptionSetValue)
+        // to resolve the [AttributeLogicalName] on the parent property
+        if (memberExpr.Expression is MemberExpression { Member: PropertyInfo parentProp, Expression: { } parentContainer })
         {
-            return refProp.GetCustomAttribute<AttributeLogicalNameAttribute>()?.LogicalName;
-        }
+            var isUnwrap = memberExpr.Member.Name switch
+            {
+                "Id" => true,
+                "Value" when memberExpr.Member.DeclaringType == typeof(Money)
+                          || memberExpr.Member.DeclaringType == typeof(OptionSetValue) => true,
+                _ => false
+            };
 
-        // Two-level Money access: a.CreditLimitMoney.Value → [AttributeLogicalName] on CreditLimitMoney
-        if (memberExpr.Member.Name == nameof(Money.Value) &&
-            memberExpr.Member.DeclaringType == typeof(Money) &&
-            memberExpr.Expression is MemberExpression { Member: PropertyInfo moneyProp })
-        {
-            return moneyProp.GetCustomAttribute<AttributeLogicalNameAttribute>()?.LogicalName;
-        }
-
-        // Two-level OptionSetValue access: a.StatusReason_OptionSetValue.Value → [AttributeLogicalName]
-        if (memberExpr.Member.Name == nameof(OptionSetValue.Value) &&
-            memberExpr.Member.DeclaringType == typeof(OptionSetValue) &&
-            memberExpr.Expression is MemberExpression { Member: PropertyInfo optionProp })
-        {
-            return optionProp.GetCustomAttribute<AttributeLogicalNameAttribute>()?.LogicalName;
+            if (isUnwrap)
+            {
+                var attrName = parentProp.GetCustomAttribute<AttributeLogicalNameAttribute>()?.LogicalName;
+                if (attrName is not null)
+                    return (attrName, parentContainer);
+            }
         }
 
         return null;
     }
+
+    private static string? GetAttributeName(Expression expr) =>
+        ResolveAttributeAccess(expr)?.AttributeName;
 
     // -------------------------------------------------------------------------
     // Translation context — carries state across recursive operator processing
