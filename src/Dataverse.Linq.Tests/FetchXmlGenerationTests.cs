@@ -1131,4 +1131,153 @@ public class FetchXmlGenerationTests
             </fetch>
             """);
     }
+
+    // -------------------------------------------------------------------------
+    // Where — Hierarchy operators
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_WhereAbove_GeneratesAboveFilter()
+    {
+        var parentId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Where(a => a.CustomAccountId.Above(parentId))
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_customaccountid" operator="above" value="11111111-1111-1111-1111-111111111111" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WhereAboveOrEqual_GeneratesEqOrAboveFilter()
+    {
+        var parentId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Where(a => a.CustomAccountId.AboveOrEqual(parentId))
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_customaccountid" operator="eq-or-above" value="11111111-1111-1111-1111-111111111111" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WhereUnder_GeneratesUnderFilter()
+    {
+        var parentId = Guid.Parse("22222222-2222-2222-2222-222222222222");
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Where(a => a.CustomAccountId.Under(parentId))
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_customaccountid" operator="under" value="22222222-2222-2222-2222-222222222222" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WhereUnderOrEqual_GeneratesEqOrUnderFilter()
+    {
+        var parentId = Guid.Parse("22222222-2222-2222-2222-222222222222");
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Where(a => a.CustomAccountId.UnderOrEqual(parentId))
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_customaccountid" operator="eq-or-under" value="22222222-2222-2222-2222-222222222222" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WhereNotUnder_GeneratesNotUnderFilter()
+    {
+        var parentId = Guid.Parse("33333333-3333-3333-3333-333333333333");
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Where(a => a.CustomAccountId.NotUnder(parentId))
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_customaccountid" operator="not-under" value="33333333-3333-3333-3333-333333333333" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WhereEqualUserOrUserHierarchy_GeneratesFilter()
+    {
+        var fetchXml = _service.Queryable<CustomContact>()
+            .Where(c => c.CustomContactId.EqualUserOrUserHierarchy())
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customcontact">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_customcontactid" operator="eq-useroruserhierarchy" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WhereEqualUserOrUserHierarchyAndTeams_GeneratesFilter()
+    {
+        var fetchXml = _service.Queryable<CustomContact>()
+            .Where(c => c.CustomContactId.EqualUserOrUserHierarchyAndTeams())
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customcontact">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_customcontactid" operator="eq-useroruserhierarchyandteams" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
 }

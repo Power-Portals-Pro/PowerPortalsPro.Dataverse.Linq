@@ -64,6 +64,27 @@ internal static class FetchXmlQueryTranslator
         ["NotBetween"] = ConditionOperator.NotBetween,
     };
 
+    private static readonly Dictionary<string, ConditionOperator> HierarchyOperatorMap = new()
+    {
+        ["Above"] = ConditionOperator.Above,
+        ["AboveOrEqual"] = ConditionOperator.AboveOrEqual,
+        ["Under"] = ConditionOperator.Under,
+        ["UnderOrEqual"] = ConditionOperator.UnderOrEqual,
+        ["NotUnder"] = ConditionOperator.NotUnder,
+        ["EqualUserOrUserHierarchy"] = ConditionOperator.EqualUserOrUserHierarchy,
+        ["EqualUserOrUserHierarchyAndTeams"] = ConditionOperator.EqualUserOrUserHierarchyAndTeams,
+    };
+
+    private static bool TryGetExtensionOperator(Type? declaringType, string methodName, out ConditionOperator op)
+    {
+        if (declaringType == typeof(Extensions.DateTimeExtensions))
+            return DateTimeOperatorMap.TryGetValue(methodName, out op);
+        if (declaringType == typeof(Extensions.HierarchyExtensions))
+            return HierarchyOperatorMap.TryGetValue(methodName, out op);
+        op = default;
+        return false;
+    }
+
     /// <summary>
     /// Entry point. Translates the given expression into a <see cref="FetchXmlQuery"/>.
     /// </summary>
@@ -328,10 +349,9 @@ internal static class FetchXmlQueryTranslator
                 return;
             }
 
-            // DateTime extension methods → date/time condition operators
+            // Extension method operators (DateTime, hierarchy) → condition operators
             case MethodCallExpression { Method.DeclaringType: var declType } dateCall
-                when declType == typeof(Extensions.DateTimeExtensions)
-                    && DateTimeOperatorMap.TryGetValue(dateCall.Method.Name, out var dateOp):
+                when TryGetExtensionOperator(declType, dateCall.Method.Name, out var dateOp):
             {
                 var resolved = ResolveMethodAttribute(dateCall, ctx);
                 var condition = new FetchCondition

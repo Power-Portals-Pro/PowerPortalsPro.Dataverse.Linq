@@ -53,7 +53,8 @@
       "Bash(cd \"D:/Code/XrmToolkit - Dev/src/XrmToolkit/Dataverse.Linq.Tests\" && dotnet test --filter \"FetchXmlGeneration\" --no-restore 2>&1 | tail -10)",
       "Bash(cd \"D:/Code/XrmToolkit - Dev/src/XrmToolkit/Dataverse.Linq.Tests\" && dotnet test --filter \"ToFetchXml_WhereOn_GeneratesOnFilter\" --no-restore 2>&1 | grep -A 5 \"Error Message\")",
       "Bash(cd \"D:/Code/XrmToolkit - Dev/src/XrmToolkit/Dataverse.Linq.Tests\" && dotnet test --filter \"ToFetchXml_WhereOn_GeneratesOnFilter\" --no-restore 2>&1 | grep -A 3 \"Error Message\")",
-      "Bash(cd \"D:/Code/XrmToolkit - Dev/src/XrmToolkit/Dataverse.Linq.Tests\" && dotnet test --filter \"ToFetchXml_WhereOn_GeneratesOnFilter\" --no-restore 2>&1 | grep \"actual\\\\|expected\")"
+      "Bash(cd \"D:/Code/XrmToolkit - Dev/src/XrmToolkit/Dataverse.Linq.Tests\" && dotnet test --filter \"ToFetchXml_WhereOn_GeneratesOnFilter\" --no-restore 2>&1 | grep \"actual\\\\|expected\")",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev/src/XrmToolkit/Dataverse.Linq.Tests\" && dotnet test --filter \"WhereUnderOrEqual\" --no-restore 2>&1 | grep -A 3 \"Error Message\")"
     ]
   }
 }
