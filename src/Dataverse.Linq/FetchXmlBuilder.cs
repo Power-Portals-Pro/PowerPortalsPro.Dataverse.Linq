@@ -5,75 +5,92 @@ namespace Dataverse.Linq;
 
 internal static class FetchXmlBuilder
 {
-    internal static string Build(string entityLogicalName, IReadOnlyList<string>? columns = null)
-    {
-        var entityElement = new XElement("entity", new XAttribute("name", entityLogicalName));
+    internal static string Build(string entityName, IReadOnlyList<string>? columns = null) =>
+        BuildFetchXml(entityName, columns, link: null, nullFilter: null);
 
+    internal static string BuildJoin(JoinInfo join) =>
+        BuildFetchXml(
+            join.OuterEntityLogicalName,
+            join.OuterColumns,
+            new LinkSpec(join.InnerEntityLogicalName, join.InnerKeyAttribute, join.OuterKeyAttribute, join.InnerAlias, "inner", join.InnerColumns),
+            nullFilter: null);
+
+    internal static string BuildLeftJoin(LeftJoinInfo join) =>
+        BuildFetchXml(
+            join.OuterEntityLogicalName,
+            join.OuterColumns,
+            new LinkSpec(join.InnerEntityLogicalName, join.InnerKeyAttribute, join.OuterKeyAttribute, join.InnerAlias, "outer"),
+            join.FilterWhereInnerIsNull
+                ? new NullFilterSpec(join.InnerAlias, join.InnerEntityLogicalName + "id")
+                : null);
+
+    // -------------------------------------------------------------------------
+    // Core builder
+    // -------------------------------------------------------------------------
+
+    private static string BuildFetchXml(
+        string entityName,
+        IReadOnlyList<string>? columns,
+        LinkSpec? link,
+        NullFilterSpec? nullFilter)
+    {
+        var entity = CreateEntityElement(entityName, columns);
+
+        if (link is not null)
+            entity.Add(CreateLinkEntityElement(link));
+
+        if (nullFilter is not null)
+            entity.Add(CreateNullFilterElement(nullFilter));
+
+        return new XElement("fetch", new XAttribute("mapping", "logical"), entity).ToString();
+    }
+
+    // -------------------------------------------------------------------------
+    // Element builders
+    // -------------------------------------------------------------------------
+
+    private static XElement CreateEntityElement(string name, IReadOnlyList<string>? columns)
+    {
+        var element = new XElement("entity", new XAttribute("name", name));
+        AddColumns(element, columns);
+        return element;
+    }
+
+    private static XElement CreateLinkEntityElement(LinkSpec link)
+    {
+        var element = new XElement("link-entity",
+            new XAttribute("name", link.Name),
+            new XAttribute("from", link.From),
+            new XAttribute("to", link.To),
+            new XAttribute("alias", link.Alias),
+            new XAttribute("link-type", link.LinkType));
+        AddColumns(element, link.Columns);
+        return element;
+    }
+
+    private static XElement CreateNullFilterElement(NullFilterSpec filter) =>
+        new XElement("filter",
+            new XElement("condition",
+                new XAttribute("entityname", filter.Alias),
+                new XAttribute("attribute", filter.Attribute),
+                new XAttribute("operator", "null")));
+
+    private static void AddColumns(XElement element, IReadOnlyList<string>? columns)
+    {
         if (columns is { Count: > 0 })
-            foreach (var column in columns)
-                entityElement.Add(new XElement("attribute", new XAttribute("name", column)));
+            foreach (var col in columns)
+                element.Add(new XElement("attribute", new XAttribute("name", col)));
         else
-            entityElement.Add(new XElement("all-attributes"));
-
-        return new XElement("fetch", new XAttribute("mapping", "logical"), entityElement).ToString();
-    }
-
-    internal static string BuildJoin(JoinInfo join)
-    {
-        var entityElement = new XElement("entity", new XAttribute("name", join.OuterEntityLogicalName));
-
-        if (join.OuterColumns is { Count: > 0 })
-            foreach (var col in join.OuterColumns)
-                entityElement.Add(new XElement("attribute", new XAttribute("name", col)));
-        else
-            entityElement.Add(new XElement("all-attributes"));
-
-        var linkElement = new XElement("link-entity",
-            new XAttribute("name", join.InnerEntityLogicalName),
-            new XAttribute("from", join.InnerKeyAttribute),
-            new XAttribute("to", join.OuterKeyAttribute),
-            new XAttribute("alias", join.InnerAlias),
-            new XAttribute("link-type", "inner"));
-
-        if (join.InnerColumns is { Count: > 0 })
-            foreach (var col in join.InnerColumns)
-                linkElement.Add(new XElement("attribute", new XAttribute("name", col)));
-        else
-            linkElement.Add(new XElement("all-attributes"));
-
-        entityElement.Add(linkElement);
-
-        return new XElement("fetch", new XAttribute("mapping", "logical"), entityElement).ToString();
-    }
-
-    internal static string BuildLeftJoin(LeftJoinInfo join)
-    {
-        var entityElement = new XElement("entity", new XAttribute("name", join.OuterEntityLogicalName));
-
-        if (join.OuterColumns is { Count: > 0 })
-            foreach (var col in join.OuterColumns)
-                entityElement.Add(new XElement("attribute", new XAttribute("name", col)));
-        else
-            entityElement.Add(new XElement("all-attributes"));
-
-        var linkElement = new XElement("link-entity",
-            new XAttribute("name", join.InnerEntityLogicalName),
-            new XAttribute("from", join.InnerKeyAttribute),
-            new XAttribute("to", join.OuterKeyAttribute),
-            new XAttribute("alias", join.InnerAlias),
-            new XAttribute("link-type", "outer"));
-
-        entityElement.Add(linkElement);
-
-        if (join.FilterWhereInnerIsNull)
-        {
-            entityElement.Add(new XElement("filter",
-                new XElement("condition",
-                    new XAttribute("entityname", join.InnerAlias),
-                    new XAttribute("attribute", join.InnerEntityLogicalName + "id"),
-                    new XAttribute("operator", "null"))));
-        }
-
-        return new XElement("fetch", new XAttribute("mapping", "logical"), entityElement).ToString();
+            element.Add(new XElement("all-attributes"));
     }
 }
+
+internal sealed record LinkSpec(
+    string Name,
+    string From,
+    string To,
+    string Alias,
+    string LinkType,
+    IReadOnlyList<string>? Columns = null);
+
+internal sealed record NullFilterSpec(string Alias, string Attribute);
