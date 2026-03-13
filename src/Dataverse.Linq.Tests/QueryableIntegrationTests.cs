@@ -5,15 +5,9 @@ using Microsoft.PowerPlatform.Dataverse.Client;
 
 namespace Dataverse.Linq.Tests;
 
-[CollectionDefinition(nameof(DataSeedFixture))]
-public class DataSeedCollection : ICollectionFixture<DataSeedFixture> { }
-
-[Collection(nameof(DataSeedFixture))]
 public class QueryableIntegrationTests : IntegrationTestBase
 {
     private ServiceClient Service => ServiceProvider.GetRequiredService<ServiceClient>();
-
-    public QueryableIntegrationTests(DataSeedFixture _) { }
 
     // -------------------------------------------------------------------------
     // Basic retrieval
@@ -156,5 +150,59 @@ public class QueryableIntegrationTests : IntegrationTestBase
                              select new { a.Name, c.FirstName, c.LastName }).ToListAsync();
 
         results.Should().HaveCount(500);
+    }
+
+    [Fact]
+    public async Task ToListAsync_WithJoin_AccountNameIsPopulatedOnAllRows()
+    {
+        var results = await (from a in Service.Queryable<CustomAccount>()
+                             join c in Service.Queryable<CustomContact>()
+                                 on a.AccountId equals c.ParentAccountId
+                             select new { a.Name, c.FirstName, c.LastName }).ToListAsync();
+
+        results.Should().AllSatisfy(r => r.Name.Should().NotBeNullOrEmpty());
+    }
+
+    [Fact]
+    public async Task ToListAsync_WithJoin_ContactNamesArePopulatedOnAllRows()
+    {
+        var results = await (from a in Service.Queryable<CustomAccount>()
+                             join c in Service.Queryable<CustomContact>()
+                                 on a.AccountId equals c.ParentAccountId
+                             select new { a.Name, c.FirstName, c.LastName }).ToListAsync();
+
+        results.Should().AllSatisfy(r =>
+        {
+            r.FirstName.Should().NotBeNullOrEmpty();
+            r.LastName.Should().NotBeNullOrEmpty();
+        });
+    }
+
+    [Fact]
+    public async Task ToListAsync_WithJoin_EachAccountAppearsExactly5Times()
+    {
+        var results = await (from a in Service.Queryable<CustomAccount>()
+                             join c in Service.Queryable<CustomContact>()
+                                 on a.AccountId equals c.ParentAccountId
+                             select new { a.Name, c.FirstName, c.LastName }).ToListAsync();
+
+        results.GroupBy(r => r.Name)
+               .Should().AllSatisfy(g => g.Should().HaveCount(5));
+    }
+
+    [Fact]
+    public async Task ToListAsync_WithJoin_NamesMatchSeedDataPattern()
+    {
+        var results = await (from a in Service.Queryable<CustomAccount>()
+                             join c in Service.Queryable<CustomContact>()
+                                 on a.AccountId equals c.ParentAccountId
+                             select new { a.Name, c.FirstName, c.LastName }).ToListAsync();
+
+        results.Should().AllSatisfy(r =>
+        {
+            r.Name.Should().StartWith("Custom Account");
+            r.FirstName.Should().StartWith("First");
+            r.LastName.Should().StartWith("Last");
+        });
     }
 }

@@ -1,5 +1,5 @@
 using Dataverse.Linq.Tests.ProxyClasses;
-using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
@@ -7,14 +7,13 @@ using Microsoft.Xrm.Sdk.Query;
 
 namespace Dataverse.Linq.Tests;
 
-public class DataSeedFixture : IAsyncLifetime
+public class DataManagementTests : IntegrationTestBase
 {
-    private ServiceClient _service = null!;
+    private ServiceClient Service => ServiceProvider.GetRequiredService<ServiceClient>();
 
-    public async Task InitializeAsync()
+    [Fact(Skip = "Run on demand only")]
+    public async Task SeedData()
     {
-        _service = CreateServiceClient();
-
         await DeleteAllAsync(CustomAccount.LogicalName);
         await DeleteAllAsync(CustomContact.LogicalName);
 
@@ -23,7 +22,12 @@ public class DataSeedFixture : IAsyncLifetime
         await LinkContactsToAccountsAsync(accountIds, contactIds);
     }
 
-    public Task DisposeAsync() => Task.CompletedTask;
+    [Fact(Skip = "Run on demand only")]
+    public async Task DeleteAllData()
+    {
+        await DeleteAllAsync(CustomAccount.LogicalName);
+        await DeleteAllAsync(CustomContact.LogicalName);
+    }
 
     // -------------------------------------------------------------------------
     // Seeding
@@ -47,7 +51,7 @@ public class DataSeedFixture : IAsyncLifetime
             requests.Requests.Add(new CreateRequest { Target = account });
         }
 
-        var response = (ExecuteMultipleResponse)await _service.ExecuteAsync(requests);
+        var response = (ExecuteMultipleResponse)await Service.ExecuteAsync(requests);
 
         return response.Responses
             .Select(r => ((CreateResponse)r.Response).id)
@@ -78,7 +82,7 @@ public class DataSeedFixture : IAsyncLifetime
             }
         }
 
-        var response = (ExecuteMultipleResponse)await _service.ExecuteAsync(requests);
+        var response = (ExecuteMultipleResponse)await Service.ExecuteAsync(requests);
 
         return response.Responses
             .Select(r => ((CreateResponse)r.Response).id)
@@ -89,7 +93,6 @@ public class DataSeedFixture : IAsyncLifetime
     {
         const int contactsPerAccount = 5;
 
-        // Set the first contact of each account's group as its primary contact
         var requests = new ExecuteMultipleRequest
         {
             Settings = new ExecuteMultipleSettings { ContinueOnError = false, ReturnResponses = false },
@@ -105,11 +108,11 @@ public class DataSeedFixture : IAsyncLifetime
             requests.Requests.Add(new UpdateRequest { Target = account });
         }
 
-        await _service.ExecuteAsync(requests);
+        await Service.ExecuteAsync(requests);
     }
 
     // -------------------------------------------------------------------------
-    // Cleanup
+    // Deletion
     // -------------------------------------------------------------------------
 
     private async Task DeleteAllAsync(string entityLogicalName)
@@ -130,7 +133,7 @@ public class DataSeedFixture : IAsyncLifetime
             foreach (var id in batch)
                 requests.Requests.Add(new DeleteRequest { Target = new EntityReference(entityLogicalName, id) });
 
-            await _service.ExecuteAsync(requests);
+            await Service.ExecuteAsync(requests);
         }
     }
 
@@ -145,7 +148,7 @@ public class DataSeedFixture : IAsyncLifetime
 
         while (true)
         {
-            var response = await _service.RetrieveMultipleAsync(query);
+            var response = await Service.RetrieveMultipleAsync(query);
             ids.AddRange(response.Entities.Select(e => e.Id));
 
             if (!response.MoreRecords) break;
@@ -154,39 +157,5 @@ public class DataSeedFixture : IAsyncLifetime
         }
 
         return ids;
-    }
-
-    // -------------------------------------------------------------------------
-    // Service client
-    // -------------------------------------------------------------------------
-
-    private static ServiceClient CreateServiceClient()
-    {
-        var config = new ConfigurationBuilder()
-            .AddJsonFile($"{Path.GetDirectoryName(typeof(DataSeedFixture).Assembly.Location)}\\appsettings.json")
-            .AddUserSecrets(typeof(DataSeedFixture).Assembly)
-            .Build();
-
-        var orgUrl = config.GetValue<string>("D365:Url")
-            ?? throw new Exception("D365:Url is required in configuration.");
-
-        var orgUri = new Uri(orgUrl);
-        var rootOrgUrl = $"{orgUri.Scheme}://{orgUri.Authority}";
-        var username = config.GetValue<string>("D365:Username");
-        var password = config.GetValue<string>("D365:Password");
-        var clientId = config.GetValue<string>("D365:ClientId");
-        var secret = config.GetValue<string>("D365:Secret");
-
-        var connectionString = !string.IsNullOrWhiteSpace(username)
-            ? $"AuthType='OAuth';ServiceUri='{rootOrgUrl}';Username='{username}';Password='{password}'"
-            : $"AuthType='ClientSecret';ServiceUri='{rootOrgUrl}';ClientId='{clientId}';ClientSecret='{secret}'";
-
-        var client = new ServiceClient(connectionString) { EnableAffinityCookie = false };
-
-        var impersonatedUserId = config.GetValue<Guid?>("D365:ImpersonatedUserId");
-        if (impersonatedUserId.HasValue)
-            client.CallerId = impersonatedUserId.Value;
-
-        return client;
     }
 }
