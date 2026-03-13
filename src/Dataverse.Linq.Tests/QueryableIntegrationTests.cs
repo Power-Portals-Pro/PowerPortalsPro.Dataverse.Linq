@@ -124,4 +124,37 @@ public class QueryableIntegrationTests : IntegrationTestBase
 
         results.Should().AllSatisfy(r => r.PrimaryContact.Should().NotBeNull());
     }
+
+    // -------------------------------------------------------------------------
+    // Joins
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ToListAsync_WithJoin_ReturnsProjectedValuesFromBothEntities()
+    {
+        var results = await (from a in Service.Queryable<CustomAccount>()
+                             join c in Service.Queryable<CustomContact>()
+                                 on a.AccountId equals c.ParentAccountId
+                             select new { a.Name, c.FirstName, c.LastName }).ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Should().AllSatisfy(r =>
+        {
+            r.Should().NotBeNull();
+            r.GetType().GetProperties().Should().Contain(p => p.Name == nameof(r.Name));
+            r.GetType().GetProperties().Should().Contain(p => p.Name == nameof(r.FirstName));
+            r.GetType().GetProperties().Should().Contain(p => p.Name == nameof(r.LastName));
+        });
+    }
+
+    [Fact]
+    public async Task ToListAsync_WithJoin_Returns500Records()
+    {
+        var results = await (from a in Service.Queryable<CustomAccount>()
+                             join c in Service.Queryable<CustomContact>()
+                                 on a.AccountId equals c.ParentAccountId
+                             select new { a.Name, c.FirstName, c.LastName }).ToListAsync();
+
+        results.Should().HaveCount(500);
+    }
 }
