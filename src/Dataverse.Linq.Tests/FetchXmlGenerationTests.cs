@@ -171,10 +171,10 @@ public class FetchXmlGenerationTests
             <fetch mapping="logical">
               <entity name="new_customaccount">
                 <attribute name="new_name" />
-                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="outer" />
                 <filter type="and">
                   <condition entityname="c" attribute="new_customcontactid" operator="null" />
                 </filter>
+                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="outer" />
               </entity>
             </fetch>
             """);
@@ -472,10 +472,7 @@ public class FetchXmlGenerationTests
             <fetch mapping="logical">
               <entity name="new_customcontact">
                 <attribute name="new_lastname" />
-                <link-entity name="new_customaccount" from="new_primarycontact" to="new_customcontactid" alias="a" link-type="inner">
-                  <attribute name="new_name" />
-                  <attribute name="new_website" />
-                </link-entity>
+                <order attribute="new_lastname" descending="false" />
                 <filter type="and">
                   <condition entityname="a" attribute="new_website" operator="null" />
                   <filter type="or">
@@ -483,7 +480,10 @@ public class FetchXmlGenerationTests
                     <condition attribute="new_lastname" operator="like" value="%Last%" />
                   </filter>
                 </filter>
-                <order attribute="new_lastname" descending="false" />
+                <link-entity name="new_customaccount" from="new_primarycontact" to="new_customcontactid" alias="a" link-type="inner">
+                  <attribute name="new_name" />
+                  <attribute name="new_website" />
+                </link-entity>
               </entity>
             </fetch>
             """);
@@ -503,12 +503,12 @@ public class FetchXmlGenerationTests
             <fetch mapping="logical">
               <entity name="new_customcontact">
                 <attribute name="new_lastname" />
-                <link-entity name="new_customaccount" from="new_primarycontact" to="new_customcontactid" alias="a" link-type="inner">
-                  <attribute name="new_name" />
-                </link-entity>
                 <filter type="and">
                   <condition entityname="a" attribute="new_name" operator="eq" value="Test" />
                 </filter>
+                <link-entity name="new_customaccount" from="new_primarycontact" to="new_customcontactid" alias="a" link-type="inner">
+                  <attribute name="new_name" />
+                </link-entity>
               </entity>
             </fetch>
             """);

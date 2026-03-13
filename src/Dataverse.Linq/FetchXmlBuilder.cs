@@ -37,14 +37,14 @@ internal static class FetchXmlBuilder
         var element = new XElement("entity", new XAttribute("name", query.EntityLogicalName));
         AddAttributes(element, query.Attributes, query.AllAttributes);
 
-        foreach (var link in query.Links)
-            element.Add(BuildLinkEntity(link));
+        foreach (var order in query.Orders)
+            element.Add(BuildOrder(order));
 
         if (query.Filter is not null)
             element.Add(BuildFilter(query.Filter));
 
-        foreach (var order in query.Orders)
-            element.Add(BuildOrder(order));
+        foreach (var link in query.Links)
+            element.Add(BuildLinkEntity(link));
 
         return element;
     }
