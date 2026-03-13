@@ -573,4 +573,212 @@ public class FetchXmlGenerationTests
             </fetch>
             """);
     }
+
+    // -------------------------------------------------------------------------
+    // Where — NotEqual (non-null)
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_WhereNotEqualToValue_GeneratesNeFilter()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Where(a => a.Name != "Test")
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_name" operator="ne" value="Test" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    // -------------------------------------------------------------------------
+    // Where — comparison operators (lt, le, gt, ge)
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_WhereLessThan_GeneratesLtFilter()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Where(a => a.NumberOfEmployees < 50)
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_numberofemployees" operator="lt" value="50" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WhereLessEqual_GeneratesLeFilter()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Where(a => a.NumberOfEmployees <= 50)
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_numberofemployees" operator="le" value="50" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WhereGreaterThan_GeneratesGtFilter()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Where(a => a.NumberOfEmployees > 950)
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_numberofemployees" operator="gt" value="950" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WhereGreaterEqual_GeneratesGeFilter()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Where(a => a.NumberOfEmployees >= 950)
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_numberofemployees" operator="ge" value="950" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    // -------------------------------------------------------------------------
+    // Where — In / NotIn
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_WhereIn_GeneratesInFilter()
+    {
+        var names = new[] { "Custom Account 001", "Custom Account 002", "Custom Account 003" };
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Where(a => names.Contains(a.Name))
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_name" operator="in">
+                    <value>Custom Account 001</value>
+                    <value>Custom Account 002</value>
+                    <value>Custom Account 003</value>
+                  </condition>
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WhereNotIn_GeneratesNotInFilter()
+    {
+        var names = new[] { "Custom Account 001", "Custom Account 002" };
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Where(a => !names.Contains(a.Name))
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_name" operator="not-in">
+                    <value>Custom Account 001</value>
+                    <value>Custom Account 002</value>
+                  </condition>
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WhereInWithGuids_GeneratesInFilterOnPrimaryKey()
+    {
+        var ids = new[] { Guid.Parse("11111111-1111-1111-1111-111111111111"), Guid.Parse("22222222-2222-2222-2222-222222222222") };
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Where(a => ids.Contains(a.CustomAccountId))
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_customaccountid" operator="in">
+                    <value>11111111-1111-1111-1111-111111111111</value>
+                    <value>22222222-2222-2222-2222-222222222222</value>
+                  </condition>
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WhereNotInWithGuids_GeneratesNotInFilterOnPrimaryKey()
+    {
+        var ids = new[] { Guid.Parse("11111111-1111-1111-1111-111111111111") };
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Where(a => !ids.Contains(a.CustomAccountId))
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_customaccountid" operator="not-in">
+                    <value>11111111-1111-1111-1111-111111111111</value>
+                  </condition>
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
 }

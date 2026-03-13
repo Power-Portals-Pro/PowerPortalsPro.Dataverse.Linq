@@ -248,6 +248,22 @@ internal static class FetchXmlQueryTranslator
                 return;
             }
 
+            // collection.Contains(x.Attr) → in  /  negated → not-in
+            case MethodCallExpression { Method: { Name: "Contains" } } containsCall
+                when TryResolveInPredicate(containsCall, ctx) is { } inResult:
+            {
+                var condition = new FetchCondition
+                {
+                    Attribute = inResult.Resolved.Name,
+                    EntityAlias = inResult.Resolved.EntityAlias,
+                    Operator = negated ? ConditionOperator.NotIn : ConditionOperator.In
+                };
+                foreach (var val in inResult.Values)
+                    condition.Values.Add(val);
+                filter.Conditions.Add(condition);
+                return;
+            }
+
             // x.Attr.Contains("value") / StartsWith / EndsWith → like  /  negated → not-like
             case MethodCallExpression { Method: { Name: "Contains" or "StartsWith" or "EndsWith" } } stringCall
                 when stringCall.Method.DeclaringType == typeof(string) && stringCall.Object is not null:
@@ -305,6 +321,48 @@ internal static class FetchXmlQueryTranslator
             _ => throw new NotSupportedException()
         };
         return (resolved, pattern);
+    }
+
+    private record InPredicateResult(ResolvedAttribute Resolved, List<object> Values);
+
+    private static InPredicateResult? TryResolveInPredicate(MethodCallExpression call, TranslationContext ctx)
+    {
+        // Two patterns:
+        // 1. Static: Enumerable.Contains(collection, entity.Attr) — 2 args, no Object
+        // 2. Instance: list.Contains(entity.Attr) — 1 arg, Object is the collection
+        Expression? collectionExpr;
+        Expression? attrExpr;
+
+        if (call.Object is null && call.Arguments.Count == 2)
+        {
+            // Static Enumerable.Contains<T>(IEnumerable<T>, T)
+            collectionExpr = call.Arguments[0];
+            attrExpr = call.Arguments[1];
+        }
+        else if (call.Object is not null && call.Arguments.Count == 1)
+        {
+            // Instance List<T>.Contains(T)
+            collectionExpr = call.Object;
+            attrExpr = call.Arguments[0];
+        }
+        else
+        {
+            return null;
+        }
+
+        var resolved = ResolveAttribute(attrExpr, ctx);
+        if (resolved is null)
+            return null;
+
+        var collection = EvaluateValue(collectionExpr);
+        if (collection is not System.Collections.IEnumerable enumerable)
+            return null;
+
+        var values = new List<object>();
+        foreach (var item in enumerable)
+            values.Add(item);
+
+        return new InPredicateResult(resolved.Value, values);
     }
 
     private static void TranslateLogicalPredicate(
@@ -396,8 +454,51 @@ internal static class FetchXmlQueryTranslator
         if (expr is ConstantExpression constant)
             return constant.Value;
 
-        // Evaluate captured variables / closures
-        return Expression.Lambda(expr).Compile().DynamicInvoke();
+        // Closure field/property access: closureInstance.field (may be nested)
+        if (expr is MemberExpression memberExpr)
+        {
+            var target = memberExpr.Expression is not null
+                ? EvaluateValue(memberExpr.Expression)
+                : null;
+            return memberExpr.Member switch
+            {
+                FieldInfo fi => fi.GetValue(target),
+                PropertyInfo pi => pi.GetValue(target),
+                _ => throw new NotSupportedException($"Unsupported member type: {memberExpr.Member.GetType()}")
+            };
+        }
+
+        // new[] { ... } inline array
+        if (expr is NewArrayExpression newArray)
+        {
+            var items = newArray.Expressions.Select(e => EvaluateValue(e)).ToArray();
+            var array = Array.CreateInstance(newArray.Type.GetElementType()!, items.Length);
+            for (var i = 0; i < items.Length; i++)
+                array.SetValue(items[i], i);
+            return array;
+        }
+
+        // Convert / cast
+        if (expr is UnaryExpression { NodeType: ExpressionType.Convert } convert)
+            return EvaluateValue(convert.Operand);
+
+        // Method call (e.g. implicit conversions, static methods)
+        if (expr is MethodCallExpression methodCall)
+        {
+            // Implicit/explicit conversion operators with a single argument — just evaluate the argument
+            if (methodCall.Method is { IsSpecialName: true, Name: "op_Implicit" or "op_Explicit" }
+                && methodCall.Arguments.Count == 1)
+            {
+                return EvaluateValue(methodCall.Arguments[0]);
+            }
+
+            var target = methodCall.Object is not null ? EvaluateValue(methodCall.Object) : null;
+            var args = methodCall.Arguments.Select(a => EvaluateValue(a)).ToArray();
+            return methodCall.Method.Invoke(target, args);
+        }
+
+        throw new NotSupportedException(
+            $"Unable to evaluate expression of type {expr.GetType().Name} (NodeType={expr.NodeType}): {expr}");
     }
 
     // -------------------------------------------------------------------------

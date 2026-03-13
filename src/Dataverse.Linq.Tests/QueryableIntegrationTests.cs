@@ -581,4 +581,147 @@ public class QueryableIntegrationTests : IntegrationTestBase
         results.Should().HaveCount(2);
         results.Should().OnlyContain(r => r.Name.EndsWith("001"));
     }
+
+    // -------------------------------------------------------------------------
+    // Where — NotEqual (non-null)
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ToListAsync_WhereNotEqualToValue_ExcludesMatchingRecords()
+    {
+        var results = await Service.Queryable<CustomAccount>()
+            .Where(a => a.Name != "Custom Account 001")
+            .ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Should().NotContain(r => r.Name == "Custom Account 001");
+    }
+
+    // -------------------------------------------------------------------------
+    // Where — comparison operators (lt, le, gt, ge)
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ToListAsync_WhereLessThan_ReturnsMatchingRecords()
+    {
+        // Seed: NumberOfEmployees = i * 10 for i where i % 8 != 0
+        // i=1 → 10, i=2 → 20, i=3 → 30, i=4 → 40 all have < 50
+        var results = await Service.Queryable<CustomAccount>()
+            .Where(a => a.NumberOfEmployees < 50)
+            .ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Should().OnlyContain(r => r.NumberOfEmployees < 50);
+    }
+
+    [Fact]
+    public async Task ToListAsync_WhereLessEqual_ReturnsMatchingRecords()
+    {
+        var results = await Service.Queryable<CustomAccount>()
+            .Where(a => a.NumberOfEmployees <= 50)
+            .ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Should().OnlyContain(r => r.NumberOfEmployees <= 50);
+        // Should include i=5 (50) which < 50 would not
+        results.Count.Should().BeGreaterThan(
+            (await Service.Queryable<CustomAccount>()
+                .Where(a => a.NumberOfEmployees < 50)
+                .ToListAsync()).Count);
+    }
+
+    [Fact]
+    public async Task ToListAsync_WhereGreaterThan_ReturnsMatchingRecords()
+    {
+        // Seed: i=97 → 970, i=98 → 980, i=99 → 990 (i=100 → 1000 but 100 % 8 == 4 so not null... check: 100%8=4 !=0, so 1000 is set)
+        // > 950 should return records with 960, 970, 980, 990, 1000
+        var results = await Service.Queryable<CustomAccount>()
+            .Where(a => a.NumberOfEmployees > 950)
+            .ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Should().OnlyContain(r => r.NumberOfEmployees > 950);
+    }
+
+    [Fact]
+    public async Task ToListAsync_WhereGreaterEqual_ReturnsMatchingRecords()
+    {
+        var results = await Service.Queryable<CustomAccount>()
+            .Where(a => a.NumberOfEmployees >= 950)
+            .ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Should().OnlyContain(r => r.NumberOfEmployees >= 950);
+        // Should include i=95 (950) which > 950 would not
+        results.Count.Should().BeGreaterThan(
+            (await Service.Queryable<CustomAccount>()
+                .Where(a => a.NumberOfEmployees > 950)
+                .ToListAsync()).Count);
+    }
+
+    // -------------------------------------------------------------------------
+    // Where — In / NotIn
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ToListAsync_WhereIn_ReturnsMatchingRecords()
+    {
+        var names = new[] { "Custom Account 001", "Custom Account 002", "Custom Account 003" };
+        var results = await Service.Queryable<CustomAccount>()
+            .Where(a => names.Contains(a.Name))
+            .ToListAsync();
+
+        results.Should().HaveCount(3);
+        results.Select(r => r.Name).Should().BeEquivalentTo(names);
+    }
+
+    [Fact]
+    public async Task ToListAsync_WhereNotIn_ExcludesMatchingRecords()
+    {
+        var excluded = new[] { "Custom Account 001", "Custom Account 002" };
+        var results = await Service.Queryable<CustomAccount>()
+            .Where(a => !excluded.Contains(a.Name))
+            .ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Should().NotContain(r => excluded.Contains(r.Name));
+    }
+
+    [Fact]
+    public async Task ToListAsync_WhereInWithGuids_ReturnsMatchingRecords()
+    {
+        // First get some known account IDs
+        var allAccounts = await Service.Queryable<CustomAccount>()
+            .Where(a => a.Name == "Custom Account 001" || a.Name == "Custom Account 002" || a.Name == "Custom Account 003")
+            .ToListAsync();
+        var ids = allAccounts.Select(a => a.CustomAccountId).ToArray();
+        ids.Should().HaveCount(3);
+
+        // Now query by those IDs
+        var results = await Service.Queryable<CustomAccount>()
+            .Where(a => ids.Contains(a.CustomAccountId))
+            .ToListAsync();
+
+        results.Should().HaveCount(3);
+        results.Select(r => r.CustomAccountId).Should().BeEquivalentTo(ids);
+    }
+
+    [Fact]
+    public async Task ToListAsync_WhereNotInWithGuids_ExcludesMatchingRecords()
+    {
+        // First get some known account IDs
+        var excluded = await Service.Queryable<CustomAccount>()
+            .Where(a => a.Name == "Custom Account 001" || a.Name == "Custom Account 002")
+            .ToListAsync();
+        var excludedIds = excluded.Select(a => a.CustomAccountId).ToArray();
+        excludedIds.Should().HaveCount(2);
+
+        // Now query excluding those IDs
+        var results = await Service.Queryable<CustomAccount>()
+            .Where(a => !excludedIds.Contains(a.CustomAccountId))
+            .ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Should().NotContain(r => excludedIds.Contains(r.CustomAccountId));
+    }
 }
