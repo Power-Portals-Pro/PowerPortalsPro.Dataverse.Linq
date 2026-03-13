@@ -957,6 +957,72 @@ public class QueryableIntegrationTests : IntegrationTestBase
     }
 
     // -------------------------------------------------------------------------
+    // ForEachPageAsync
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ForEachPageAsync_ProcessesAllPages()
+    {
+        var all = await Service.Queryable<CustomAccount>().ToListAsync();
+        var collected = new List<CustomAccount>();
+        var pageCount = 0;
+
+        await Service.Queryable<CustomAccount>()
+            .WithPageSize(10)
+            .ForEachPageAsync(async page =>
+            {
+                pageCount++;
+                collected.AddRange(page);
+                await Task.CompletedTask;
+            });
+
+        collected.Should().HaveCount(all.Count);
+        pageCount.Should().BeGreaterThan(1);
+    }
+
+    [Fact]
+    public async Task ForEachPageAsync_WithWhereAndSelect_ProjectsCorrectly()
+    {
+        var all = await Service.Queryable<CustomAccount>()
+            .Where(a => a.Name != null)
+            .Select(a => new { a.Name })
+            .ToListAsync();
+
+        var collected = new List<string>();
+
+        await Service.Queryable<CustomAccount>()
+            .Where(a => a.Name != null)
+            .Select(a => new { a.Name })
+            .WithPageSize(10)
+            .ForEachPageAsync(async page =>
+            {
+                collected.AddRange(page.Select(p => p.Name));
+                await Task.CompletedTask;
+            });
+
+        collected.Should().HaveCount(all.Count);
+        collected.Should().OnlyContain(n => n != null);
+    }
+
+    [Fact]
+    public async Task ForEachPageAsync_WithoutPageSize_ReturnsSinglePage()
+    {
+        var pageCount = 0;
+
+        await Service.Queryable<CustomAccount>()
+            .ForEachPageAsync(async page =>
+            {
+                pageCount++;
+                page.Should().NotBeEmpty();
+                await Task.CompletedTask;
+            });
+
+        // Without WithPageSize, Dataverse uses its default page size (5000)
+        // so all 150 records come back in a single page
+        pageCount.Should().Be(1);
+    }
+
+    // -------------------------------------------------------------------------
     // Terminal operators — First / FirstOrDefault / Single / SingleOrDefault
     // -------------------------------------------------------------------------
 

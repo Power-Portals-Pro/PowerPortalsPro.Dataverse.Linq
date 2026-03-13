@@ -103,6 +103,67 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
         return RetrieveAll(fetchXml).Select(e => e.ToEntity<T>()).ToList();
     }
 
+    internal async Task ForEachPageAsync<TElement>(
+        Expression expression,
+        Func<List<TElement>, Task> onPage,
+        CancellationToken cancellationToken)
+    {
+        var query = FetchXmlQueryTranslator.Translate<T>(expression, Columns, EntityLogicalName);
+        var fetchXml = FetchXmlBuilder.Build(query);
+        var fetchDocument = XDocument.Parse(fetchXml);
+        string? pagingCookie = null;
+        var pageNumber = 1;
+
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (pagingCookie != null)
+            {
+                fetchDocument.Root!.SetAttributeValue("paging-cookie", pagingCookie);
+                fetchDocument.Root!.SetAttributeValue("page", pageNumber);
+            }
+
+            var response = await Service.RetrieveMultipleAsync(new FetchExpression(fetchDocument.ToString()));
+            var page = ProjectEntities<TElement>(response.Entities.ToList(), query);
+            await onPage(page);
+
+            if (!response.MoreRecords) break;
+
+            pagingCookie = response.PagingCookie;
+            pageNumber++;
+        }
+    }
+
+    internal void ForEachPage<TElement>(
+        Expression expression,
+        Action<List<TElement>> onPage)
+    {
+        var query = FetchXmlQueryTranslator.Translate<T>(expression, Columns, EntityLogicalName);
+        var fetchXml = FetchXmlBuilder.Build(query);
+        var fetchDocument = XDocument.Parse(fetchXml);
+        string? pagingCookie = null;
+        var pageNumber = 1;
+
+        while (true)
+        {
+            if (pagingCookie != null)
+            {
+                fetchDocument.Root!.SetAttributeValue("paging-cookie", pagingCookie);
+                fetchDocument.Root!.SetAttributeValue("page", pageNumber);
+            }
+
+            var response = Service.RetrieveMultiple(new FetchExpression(fetchDocument.ToString()));
+            var page = ProjectEntities<TElement>(response.Entities.ToList(), query);
+            onPage(page);
+
+            if (!response.MoreRecords) break;
+
+            pagingCookie = response.PagingCookie;
+            pageNumber++;
+        }
+    }
+
     internal string GenerateFetchXml(Expression expression)
     {
         var query = FetchXmlQueryTranslator.Translate<T>(expression, Columns, EntityLogicalName);

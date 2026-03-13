@@ -65,6 +65,47 @@ public static class ServiceClientExtensions
     }
 
     /// <summary>
+    /// Asynchronously executes the query page by page, invoking <paramref name="onPage"/>
+    /// with each page of results as they are retrieved from Dataverse.
+    /// </summary>
+    public static Task ForEachPageAsync<TElement>(
+        this IQueryable<TElement> queryable,
+        Func<List<TElement>, Task> onPage,
+        CancellationToken cancellationToken = default)
+    {
+        var providerType = queryable.Provider.GetType();
+        if (providerType.IsGenericType &&
+            providerType.GetGenericTypeDefinition() == typeof(DataverseQueryProvider<>))
+        {
+            return ((dynamic)queryable.Provider).ForEachPageAsync<TElement>(
+                queryable.Expression, onPage, cancellationToken);
+        }
+
+        throw new InvalidOperationException(
+            "ForEachPageAsync can only be used with Dataverse queryables created via Queryable<T>().");
+    }
+
+    /// <summary>
+    /// Synchronously executes the query page by page, invoking <paramref name="onPage"/>
+    /// with each page of results as they are retrieved from Dataverse.
+    /// </summary>
+    public static void ForEachPage<TElement>(
+        this IQueryable<TElement> queryable,
+        Action<List<TElement>> onPage)
+    {
+        var providerType = queryable.Provider.GetType();
+        if (providerType.IsGenericType &&
+            providerType.GetGenericTypeDefinition() == typeof(DataverseQueryProvider<>))
+        {
+            ((dynamic)queryable.Provider).ForEachPage<TElement>(queryable.Expression, onPage);
+            return;
+        }
+
+        throw new InvalidOperationException(
+            "ForEachPage can only be used with Dataverse queryables created via Queryable<T>().");
+    }
+
+    /// <summary>
     /// Asynchronously returns the first element of the sequence.
     /// Throws <see cref="InvalidOperationException"/> if the sequence is empty.
     /// </summary>

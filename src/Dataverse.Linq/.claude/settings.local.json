@@ -69,7 +69,9 @@
       "Bash(cd \"D:\\\\Code\\\\XrmToolkit - Dev\" && dotnet build src/XrmToolkit/Dataverse.Linq 2>&1 | grep \"error CS\")",
       "Bash(cd \"D:\\\\Code\\\\XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests --filter \"FirstAsync|FirstOrDefault|SingleAsync|SingleOrDefault|First_Sync\" --no-restore 2>&1 | tail -20)",
       "Bash(cd \"D:\\\\Code\\\\XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests --filter \"WithPageSize|FetchXmlGeneration\" --no-restore 2>&1 | tail -10)",
-      "Bash(cd \"D:\\\\Code\\\\XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests --filter \"WithPageSize|FetchXmlGeneration\" --no-restore 2>&1 | tail -5)"
+      "Bash(cd \"D:\\\\Code\\\\XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests --filter \"WithPageSize|FetchXmlGeneration\" --no-restore 2>&1 | tail -5)",
+      "Bash(cd \"D:\\\\Code\\\\XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests --filter \"StreamAsync\" --no-restore 2>&1 | tail -10)",
+      "Bash(cd \"D:\\\\Code\\\\XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests --filter \"ForEachPageAsync\" --no-restore 2>&1 | tail -5)"
     ]
   }
 }
