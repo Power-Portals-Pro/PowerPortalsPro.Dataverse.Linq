@@ -29,7 +29,9 @@
       "Bash(cd \"D:/Code/XrmToolkit - Dev/src/XrmToolkit/Dataverse.Linq.Tests\" && dotnet test --no-restore --filter \"FullyQualifiedName~FetchXmlGenerationTests\" --verbosity normal 2>&1 | tail -30)",
       "Bash(cd \"D:/Code/XrmToolkit - Dev/src/XrmToolkit/Dataverse.Linq.Tests\" && dotnet test --no-restore --filter \"FullyQualifiedName~FetchXmlGenerationTests\" --verbosity normal 2>&1 | tail -25)",
       "Bash(cd \"D:/Code/XrmToolkit - Dev/src/XrmToolkit/Dataverse.Linq.Tests\" && dotnet test --no-restore --filter \"FullyQualifiedName~ToFetchXml_WithLeftJoin_GeneratesOuterLinkEntity\" --verbosity normal 2>&1 | grep -A 20 \"Expected\")",
-      "Bash(cd \"D:/Code/XrmToolkit - Dev/src/XrmToolkit/Dataverse.Linq.Tests\" && dotnet test --no-restore --filter \"FullyQualifiedName~FetchXmlGenerationTests\" --verbosity normal 2>&1 | tail -20)"
+      "Bash(cd \"D:/Code/XrmToolkit - Dev/src/XrmToolkit/Dataverse.Linq.Tests\" && dotnet test --no-restore --filter \"FullyQualifiedName~FetchXmlGenerationTests\" --verbosity normal 2>&1 | tail -20)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev/src/XrmToolkit\" && dotnet test Dataverse.Linq.Tests --filter \"FullyQualifiedName~FetchXmlGeneration\" --no-restore 2>&1 | tail -20)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev/src/XrmToolkit\" && dotnet test Dataverse.Linq.Tests --filter \"FullyQualifiedName~FetchXmlGeneration\" --no-restore 2>&1 | tail -5)"
     ]
   }
 }

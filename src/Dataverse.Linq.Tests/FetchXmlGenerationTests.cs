@@ -122,7 +122,7 @@ public class FetchXmlGenerationTests
             <fetch mapping="logical">
               <entity name="new_customaccount">
                 <attribute name="new_name" />
-                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="je0" link-type="inner">
+                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="inner">
                   <attribute name="new_firstname" />
                   <attribute name="new_lastname" />
                 </link-entity>
@@ -149,7 +149,7 @@ public class FetchXmlGenerationTests
             <fetch mapping="logical">
               <entity name="new_customaccount">
                 <attribute name="new_name" />
-                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="je0" link-type="outer" />
+                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="outer" />
               </entity>
             </fetch>
             """);
@@ -170,9 +170,9 @@ public class FetchXmlGenerationTests
             <fetch mapping="logical">
               <entity name="new_customaccount">
                 <attribute name="new_name" />
-                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="je0" link-type="outer" />
+                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="outer" />
                 <filter>
-                  <condition entityname="je0" attribute="new_customcontactid" operator="null" />
+                  <condition entityname="c" attribute="new_customcontactid" operator="null" />
                 </filter>
               </entity>
             </fetch>

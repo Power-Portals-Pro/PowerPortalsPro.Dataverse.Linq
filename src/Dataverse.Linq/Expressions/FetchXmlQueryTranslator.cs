@@ -185,13 +185,13 @@ internal static class FetchXmlQueryTranslator
                 ctx.Query.Attributes.Add(new FetchAttribute { Name = col });
         }
 
-        // Link entity
+        // Link entity — use the LINQ parameter name as the alias
         var link = new FetchLinkEntity
         {
             Name = innerLogicalName,
             From = innerKeyAttr,
             To = outerKeyAttr,
-            Alias = "je0",
+            Alias = resultLambda.Parameters[1].Name!,
             LinkType = "inner"
         };
 
@@ -242,20 +242,20 @@ internal static class FetchXmlQueryTranslator
         // Root entity
         ctx.Query.EntityLogicalName = outerLogicalName;
 
-        // Link entity
+        // Analyse the SelectMany result selector to determine whether the C# compiler
+        // folded the final Select into it (no subsequent Where/Select) or created a
+        // transparent-identifier wrapper (further operators follow).
+        var resultSelector = ExtractLambda(call.Arguments[2]);
+
+        // Link entity — use the LINQ parameter name as the alias
         ctx.Query.Links.Add(new FetchLinkEntity
         {
             Name = innerLogicalName,
             From = innerKeyAttr,
             To = outerKeyAttr,
-            Alias = "je0",
+            Alias = resultSelector.Parameters[1].Name!,
             LinkType = "outer"
         });
-
-        // Analyse the SelectMany result selector to determine whether the C# compiler
-        // folded the final Select into it (no subsequent Where/Select) or created a
-        // transparent-identifier wrapper (further operators follow).
-        var resultSelector = ExtractLambda(call.Arguments[2]);
         var outerPath = FindOuterPropertyPath(resultSelector.Parameters[0].Type, outerEntityType);
 
         if (outerPath is null)
