@@ -99,7 +99,12 @@
       "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"DisplayName~WhereAny&FullyQualifiedName~Integration\" --no-restore 2>&1 | tail -20)",
       "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"DisplayName~WhereAny&FullyQualifiedName~Integration\" --no-restore -v n 2>&1 | grep -E \"Passed|Failed\")",
       "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"DisplayName~WhereNotAny&FullyQualifiedName~Integration\" --no-restore 2>&1 | tail -10)",
-      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"DisplayName~WhereAnyInOrFilter\" --no-restore 2>&1 | grep \"↓\\\\|↑\" -A 1)"
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"DisplayName~WhereAnyInOrFilter\" --no-restore 2>&1 | grep \"↓\\\\|↑\" -A 1)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet build src/XrmToolkit/Dataverse.Linq/Dataverse.Linq.csproj 2>&1 | tail -5)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"ClassName~FetchXmlGenerationTests\" --no-restore 2>&1 | tail -10)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"ClassName~FetchXml\" --no-restore --list-tests 2>&1 | head -20)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"FullyQualifiedName~ToFetchXml\" --no-restore 2>&1 | tail -10)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"FullyQualifiedName~ToFetchXml\" --no-restore 2>&1 | tail -5)"
     ]
   }
 }

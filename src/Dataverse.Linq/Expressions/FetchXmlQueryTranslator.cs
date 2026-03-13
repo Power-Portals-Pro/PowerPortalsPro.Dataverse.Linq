@@ -228,11 +228,7 @@ internal static class FetchXmlQueryTranslator
             // After a left join — resolve member accesses through transparent identifiers
             var columns = ExtractColumnsViaPath(lambda, ctx.OuterEntityPath);
             if (columns is { Count: > 0 })
-            {
-                ctx.Query.AllAttributes = false;
-                foreach (var col in columns)
-                    ctx.Query.Attributes.Add(new FetchAttribute { Name = col });
-            }
+                ApplyColumns(ctx.Query, columns);
 
             ctx.Query.Projector = RebuildProjector(lambda, ctx.OuterEntityPath, ctx.OuterEntityType!);
             ctx.Query.ProjectionType = lambda.ReturnType;
@@ -242,11 +238,7 @@ internal static class FetchXmlQueryTranslator
             // Simple select on root entity
             var columns = ExtractColumns(lambda.Body);
             if (columns is { Count: > 0 })
-            {
-                ctx.Query.AllAttributes = false;
-                foreach (var col in columns)
-                    ctx.Query.Attributes.Add(new FetchAttribute { Name = col });
-            }
+                ApplyColumns(ctx.Query, columns);
 
             ctx.Query.Projector = lambda.Compile();
             ctx.Query.ProjectionType = lambda.ReturnType;
@@ -259,15 +251,7 @@ internal static class FetchXmlQueryTranslator
         var rootColumns = new List<string>();
         var linkColumns = new List<string>();
 
-        IEnumerable<Expression> args = lambda.Body switch
-        {
-            NewExpression ne => ne.Arguments,
-            MemberInitExpression init => init.Bindings
-                .OfType<MemberAssignment>().Select(b => b.Expression),
-            _ => []
-        };
-
-        foreach (var arg in args)
+        foreach (var arg in GetProjectionArguments(lambda.Body))
         {
             var resolved = ResolveAttribute(arg, ctx);
             if (resolved is null) continue;
@@ -279,11 +263,7 @@ internal static class FetchXmlQueryTranslator
         }
 
         if (rootColumns.Count > 0)
-        {
-            ctx.Query.AllAttributes = false;
-            foreach (var col in rootColumns)
-                ctx.Query.Attributes.Add(new FetchAttribute { Name = col });
-        }
+            ApplyColumns(ctx.Query, rootColumns);
 
         if (linkColumns.Count > 0)
         {
@@ -1009,16 +989,9 @@ internal static class FetchXmlQueryTranslator
 
     private static void HandleInnerJoin(MethodCallExpression call, TranslationContext ctx)
     {
-        var (outerLogicalName, outerEntityType) = GetSourceInfo(call.Arguments[0]);
-        var (innerLogicalName, innerEntityType) = GetSourceInfo(call.Arguments[1]);
-
-        var outerKeyAttr = GetAttributeName(ExtractLambda(call.Arguments[2]).Body)
-            ?? throw new NotSupportedException(
-                "Outer join key must be a property decorated with [AttributeLogicalName].");
-
-        var innerKeyAttr = GetAttributeName(ExtractLambda(call.Arguments[3]).Body)
-            ?? throw new NotSupportedException(
-                "Inner join key must be a property decorated with [AttributeLogicalName].");
+        var (outerLogicalName, outerEntityType) = GetSourceInfoFromType(call.Arguments[0]);
+        var (innerLogicalName, innerEntityType) = GetSourceInfoFromType(call.Arguments[1]);
+        var (outerKeyAttr, innerKeyAttr) = ExtractJoinKeys(call);
 
         var resultLambda = ExtractLambda(call.Arguments[4]);
 
@@ -1055,11 +1028,7 @@ internal static class FetchXmlQueryTranslator
             resultLambda, resultLambda.Parameters[0], resultLambda.Parameters[1]);
 
         if (outerColumns is { Count: > 0 })
-        {
-            ctx.Query.AllAttributes = false;
-            foreach (var col in outerColumns)
-                ctx.Query.Attributes.Add(new FetchAttribute { Name = col });
-        }
+            ApplyColumns(ctx.Query, outerColumns);
 
         if (innerColumns is { Count: > 0 })
         {
@@ -1098,16 +1067,9 @@ internal static class FetchXmlQueryTranslator
         }
 
         // Extract join keys from GroupJoin
-        var (outerLogicalName, outerEntityType) = GetSourceInfo(groupJoinCall.Arguments[0]);
-        var (innerLogicalName, _) = GetSourceInfo(groupJoinCall.Arguments[1]);
-
-        var outerKeyAttr = GetAttributeName(ExtractLambda(groupJoinCall.Arguments[2]).Body)
-            ?? throw new NotSupportedException(
-                "Outer join key must be a property decorated with [AttributeLogicalName].");
-
-        var innerKeyAttr = GetAttributeName(ExtractLambda(groupJoinCall.Arguments[3]).Body)
-            ?? throw new NotSupportedException(
-                "Inner join key must be a property decorated with [AttributeLogicalName].");
+        var (outerLogicalName, outerEntityType) = GetSourceInfoFromType(groupJoinCall.Arguments[0]);
+        var (innerLogicalName, _) = GetSourceInfoFromType(groupJoinCall.Arguments[1]);
+        var (outerKeyAttr, innerKeyAttr) = ExtractJoinKeys(groupJoinCall);
 
         // Root entity
         ctx.Query.EntityLogicalName = outerLogicalName;
@@ -1140,9 +1102,7 @@ internal static class FetchXmlQueryTranslator
         if (columns is { Count: > 0 })
         {
             // Select folded into SelectMany — handle projection here
-            ctx.Query.AllAttributes = false;
-            foreach (var col in columns)
-                ctx.Query.Attributes.Add(new FetchAttribute { Name = col });
+            ApplyColumns(ctx.Query, columns);
 
             ctx.Query.Projector = RebuildProjector(resultSelector, outerPath, outerEntityType);
             ctx.Query.ProjectionType = resultSelector.ReturnType;
@@ -1169,8 +1129,46 @@ internal static class FetchXmlQueryTranslator
     }
 
     // -------------------------------------------------------------------------
+    // Shared join helpers
+    // -------------------------------------------------------------------------
+
+    private static (string OuterKey, string InnerKey) ExtractJoinKeys(MethodCallExpression joinCall)
+    {
+        var outerKey = GetAttributeName(ExtractLambda(joinCall.Arguments[2]).Body)
+            ?? throw new NotSupportedException(
+                "Outer join key must be a property decorated with [AttributeLogicalName].");
+
+        var innerKey = GetAttributeName(ExtractLambda(joinCall.Arguments[3]).Body)
+            ?? throw new NotSupportedException(
+                "Inner join key must be a property decorated with [AttributeLogicalName].");
+
+        return (outerKey, innerKey);
+    }
+
+    private static void ApplyColumns(FetchXmlQuery query, IReadOnlyList<string> columns)
+    {
+        query.AllAttributes = false;
+        foreach (var col in columns)
+            query.Attributes.Add(new FetchAttribute { Name = col });
+    }
+
+    // -------------------------------------------------------------------------
     // Column extraction
     // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Extracts the member-argument expressions from a projection body
+    /// (<see cref="NewExpression"/>, <see cref="MemberInitExpression"/>, or single
+    /// <see cref="MemberExpression"/>).
+    /// </summary>
+    private static IEnumerable<Expression> GetProjectionArguments(Expression body) => body switch
+    {
+        NewExpression ne => ne.Arguments,
+        MemberInitExpression init => init.Bindings
+            .OfType<MemberAssignment>().Select(b => b.Expression),
+        MemberExpression me => [me],
+        _ => []
+    };
 
     /// <summary>
     /// Extracts attribute logical names from a simple select body (anonymous type,
@@ -1180,16 +1178,7 @@ internal static class FetchXmlQueryTranslator
     {
         var columns = new List<string>();
 
-        IEnumerable<Expression> args = body switch
-        {
-            NewExpression ne => ne.Arguments,
-            MemberInitExpression init => init.Bindings
-                .OfType<MemberAssignment>().Select(b => b.Expression),
-            MemberExpression me => [me],
-            _ => []
-        };
-
-        foreach (var arg in args)
+        foreach (var arg in GetProjectionArguments(body))
         {
             var name = GetAttributeName(arg);
             if (name is not null)
@@ -1210,15 +1199,7 @@ internal static class FetchXmlQueryTranslator
         var param = lambda.Parameters[0];
         var columns = new List<string>();
 
-        IEnumerable<Expression> args = lambda.Body switch
-        {
-            NewExpression ne => ne.Arguments,
-            MemberInitExpression init => init.Bindings
-                .OfType<MemberAssignment>().Select(b => b.Expression),
-            _ => []
-        };
-
-        foreach (var arg in args)
+        foreach (var arg in GetProjectionArguments(lambda.Body))
         {
             if (arg is MemberExpression { Member: PropertyInfo prop, Expression: { } attrExpr }
                 && IsOuterEntityAccess(attrExpr, param, outerPath))
@@ -1241,13 +1222,7 @@ internal static class FetchXmlQueryTranslator
         var outerColumns = new List<string>();
         var innerColumns = new List<string>();
 
-        IEnumerable<Expression> args = lambda.Body switch
-        {
-            NewExpression ne => ne.Arguments,
-            _ => []
-        };
-
-        foreach (var arg in args)
+        foreach (var arg in GetProjectionArguments(lambda.Body))
         {
             if (arg is not MemberExpression { Member: PropertyInfo prop, Expression: ParameterExpression paramExpr })
                 continue;
@@ -1428,22 +1403,6 @@ internal static class FetchXmlQueryTranslator
     // -------------------------------------------------------------------------
     // Shared helpers
     // -------------------------------------------------------------------------
-
-    private static (string EntityLogicalName, Type EntityType) GetSourceInfo(Expression sourceExpr)
-    {
-        if (sourceExpr is ConstantExpression { Value: { } val })
-        {
-            var type = val.GetType();
-            if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(DataverseQueryable<>))
-            {
-                var entityType = type.GetGenericArguments()[0];
-                var logicalName = GetEntityLogicalName(entityType);
-                return (logicalName, entityType);
-            }
-        }
-
-        throw new NotSupportedException("Query sources must be DataverseQueryable<T> instances.");
-    }
 
     private static string GetEntityLogicalName(Type entityType) =>
         entityType.GetCustomAttribute<EntityLogicalNameAttribute>()?.LogicalName
