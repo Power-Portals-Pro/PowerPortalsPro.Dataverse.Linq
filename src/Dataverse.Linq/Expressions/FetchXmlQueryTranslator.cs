@@ -1,6 +1,7 @@
 using Dataverse.Linq.Model;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Client;
+using Microsoft.Xrm.Sdk.Query;
 using System.Linq.Expressions;
 using System.Reflection;
 
@@ -200,7 +201,7 @@ internal static class FetchXmlQueryTranslator
             {
                 EntityAlias = link.Alias,
                 Attribute = link.Name + "id",
-                Operator = "null"
+                Operator = ConditionOperator.Null
             });
             return;
         }
@@ -240,8 +241,8 @@ internal static class FetchXmlQueryTranslator
                     ?? throw new NotSupportedException(
                         "string.IsNullOrEmpty argument must resolve to an attribute.");
                 var subFilter = new FetchFilter { Type = FilterType.Or };
-                subFilter.Conditions.Add(new FetchCondition { Attribute = resolved.Name, EntityAlias = resolved.EntityAlias, Operator = "null" });
-                subFilter.Conditions.Add(new FetchCondition { Attribute = resolved.Name, EntityAlias = resolved.EntityAlias, Operator = "eq", Value = "" });
+                subFilter.Conditions.Add(new FetchCondition { Attribute = resolved.Name, EntityAlias = resolved.EntityAlias, Operator = ConditionOperator.Null });
+                subFilter.Conditions.Add(new FetchCondition { Attribute = resolved.Name, EntityAlias = resolved.EntityAlias, Operator = ConditionOperator.Equal, Value = "" });
                 filter.Filters.Add(subFilter);
                 return;
             }
@@ -265,7 +266,7 @@ internal static class FetchXmlQueryTranslator
                 {
                     Attribute = resolved.Name,
                     EntityAlias = resolved.EntityAlias,
-                    Operator = "like",
+                    Operator = ConditionOperator.Like,
                     Value = pattern
                 });
                 return;
@@ -304,8 +305,8 @@ internal static class FetchXmlQueryTranslator
                     ?? throw new NotSupportedException(
                         "string.IsNullOrEmpty argument must resolve to an attribute.");
                 var subFilter = new FetchFilter { Type = FilterType.And };
-                subFilter.Conditions.Add(new FetchCondition { Attribute = resolved.Name, EntityAlias = resolved.EntityAlias, Operator = "not-null" });
-                subFilter.Conditions.Add(new FetchCondition { Attribute = resolved.Name, EntityAlias = resolved.EntityAlias, Operator = "ne", Value = "" });
+                subFilter.Conditions.Add(new FetchCondition { Attribute = resolved.Name, EntityAlias = resolved.EntityAlias, Operator = ConditionOperator.NotNull });
+                subFilter.Conditions.Add(new FetchCondition { Attribute = resolved.Name, EntityAlias = resolved.EntityAlias, Operator = ConditionOperator.NotEqual, Value = "" });
                 filter.Filters.Add(subFilter);
                 return;
             }
@@ -329,7 +330,7 @@ internal static class FetchXmlQueryTranslator
                 {
                     Attribute = resolved.Name,
                     EntityAlias = resolved.EntityAlias,
-                    Operator = "not-like",
+                    Operator = ConditionOperator.NotLike,
                     Value = pattern
                 });
                 return;
@@ -365,12 +366,12 @@ internal static class FetchXmlQueryTranslator
     {
         var op = binary.NodeType switch
         {
-            ExpressionType.Equal => "eq",
-            ExpressionType.NotEqual => "ne",
-            ExpressionType.LessThan => "lt",
-            ExpressionType.LessThanOrEqual => "le",
-            ExpressionType.GreaterThan => "gt",
-            ExpressionType.GreaterThanOrEqual => "ge",
+            ExpressionType.Equal => ConditionOperator.Equal,
+            ExpressionType.NotEqual => ConditionOperator.NotEqual,
+            ExpressionType.LessThan => ConditionOperator.LessThan,
+            ExpressionType.LessThanOrEqual => ConditionOperator.LessEqual,
+            ExpressionType.GreaterThan => ConditionOperator.GreaterThan,
+            ExpressionType.GreaterThanOrEqual => ConditionOperator.GreaterEqual,
             _ => throw new NotSupportedException(
                 $"Unsupported comparison operator in Where: {binary.NodeType}")
         };
@@ -405,7 +406,7 @@ internal static class FetchXmlQueryTranslator
             {
                 Attribute = attr.Name,
                 EntityAlias = attr.EntityAlias,
-                Operator = op == "eq" ? "null" : "not-null"
+                Operator = op == ConditionOperator.Equal ? ConditionOperator.Null : ConditionOperator.NotNull
             });
             return;
         }

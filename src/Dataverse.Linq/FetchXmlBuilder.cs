@@ -1,3 +1,4 @@
+using Dataverse.Linq.Extensions;
 using Dataverse.Linq.Model;
 using System.Xml.Linq;
 
@@ -99,7 +100,7 @@ internal static class FetchXmlBuilder
             element.Add(new XAttribute("entityname", condition.EntityAlias));
 
         element.Add(new XAttribute("attribute", condition.Attribute));
-        element.Add(new XAttribute("operator", condition.Operator));
+        element.Add(new XAttribute("operator", condition.Operator.ToFetchXml()));
 
         if (condition.Value is not null)
             element.Add(new XAttribute("value", condition.Value));

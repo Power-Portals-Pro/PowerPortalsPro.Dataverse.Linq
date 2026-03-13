@@ -1,3 +1,5 @@
+using Microsoft.Xrm.Sdk.Query;
+
 namespace Dataverse.Linq.Model;
 
 /// <summary>
@@ -13,11 +15,7 @@ internal sealed class FetchCondition
 
     public string Attribute { get; set; } = null!;
 
-    /// <summary>
-    /// FetchXml operator: eq, ne, lt, le, gt, ge, null, not-null,
-    /// like, not-like, in, not-in, etc.
-    /// </summary>
-    public string Operator { get; set; } = null!;
+    public ConditionOperator Operator { get; set; }
 
     public object? Value { get; set; }
 
