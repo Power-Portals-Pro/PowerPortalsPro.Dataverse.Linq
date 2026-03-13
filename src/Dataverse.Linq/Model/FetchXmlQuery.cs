@@ -21,6 +21,8 @@ internal sealed class FetchXmlQuery
     /// <summary>
     /// Compiled delegate that projects a raw Entity (or join result) into the
     /// final TElement shape requested by the LINQ query.
+    /// For simple selects and left joins: single-parameter (outer entity → result).
+    /// For inner joins: two-parameter (outer entity, inner entity → result).
     /// </summary>
     public Delegate? Projector { get; set; }
 
@@ -28,4 +30,12 @@ internal sealed class FetchXmlQuery
     /// The CLR type that the projector produces.
     /// </summary>
     public Type? ProjectionType { get; set; }
+
+    /// <summary>
+    /// For inner joins: the CLR type of the inner/linked entity.
+    /// The provider uses this to extract linked-entity attributes and convert
+    /// them via <c>Entity.ToEntity&lt;T&gt;()</c> before passing to the
+    /// two-parameter <see cref="Projector"/> delegate.
+    /// </summary>
+    public Type? InnerEntityType { get; set; }
 }
