@@ -45,6 +45,43 @@ public class FetchXmlGenerationTests
     }
 
     // -------------------------------------------------------------------------
+    // Distinct
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_Distinct_GeneratesDistinctFetch()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>().Distinct().ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" distinct="true">
+              <entity name="new_customaccount">
+                <all-attributes />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_DistinctWithSelect_GeneratesDistinctWithProjectedAttributes()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Select(a => new { a.Name })
+            .Distinct()
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" distinct="true">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    // -------------------------------------------------------------------------
     // Column selection
     // -------------------------------------------------------------------------
 
