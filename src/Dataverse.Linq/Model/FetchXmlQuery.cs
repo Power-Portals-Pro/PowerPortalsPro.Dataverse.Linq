@@ -1,6 +1,18 @@
 namespace Dataverse.Linq.Model;
 
 /// <summary>
+/// Indicates which terminal LINQ operator was used.
+/// </summary>
+internal enum QueryTerminalOperator
+{
+    List,
+    First,
+    FirstOrDefault,
+    Single,
+    SingleOrDefault,
+}
+
+/// <summary>
 /// Root query object representing a complete FetchXml query.
 /// One instance per LINQ query, populated by the translator
 /// and serialised by the builder.
@@ -17,6 +29,12 @@ internal sealed class FetchXmlQuery
     public int? Skip { get; set; }
     public bool Distinct { get; set; }
     public bool Aggregate { get; set; }
+
+    /// <summary>
+    /// The terminal operator that determines how the result set is returned
+    /// (e.g. First, Single). Defaults to <see cref="QueryTerminalOperator.List"/>.
+    /// </summary>
+    public QueryTerminalOperator TerminalOperator { get; set; } = QueryTerminalOperator.List;
 
     /// <summary>
     /// Compiled delegate that projects a raw Entity (or join result) into the

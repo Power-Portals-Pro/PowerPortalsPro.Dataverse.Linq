@@ -185,6 +185,13 @@ internal static class FetchXmlQueryTranslator
                         HandleOrderBy(call, ctx);
                         return;
 
+                    case nameof(Queryable.First):
+                    case nameof(Queryable.FirstOrDefault):
+                    case nameof(Queryable.Single):
+                    case nameof(Queryable.SingleOrDefault):
+                        HandleTerminalOperator(call, ctx);
+                        return;
+
                     default:
                         throw new NotSupportedException(
                             $"LINQ operator '{call.Method.Name}' is not supported.");
@@ -730,6 +737,37 @@ internal static class FetchXmlQueryTranslator
             EntityAlias = resolved.EntityAlias,
             Descending = descending
         });
+    }
+
+    // -------------------------------------------------------------------------
+    // Terminal operators — First / FirstOrDefault / Single / SingleOrDefault
+    // -------------------------------------------------------------------------
+
+    private static void HandleTerminalOperator(MethodCallExpression call, TranslationContext ctx)
+    {
+        // Recurse into the source expression
+        TranslateCore(call.Arguments[0], ctx);
+
+        // If the overload includes a predicate (2 arguments), apply it as a Where filter
+        if (call.Arguments.Count == 2)
+        {
+            var lambda = ExtractLambda(call.Arguments[1]);
+            var filter = ctx.Query.Filter ??= new FetchFilter { Type = FilterType.And };
+            TranslatePredicate(lambda.Body, filter, ctx);
+        }
+
+        ctx.Query.TerminalOperator = call.Method.Name switch
+        {
+            nameof(Queryable.First) => QueryTerminalOperator.First,
+            nameof(Queryable.FirstOrDefault) => QueryTerminalOperator.FirstOrDefault,
+            nameof(Queryable.Single) => QueryTerminalOperator.Single,
+            nameof(Queryable.SingleOrDefault) => QueryTerminalOperator.SingleOrDefault,
+            _ => throw new NotSupportedException($"Unsupported terminal operator '{call.Method.Name}'.")
+        };
+
+        // Single needs at least 2 rows to validate uniqueness; First only needs 1
+        ctx.Query.Top = ctx.Query.TerminalOperator is QueryTerminalOperator.Single
+                                                    or QueryTerminalOperator.SingleOrDefault ? 2 : 1;
     }
 
     // -------------------------------------------------------------------------

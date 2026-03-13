@@ -42,13 +42,21 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
 
     /// <summary>
     /// Synchronous execution — used by <see cref="DataverseProjectedQueryable{TElement}.GetEnumerator"/>.
-    /// <typeparamref name="TResult"/> is typically <see cref="IEnumerable{T}"/> for projected types.
+    /// <typeparamref name="TResult"/> is typically <see cref="IEnumerable{T}"/> for projected types,
+    /// or a scalar element type for First/Single operators.
     /// </summary>
     public TResult Execute<TResult>(Expression expression)
     {
         var query = FetchXmlQueryTranslator.Translate<T>(expression, Columns, EntityLogicalName);
         var fetchXml = FetchXmlBuilder.Build(query);
         var entities = RetrieveAll(fetchXml);
+
+        // Scalar terminal operator (First, Single, etc.)
+        if (query.TerminalOperator is not QueryTerminalOperator.List)
+        {
+            var projected = ProjectEntities<TResult>(entities, query);
+            return ApplyTerminalOperator(projected, query.TerminalOperator);
+        }
 
         var elementType = typeof(TResult).IsGenericType
             ? typeof(TResult).GetGenericArguments()[0]
@@ -66,11 +74,22 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
 
     public TResult ExecuteAsync<TResult>(Expression expression, CancellationToken cancellationToken = default)
     {
-        // TResult = Task<List<TElement>>
-        var elementType = typeof(TResult).GetGenericArguments()[0].GetGenericArguments()[0];
         var query = FetchXmlQueryTranslator.Translate<T>(expression, Columns, EntityLogicalName);
-        var method = GetPrivateMethod(nameof(ExecuteQueryAsync)).MakeGenericMethod(elementType);
-        return (TResult)method.Invoke(this, [query, cancellationToken])!;
+
+        // Scalar terminal operator: TResult = Task<TElement>
+        if (query.TerminalOperator is not QueryTerminalOperator.List)
+        {
+            var elementType = typeof(TResult).GetGenericArguments()[0];
+            var method = GetPrivateMethod(nameof(ExecuteScalarAsync)).MakeGenericMethod(elementType);
+            return (TResult)method.Invoke(this, [query, cancellationToken])!;
+        }
+
+        // List: TResult = Task<List<TElement>>
+        {
+            var elementType = typeof(TResult).GetGenericArguments()[0].GetGenericArguments()[0];
+            var method = GetPrivateMethod(nameof(ExecuteQueryAsync)).MakeGenericMethod(elementType);
+            return (TResult)method.Invoke(this, [query, cancellationToken])!;
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -100,6 +119,27 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
         var fetchXml = FetchXmlBuilder.Build(query);
         var entities = await RetrieveAllAsync(fetchXml, cancellationToken);
         return ProjectEntities<TElement>(entities, query);
+    }
+
+    private async Task<TElement> ExecuteScalarAsync<TElement>(
+        FetchXmlQuery query, CancellationToken cancellationToken)
+    {
+        var fetchXml = FetchXmlBuilder.Build(query);
+        var entities = await RetrieveAllAsync(fetchXml, cancellationToken);
+        var projected = ProjectEntities<TElement>(entities, query);
+        return ApplyTerminalOperator(projected, query.TerminalOperator);
+    }
+
+    private static TElement ApplyTerminalOperator<TElement>(List<TElement> results, QueryTerminalOperator op)
+    {
+        return op switch
+        {
+            QueryTerminalOperator.First => results.First(),
+            QueryTerminalOperator.FirstOrDefault => results.FirstOrDefault()!,
+            QueryTerminalOperator.Single => results.Single(),
+            QueryTerminalOperator.SingleOrDefault => results.SingleOrDefault()!,
+            _ => throw new InvalidOperationException($"Unexpected terminal operator '{op}'.")
+        };
     }
 
     // -------------------------------------------------------------------------

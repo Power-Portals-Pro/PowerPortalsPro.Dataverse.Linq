@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore.Query;
 using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Client;
+using System.Linq.Expressions;
 using System.Reflection;
 
 namespace Dataverse.Linq;
@@ -44,6 +45,152 @@ public static class ServiceClientExtensions
             return asyncProvider.ExecuteAsync<Task<List<TElement>>>(queryable.Expression, cancellationToken);
 
         return Task.FromResult(queryable.ToList());
+    }
+
+    /// <summary>
+    /// Asynchronously returns the first element of the sequence.
+    /// Throws <see cref="InvalidOperationException"/> if the sequence is empty.
+    /// </summary>
+    public static Task<TElement> FirstAsync<TElement>(
+        this IQueryable<TElement> queryable,
+        CancellationToken cancellationToken = default)
+    {
+        var expression = Expression.Call(
+            typeof(System.Linq.Queryable), nameof(System.Linq.Queryable.First),
+            [typeof(TElement)], queryable.Expression);
+
+        if (queryable.Provider is IAsyncQueryProvider asyncProvider)
+            return asyncProvider.ExecuteAsync<Task<TElement>>(expression, cancellationToken);
+
+        return Task.FromResult(queryable.First());
+    }
+
+    /// <summary>
+    /// Asynchronously returns the first element of the sequence that satisfies the predicate.
+    /// Throws <see cref="InvalidOperationException"/> if no element is found.
+    /// </summary>
+    public static Task<TElement> FirstAsync<TElement>(
+        this IQueryable<TElement> queryable,
+        Expression<Func<TElement, bool>> predicate,
+        CancellationToken cancellationToken = default)
+    {
+        var expression = Expression.Call(
+            typeof(System.Linq.Queryable), nameof(System.Linq.Queryable.First),
+            [typeof(TElement)], queryable.Expression, predicate);
+
+        if (queryable.Provider is IAsyncQueryProvider asyncProvider)
+            return asyncProvider.ExecuteAsync<Task<TElement>>(expression, cancellationToken);
+
+        return Task.FromResult(queryable.First(predicate));
+    }
+
+    /// <summary>
+    /// Asynchronously returns the first element of the sequence, or a default value if empty.
+    /// </summary>
+    public static Task<TElement?> FirstOrDefaultAsync<TElement>(
+        this IQueryable<TElement> queryable,
+        CancellationToken cancellationToken = default)
+    {
+        var expression = Expression.Call(
+            typeof(System.Linq.Queryable), nameof(System.Linq.Queryable.FirstOrDefault),
+            [typeof(TElement)], queryable.Expression);
+
+        if (queryable.Provider is IAsyncQueryProvider asyncProvider)
+            return asyncProvider.ExecuteAsync<Task<TElement?>>(expression, cancellationToken);
+
+        return Task.FromResult(queryable.FirstOrDefault());
+    }
+
+    /// <summary>
+    /// Asynchronously returns the first element matching the predicate, or a default value if none found.
+    /// </summary>
+    public static Task<TElement?> FirstOrDefaultAsync<TElement>(
+        this IQueryable<TElement> queryable,
+        Expression<Func<TElement, bool>> predicate,
+        CancellationToken cancellationToken = default)
+    {
+        var expression = Expression.Call(
+            typeof(System.Linq.Queryable), nameof(System.Linq.Queryable.FirstOrDefault),
+            [typeof(TElement)], queryable.Expression, predicate);
+
+        if (queryable.Provider is IAsyncQueryProvider asyncProvider)
+            return asyncProvider.ExecuteAsync<Task<TElement?>>(expression, cancellationToken);
+
+        return Task.FromResult(queryable.FirstOrDefault(predicate));
+    }
+
+    /// <summary>
+    /// Asynchronously returns the only element of the sequence.
+    /// Throws <see cref="InvalidOperationException"/> if the sequence does not contain exactly one element.
+    /// </summary>
+    public static Task<TElement> SingleAsync<TElement>(
+        this IQueryable<TElement> queryable,
+        CancellationToken cancellationToken = default)
+    {
+        var expression = Expression.Call(
+            typeof(System.Linq.Queryable), nameof(System.Linq.Queryable.Single),
+            [typeof(TElement)], queryable.Expression);
+
+        if (queryable.Provider is IAsyncQueryProvider asyncProvider)
+            return asyncProvider.ExecuteAsync<Task<TElement>>(expression, cancellationToken);
+
+        return Task.FromResult(queryable.Single());
+    }
+
+    /// <summary>
+    /// Asynchronously returns the only element of the sequence that satisfies the predicate.
+    /// Throws <see cref="InvalidOperationException"/> if zero or more than one element is found.
+    /// </summary>
+    public static Task<TElement> SingleAsync<TElement>(
+        this IQueryable<TElement> queryable,
+        Expression<Func<TElement, bool>> predicate,
+        CancellationToken cancellationToken = default)
+    {
+        var expression = Expression.Call(
+            typeof(System.Linq.Queryable), nameof(System.Linq.Queryable.Single),
+            [typeof(TElement)], queryable.Expression, predicate);
+
+        if (queryable.Provider is IAsyncQueryProvider asyncProvider)
+            return asyncProvider.ExecuteAsync<Task<TElement>>(expression, cancellationToken);
+
+        return Task.FromResult(queryable.Single(predicate));
+    }
+
+    /// <summary>
+    /// Asynchronously returns the only element of the sequence, or a default value if empty.
+    /// Throws <see cref="InvalidOperationException"/> if more than one element is found.
+    /// </summary>
+    public static Task<TElement?> SingleOrDefaultAsync<TElement>(
+        this IQueryable<TElement> queryable,
+        CancellationToken cancellationToken = default)
+    {
+        var expression = Expression.Call(
+            typeof(System.Linq.Queryable), nameof(System.Linq.Queryable.SingleOrDefault),
+            [typeof(TElement)], queryable.Expression);
+
+        if (queryable.Provider is IAsyncQueryProvider asyncProvider)
+            return asyncProvider.ExecuteAsync<Task<TElement?>>(expression, cancellationToken);
+
+        return Task.FromResult(queryable.SingleOrDefault());
+    }
+
+    /// <summary>
+    /// Asynchronously returns the only element matching the predicate, or a default value if none found.
+    /// Throws <see cref="InvalidOperationException"/> if more than one element matches.
+    /// </summary>
+    public static Task<TElement?> SingleOrDefaultAsync<TElement>(
+        this IQueryable<TElement> queryable,
+        Expression<Func<TElement, bool>> predicate,
+        CancellationToken cancellationToken = default)
+    {
+        var expression = Expression.Call(
+            typeof(System.Linq.Queryable), nameof(System.Linq.Queryable.SingleOrDefault),
+            [typeof(TElement)], queryable.Expression, predicate);
+
+        if (queryable.Provider is IAsyncQueryProvider asyncProvider)
+            return asyncProvider.ExecuteAsync<Task<TElement?>>(expression, cancellationToken);
+
+        return Task.FromResult(queryable.SingleOrDefault(predicate));
     }
 
     /// <summary>

@@ -3,7 +3,9 @@ using Dataverse.Linq.Tests.Proxies;
 using FluentAssertions;
 using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Client;
 using NSubstitute;
+using System.Reflection;
 
 namespace Dataverse.Linq.Tests;
 
@@ -13,6 +15,15 @@ public class FetchXmlGenerationTests
 
     private static void AssertFetchXml(string actual, string expected) =>
         actual.ReplaceLineEndings("\n").Should().Be(expected.ReplaceLineEndings("\n"));
+
+    private static string TranslateToFetchXml<TEntity>(
+        System.Linq.Expressions.Expression expression) where TEntity : Entity
+    {
+        var entityLogicalName = typeof(TEntity).GetCustomAttribute<EntityLogicalNameAttribute>()!.LogicalName;
+        var query = Dataverse.Linq.Expressions.FetchXmlQueryTranslator.Translate<TEntity>(
+            expression, null, entityLogicalName);
+        return Dataverse.Linq.FetchXmlBuilder.Build(query);
+    }
 
     // -------------------------------------------------------------------------
     // Basic retrieval
@@ -1405,6 +1416,129 @@ public class FetchXmlGenerationTests
                 <all-attributes />
                 <filter type="and">
                   <condition attribute="owningbusinessunit" operator="ne-businessid" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    // -------------------------------------------------------------------------
+    // Terminal operators — First / FirstOrDefault / Single / SingleOrDefault
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_First_GeneratesTop1()
+    {
+        var baseExpr = _service.Queryable<CustomAccount>()
+            .Where(a => a.Name != null)
+            .Expression;
+
+        var firstExpr = System.Linq.Expressions.Expression.Call(
+            typeof(Queryable), nameof(Queryable.First),
+            [typeof(CustomAccount)], baseExpr);
+
+        var fetchXml = TranslateToFetchXml<CustomAccount>(firstExpr);
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" top="1">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_name" operator="not-null" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_FirstOrDefault_GeneratesTop1()
+    {
+        var baseExpr = _service.Queryable<CustomAccount>().Expression;
+
+        var expr = System.Linq.Expressions.Expression.Call(
+            typeof(Queryable), nameof(Queryable.FirstOrDefault),
+            [typeof(CustomAccount)], baseExpr);
+
+        var fetchXml = TranslateToFetchXml<CustomAccount>(expr);
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" top="1">
+              <entity name="new_customaccount">
+                <all-attributes />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_Single_GeneratesTop2()
+    {
+        var baseExpr = _service.Queryable<CustomAccount>()
+            .Where(a => a.Name == "Custom Account 001")
+            .Expression;
+
+        var singleExpr = System.Linq.Expressions.Expression.Call(
+            typeof(Queryable), nameof(Queryable.Single),
+            [typeof(CustomAccount)], baseExpr);
+
+        var fetchXml = TranslateToFetchXml<CustomAccount>(singleExpr);
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" top="2">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_name" operator="eq" value="Custom Account 001" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_SingleOrDefault_GeneratesTop2()
+    {
+        var baseExpr = _service.Queryable<CustomAccount>().Expression;
+
+        var expr = System.Linq.Expressions.Expression.Call(
+            typeof(Queryable), nameof(Queryable.SingleOrDefault),
+            [typeof(CustomAccount)], baseExpr);
+
+        var fetchXml = TranslateToFetchXml<CustomAccount>(expr);
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" top="2">
+              <entity name="new_customaccount">
+                <all-attributes />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_FirstWithPredicate_GeneratesFilterAndTop1()
+    {
+        var baseExpr = _service.Queryable<CustomAccount>().Expression;
+
+        System.Linq.Expressions.Expression<Func<CustomAccount, bool>> predicate = a => a.Name == "Custom Account 001";
+        var firstExpr = System.Linq.Expressions.Expression.Call(
+            typeof(Queryable), nameof(Queryable.First),
+            [typeof(CustomAccount)], baseExpr, predicate);
+
+        var fetchXml = TranslateToFetchXml<CustomAccount>(firstExpr);
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" top="1">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_name" operator="eq" value="Custom Account 001" />
                 </filter>
               </entity>
             </fetch>
