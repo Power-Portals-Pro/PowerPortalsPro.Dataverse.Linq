@@ -812,6 +812,42 @@ public class QueryableIntegrationTests : IntegrationTestBase
             && (r.DateCompanyWasOrganized.Value < from || r.DateCompanyWasOrganized.Value > to));
     }
 
+    [Fact]
+    public async Task ToListAsync_WhereNegatedBetween_ReturnsSameAsNotBetween()
+    {
+        var from = new DateTime(2010, 1, 1);
+        var to = new DateTime(2015, 12, 31);
+
+        var notBetween = await Service.Queryable<CustomAccount>()
+            .Where(a => a.DateCompanyWasOrganized.NotBetween(from, to))
+            .ToListAsync();
+
+        var negatedBetween = await Service.Queryable<CustomAccount>()
+            .Where(a => !a.DateCompanyWasOrganized.Between(from, to))
+            .ToListAsync();
+
+        negatedBetween.Should().HaveCount(notBetween.Count);
+        negatedBetween.Select(r => r.CustomAccountId).Should().BeEquivalentTo(notBetween.Select(r => r.CustomAccountId));
+    }
+
+    [Fact]
+    public async Task ToListAsync_WhereNegatedNotBetween_ReturnsSameAsBetween()
+    {
+        var from = new DateTime(2010, 1, 1);
+        var to = new DateTime(2015, 12, 31);
+
+        var between = await Service.Queryable<CustomAccount>()
+            .Where(a => a.DateCompanyWasOrganized.Between(from, to))
+            .ToListAsync();
+
+        var negatedNotBetween = await Service.Queryable<CustomAccount>()
+            .Where(a => !a.DateCompanyWasOrganized.NotBetween(from, to))
+            .ToListAsync();
+
+        negatedNotBetween.Should().HaveCount(between.Count);
+        negatedNotBetween.Select(r => r.CustomAccountId).Should().BeEquivalentTo(between.Select(r => r.CustomAccountId));
+    }
+
     // -------------------------------------------------------------------------
     // Where — DateTime operators (LastXDays)
     // -------------------------------------------------------------------------
@@ -933,6 +969,23 @@ public class QueryableIntegrationTests : IntegrationTestBase
         results.Should().OnlyContain(r =>
             r.FavoriteColors_OptionSetValues == null
             || r.FavoriteColors_OptionSetValues.All(o => o.Value != red));
+    }
+
+    [Fact]
+    public async Task ToListAsync_WhereNegatedContainValues_ReturnsSameAsDoesNotContainValues()
+    {
+        var red = (int)CustomContact.Color.Red;
+
+        var doesNotContain = await Service.Queryable<CustomContact>()
+            .Where(c => c.FavoriteColors_OptionSetValues.DoesNotContainValues(red))
+            .ToListAsync();
+
+        var negatedContain = await Service.Queryable<CustomContact>()
+            .Where(c => !c.FavoriteColors_OptionSetValues.ContainValues(red))
+            .ToListAsync();
+
+        negatedContain.Should().HaveCount(doesNotContain.Count);
+        negatedContain.Select(r => r.CustomContactId).Should().BeEquivalentTo(doesNotContain.Select(r => r.CustomContactId));
     }
 
 }

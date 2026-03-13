@@ -105,6 +105,8 @@ internal static class FetchXmlQueryTranslator
 
     private static ConditionOperator NegateOperator(ConditionOperator op) => op switch
     {
+        ConditionOperator.Between => ConditionOperator.NotBetween,
+        ConditionOperator.NotBetween => ConditionOperator.Between,
         ConditionOperator.ContainValues => ConditionOperator.DoesNotContainValues,
         ConditionOperator.DoesNotContainValues => ConditionOperator.ContainValues,
         _ => throw new NotSupportedException($"Negation of the '{op}' operator is not supported.")

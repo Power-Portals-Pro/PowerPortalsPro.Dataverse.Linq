@@ -1132,6 +1132,52 @@ public class FetchXmlGenerationTests
             """);
     }
 
+    [Fact]
+    public void ToFetchXml_WhereNegatedBetween_GeneratesNotBetweenFilter()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Where(a => !a.DateCompanyWasOrganized.Between(new DateTime(2010, 1, 1), new DateTime(2015, 12, 31)))
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_datecompanywasorganized" operator="not-between">
+                    <value>2010-01-01T00:00:00</value>
+                    <value>2015-12-31T00:00:00</value>
+                  </condition>
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WhereNegatedNotBetween_GeneratesBetweenFilter()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Where(a => !a.DateCompanyWasOrganized.NotBetween(new DateTime(2010, 1, 1), new DateTime(2015, 12, 31)))
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_datecompanywasorganized" operator="between">
+                    <value>2010-01-01T00:00:00</value>
+                    <value>2015-12-31T00:00:00</value>
+                  </condition>
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
     // -------------------------------------------------------------------------
     // Where — Hierarchy operators
     // -------------------------------------------------------------------------
