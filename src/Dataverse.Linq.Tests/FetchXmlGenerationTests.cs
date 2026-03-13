@@ -446,4 +446,131 @@ public class FetchXmlGenerationTests
             </fetch>
             """);
     }
+
+    // -------------------------------------------------------------------------
+    // Complex queries — join + where + orderby + select
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_ComplexJoinWithWhereOrderBySelect_GeneratesCorrectFetchXml()
+    {
+        var fetchXml = (from c in _service.Queryable<CustomContact>()
+                        join a in _service.Queryable<CustomAccount>()
+                            on c.CustomContactId equals a.PrimaryContact.Id
+                        where a.Website == null
+                            && (a.Name.Contains("Account") || c.LastName.Contains("Last"))
+                        orderby c.LastName
+                        select new
+                        {
+                            account_name = a.Name,
+                            account_website = a.Website,
+                            contact_name = c.LastName
+                        }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customcontact">
+                <attribute name="new_lastname" />
+                <link-entity name="new_customaccount" from="new_primarycontact" to="new_customcontactid" alias="a" link-type="inner">
+                  <attribute name="new_name" />
+                  <attribute name="new_website" />
+                </link-entity>
+                <filter type="and">
+                  <condition entityname="a" attribute="new_website" operator="null" />
+                  <filter type="or">
+                    <condition entityname="a" attribute="new_name" operator="like" value="%Account%" />
+                    <condition attribute="new_lastname" operator="like" value="%Last%" />
+                  </filter>
+                </filter>
+                <order attribute="new_lastname" descending="false" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_JoinWithWhereOnInnerEntity_GeneratesEntityNameOnCondition()
+    {
+        var fetchXml = (from c in _service.Queryable<CustomContact>()
+                        join a in _service.Queryable<CustomAccount>()
+                            on c.CustomContactId equals a.PrimaryContact.Id
+                        where a.Name == "Test"
+                        select new { c.LastName, a.Name }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customcontact">
+                <attribute name="new_lastname" />
+                <link-entity name="new_customaccount" from="new_primarycontact" to="new_customcontactid" alias="a" link-type="inner">
+                  <attribute name="new_name" />
+                </link-entity>
+                <filter type="and">
+                  <condition entityname="a" attribute="new_name" operator="eq" value="Test" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_JoinWithContainsFilter_GeneratesLikeCondition()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Where(a => a.Name.Contains("Test"))
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_name" operator="like" value="%Test%" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WithStartsWithFilter_GeneratesLikeCondition()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Where(a => a.Name.StartsWith("Custom"))
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_name" operator="like" value="Custom%" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WithEndsWithFilter_GeneratesLikeCondition()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Where(a => a.Name.EndsWith("001"))
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_name" operator="like" value="%001" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
 }

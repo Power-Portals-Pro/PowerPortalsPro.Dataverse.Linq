@@ -9,7 +9,7 @@ namespace Dataverse.Linq;
 /// <typeparamref name="TElement"/> is not the source entity type (e.g. an anonymous-type
 /// projection).  Carries the full expression tree through to async execution.
 /// </summary>
-internal class DataverseProjectedQueryable<TElement> : IQueryable<TElement>
+internal class DataverseProjectedQueryable<TElement> : IQueryable<TElement>, IOrderedQueryable<TElement>
 {
     private readonly IAsyncQueryProvider _provider;
 

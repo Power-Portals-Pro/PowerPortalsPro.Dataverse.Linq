@@ -485,4 +485,100 @@ public class QueryableIntegrationTests : IntegrationTestBase
         unbound.Should().HaveSameCount(typed);
         unbound.Select(u => u.Name).Should().BeEquivalentTo(typed.Select(t => t.Name));
     }
+
+    // -------------------------------------------------------------------------
+    // Complex queries — join + where + orderby + select
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ToListAsync_JoinWithWhereAndOrderByAndSelect_ReturnsFilteredOrderedResults()
+    {
+        var results = await (from c in Service.Queryable<CustomContact>()
+                             join a in Service.Queryable<CustomAccount>()
+                                 on c.CustomContactId equals a.PrimaryContact.Id
+                             where a.Name != null
+                             orderby c.LastName
+                             select new
+                             {
+                                 AccountName = a.Name,
+                                 ContactLastName = c.LastName
+                             }).ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Should().AllSatisfy(r =>
+        {
+            r.AccountName.Should().NotBeNull();
+            r.ContactLastName.Should().NotBeNullOrEmpty();
+        });
+        results.Select(r => r.ContactLastName).Should().BeInAscendingOrder();
+    }
+
+    [Fact]
+    public async Task ToListAsync_JoinWithContainsFilter_ReturnsMatchingRecords()
+    {
+        var results = await (from c in Service.Queryable<CustomContact>()
+                             join a in Service.Queryable<CustomAccount>()
+                                 on c.CustomContactId equals a.PrimaryContact.Id
+                             where a.Name.Contains("Account")
+                             select new
+                             {
+                                 AccountName = a.Name,
+                                 ContactLastName = c.LastName
+                             }).ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Should().AllSatisfy(r =>
+            r.AccountName.Should().Contain("Account"));
+    }
+
+    [Fact]
+    public async Task ToListAsync_JoinWithOrFilter_ReturnsRecordsMatchingEitherCondition()
+    {
+        var results = await (from c in Service.Queryable<CustomContact>()
+                             join a in Service.Queryable<CustomAccount>()
+                                 on c.CustomContactId equals a.PrimaryContact.Id
+                             where a.Name.Contains("001") || c.LastName.Contains("Last1")
+                             select new
+                             {
+                                 AccountName = a.Name,
+                                 ContactLastName = c.LastName
+                             }).ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Should().AllSatisfy(r =>
+            (r.AccountName.Contains("001") || r.ContactLastName.Contains("Last1")).Should().BeTrue());
+    }
+
+    [Fact]
+    public async Task ToListAsync_WithContainsFilter_ReturnsMatchingRecords()
+    {
+        var results = await Service.Queryable<CustomAccount>()
+            .Where(a => a.Name.Contains("Account"))
+            .ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Should().AllSatisfy(r => r.Name.Should().Contain("Account"));
+    }
+
+    [Fact]
+    public async Task ToListAsync_WithStartsWithFilter_ReturnsMatchingRecords()
+    {
+        var results = await Service.Queryable<CustomAccount>()
+            .Where(a => a.Name.StartsWith("Custom"))
+            .ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Should().AllSatisfy(r => r.Name.Should().StartWith("Custom"));
+    }
+
+    [Fact]
+    public async Task ToListAsync_WithEndsWithFilter_ReturnsMatchingRecords()
+    {
+        var results = await Service.Queryable<CustomAccount>()
+            .Where(a => a.Name.EndsWith("001"))
+            .ToListAsync();
+
+        results.Should().HaveCount(2);
+        results.Should().OnlyContain(r => r.Name.EndsWith("001"));
+    }
 }

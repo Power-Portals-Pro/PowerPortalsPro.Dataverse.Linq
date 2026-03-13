@@ -40,11 +40,11 @@ internal static class FetchXmlBuilder
         foreach (var link in query.Links)
             element.Add(BuildLinkEntity(link));
 
-        foreach (var order in query.Orders)
-            element.Add(BuildOrder(order));
-
         if (query.Filter is not null)
             element.Add(BuildFilter(query.Filter));
+
+        foreach (var order in query.Orders)
+            element.Add(BuildOrder(order));
 
         return element;
     }
@@ -114,10 +114,17 @@ internal static class FetchXmlBuilder
     // Order / Attribute
     // -------------------------------------------------------------------------
 
-    private static XElement BuildOrder(FetchOrder order) =>
-        new("order",
+    private static XElement BuildOrder(FetchOrder order)
+    {
+        var element = new XElement("order",
             new XAttribute("attribute", order.Attribute),
             new XAttribute("descending", order.Descending ? "true" : "false"));
+
+        if (order.EntityAlias is not null)
+            element.Add(new XAttribute("entityname", order.EntityAlias));
+
+        return element;
+    }
 
     private static XElement BuildAttribute(FetchAttribute attr)
     {

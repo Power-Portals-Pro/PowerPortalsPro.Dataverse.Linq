@@ -5,6 +5,7 @@ namespace Dataverse.Linq.Model;
 /// </summary>
 internal sealed class FetchOrder
 {
+    public string? EntityAlias { get; set; }
     public string Attribute { get; set; } = null!;
     public bool Descending { get; set; }
 }
