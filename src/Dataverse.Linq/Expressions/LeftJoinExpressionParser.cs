@@ -52,24 +52,22 @@ internal static class LeftJoinExpressionParser
         var innerKeyAttr = GetAttributeName(ExtractLambda(groupJoinCall.Arguments[3]).Body)
             ?? throw new NotSupportedException("Inner join key must be a property decorated with [AttributeLogicalName].");
 
-        // Determine which property of the transparent identifier holds the outer entity.
-        // Use the lambda's first parameter type to find the property whose type matches
-        // the outer entity — this avoids fragile parameter reference-equality checks.
+        // Find the path to the outer entity through any number of transparent-identifier
+        // nesting levels. E.g. for a with-where query the compiler produces:
+        //   TI2 { <>h__TransparentIdentifier0: TI1 { a: CustomAccount, contacts }, c }
+        // so the path is ["<>h__TransparentIdentifier0", "a"].
         var lambdaToInspect = selectLambda ?? selectManyResultSelector;
-        var outerPropertyName = GetOuterPropertyNameByType(lambdaToInspect, outerEntityType);
+        var outerPath = FindOuterPropertyPath(lambdaToInspect.Parameters[0].Type, outerEntityType);
 
         IReadOnlyList<string>? outerColumns = null;
         Delegate? projector = null;
 
-        // When a Where clause is present the compiler emits a separate Select call.
-        // When there is no Where, the compiler inlines the final projection directly
-        // into the SelectMany result selector — so selectLambda is null in that case.
-        var projectionSource = selectLambda ?? (outerPropertyName is not null ? selectManyResultSelector : null);
+        var projectionSource = selectLambda ?? (outerPath is not null ? selectManyResultSelector : null);
 
-        if (projectionSource is not null && outerPropertyName is not null)
+        if (projectionSource is not null && outerPath is not null)
         {
-            outerColumns = ExtractOuterColumns(projectionSource, outerPropertyName);
-            projector = RebuildProjector(projectionSource, outerPropertyName);
+            outerColumns = ExtractOuterColumns(projectionSource, outerPath);
+            projector = RebuildProjector(projectionSource, outerPath, outerEntityType);
         }
 
         return new LeftJoinInfo(
@@ -108,23 +106,40 @@ internal static class LeftJoinExpressionParser
          binary.Right is ConstantExpression { Value: null });
 
     // -------------------------------------------------------------------------
-    // Column / projector extraction
+    // Outer property path resolution
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Finds the property on the lambda's first parameter type whose type IS (or is assignable from)
-    /// <paramref name="outerEntityType"/>. This is the transparent-identifier slot that holds the
-    /// outer entity — e.g. property "a" of type <c>CustomAccount</c> in <c>{ a, c }</c>.
+    /// Recursively searches <paramref name="type"/> for a property whose type IS (or is
+    /// assignable from) <paramref name="outerEntityType"/>, descending into compiler-generated
+    /// transparent-identifier types (<c>&lt;&gt;h__TransparentIdentifier</c>).
+    /// Returns the property-name chain, e.g. <c>["&lt;&gt;h__TransparentIdentifier0", "a"]</c>,
+    /// or <c>null</c> if not found.
     /// </summary>
-    private static string? GetOuterPropertyNameByType(LambdaExpression lambda, Type outerEntityType)
+    private static string[]? FindOuterPropertyPath(Type type, Type outerEntityType, int maxDepth = 5)
     {
-        var paramType = lambda.Parameters[0].Type;
-        return paramType.GetProperties()
-            .FirstOrDefault(p => outerEntityType.IsAssignableFrom(p.PropertyType))
-            ?.Name;
+        foreach (var prop in type.GetProperties())
+        {
+            if (outerEntityType.IsAssignableFrom(prop.PropertyType))
+                return [prop.Name];
+
+            // Recurse into compiler-generated transparent-identifier types only
+            if (maxDepth > 1 && prop.PropertyType.Name.StartsWith("<>"))
+            {
+                var nested = FindOuterPropertyPath(prop.PropertyType, outerEntityType, maxDepth - 1);
+                if (nested is not null)
+                    return [prop.Name, .. nested];
+            }
+        }
+
+        return null;
     }
 
-    private static IReadOnlyList<string>? ExtractOuterColumns(LambdaExpression selectLambda, string outerPropertyName)
+    // -------------------------------------------------------------------------
+    // Column / projector extraction
+    // -------------------------------------------------------------------------
+
+    private static IReadOnlyList<string>? ExtractOuterColumns(LambdaExpression selectLambda, string[] outerPath)
     {
         var xParam = selectLambda.Parameters[0];
         var columns = new List<string>();
@@ -137,10 +152,9 @@ internal static class LeftJoinExpressionParser
 
         foreach (var arg in args)
         {
-            // Match x.outerPropertyName.SomeAttribute pattern
-            if (arg is MemberExpression { Member: PropertyInfo prop, Expression: MemberExpression inner }
-                && inner.Expression == xParam
-                && inner.Member.Name == outerPropertyName)
+            // Match param.path[0]...path[n-1].SomeAttribute
+            if (arg is MemberExpression { Member: PropertyInfo prop, Expression: { } attrExpr } attrAccess
+                && IsOuterEntityAccess(attrExpr, xParam, outerPath))
             {
                 var attrName = prop.GetCustomAttribute<AttributeLogicalNameAttribute>()?.LogicalName;
                 if (attrName is not null)
@@ -152,16 +166,15 @@ internal static class LeftJoinExpressionParser
     }
 
     /// <summary>
-    /// Rewrites <c>x => new { x.a.Name }</c> into <c>(T outer) => new { outer.Name }</c>
+    /// Rewrites <c>x => new { x.ti0.a.Name }</c> into <c>(CustomAccount outer) => new { outer.Name }</c>
     /// so it can be invoked directly with the outer entity.
     /// </summary>
-    private static Delegate RebuildProjector(LambdaExpression selectLambda, string outerPropertyName)
+    private static Delegate RebuildProjector(LambdaExpression selectLambda, string[] outerPath, Type outerEntityType)
     {
         var originalParam = selectLambda.Parameters[0];
-        var outerType = originalParam.Type.GetProperty(outerPropertyName)!.PropertyType;
-        var outerParam = Expression.Parameter(outerType, "outer");
+        var outerParam = Expression.Parameter(outerEntityType, "outer");
 
-        var newBody = new OuterEntityRewriter(originalParam, outerParam, outerPropertyName)
+        var newBody = new OuterEntityRewriter(originalParam, outerParam, outerPath)
             .Visit(selectLambda.Body);
 
         return Expression.Lambda(newBody, outerParam).Compile();
@@ -170,20 +183,32 @@ internal static class LeftJoinExpressionParser
     private sealed class OuterEntityRewriter(
         ParameterExpression originalParam,
         ParameterExpression outerParam,
-        string outerPropertyName) : ExpressionVisitor
+        string[] outerPath) : ExpressionVisitor
     {
         protected override Expression VisitMember(MemberExpression node)
         {
-            // x.a.Property → outer.Property
-            if (node.Expression is MemberExpression inner &&
-                inner.Expression == originalParam &&
-                inner.Member.Name == outerPropertyName)
-            {
+            // param.path[0]...path[n-1].Property → outer.Property
+            if (node.Expression is not null && IsOuterEntityAccess(node.Expression, originalParam, outerPath))
                 return Expression.MakeMemberAccess(outerParam, node.Member);
-            }
 
             return base.VisitMember(node);
         }
+    }
+
+    /// <summary>
+    /// Returns true when <paramref name="expr"/> is the chain
+    /// <c>param.path[0].path[1]...path[n-1]</c>.
+    /// </summary>
+    private static bool IsOuterEntityAccess(Expression expr, ParameterExpression param, string[] path)
+    {
+        for (var i = path.Length - 1; i >= 0; i--)
+        {
+            if (expr is not MemberExpression me || me.Member.Name != path[i])
+                return false;
+            expr = me.Expression!;
+        }
+
+        return expr is ParameterExpression p && p == param;
     }
 
     // -------------------------------------------------------------------------
