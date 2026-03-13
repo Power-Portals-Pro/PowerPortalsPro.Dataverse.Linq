@@ -224,28 +224,31 @@ internal static class FetchXmlQueryTranslator
         }
     }
 
-    private static void TranslatePredicate(Expression expr, FetchFilter filter, TranslationContext ctx)
+    private static void TranslatePredicate(Expression expr, FetchFilter filter, TranslationContext ctx, bool negated = false)
     {
         switch (expr)
         {
-            // !expr → negate
+            // !expr → recurse with negated flag
             case UnaryExpression { NodeType: ExpressionType.Not, Operand: var operand }:
-                TranslateNegatedPredicate(operand, filter, ctx);
+                TranslatePredicate(operand, filter, ctx, negated: !negated);
                 return;
 
-            // string.IsNullOrEmpty(x.Attr) → null OR eq ""
+            // string.IsNullOrEmpty(x.Attr) → null OR eq ""  /  negated → not-null AND ne ""
             case MethodCallExpression { Method: { Name: "IsNullOrEmpty", DeclaringType: var dt } } isNullCall
                 when dt == typeof(string):
             {
                 var resolved = ResolveMethodAttribute(isNullCall, ctx);
-                var subFilter = new FetchFilter { Type = FilterType.Or };
-                subFilter.Conditions.Add(new FetchCondition { Attribute = resolved.Name, EntityAlias = resolved.EntityAlias, Operator = ConditionOperator.Null });
-                subFilter.Conditions.Add(new FetchCondition { Attribute = resolved.Name, EntityAlias = resolved.EntityAlias, Operator = ConditionOperator.Equal, Value = "" });
+                var (filterType, nullOp, emptyOp) = negated
+                    ? (FilterType.And, ConditionOperator.NotNull, ConditionOperator.NotEqual)
+                    : (FilterType.Or, ConditionOperator.Null, ConditionOperator.Equal);
+                var subFilter = new FetchFilter { Type = filterType };
+                subFilter.Conditions.Add(new FetchCondition { Attribute = resolved.Name, EntityAlias = resolved.EntityAlias, Operator = nullOp });
+                subFilter.Conditions.Add(new FetchCondition { Attribute = resolved.Name, EntityAlias = resolved.EntityAlias, Operator = emptyOp, Value = "" });
                 filter.Filters.Add(subFilter);
                 return;
             }
 
-            // x.Attr.Contains("value") / StartsWith / EndsWith → like
+            // x.Attr.Contains("value") / StartsWith / EndsWith → like  /  negated → not-like
             case MethodCallExpression { Method: { Name: "Contains" or "StartsWith" or "EndsWith" } } stringCall
                 when stringCall.Method.DeclaringType == typeof(string) && stringCall.Object is not null:
             {
@@ -254,7 +257,7 @@ internal static class FetchXmlQueryTranslator
                 {
                     Attribute = resolved.Name,
                     EntityAlias = resolved.EntityAlias,
-                    Operator = ConditionOperator.Like,
+                    Operator = negated ? ConditionOperator.NotLike : ConditionOperator.Like,
                     Value = pattern
                 });
                 return;
@@ -278,43 +281,6 @@ internal static class FetchXmlQueryTranslator
             default:
                 throw new NotSupportedException(
                     $"Unsupported Where predicate: {expr.NodeType}");
-        }
-    }
-
-    private static void TranslateNegatedPredicate(Expression expr, FetchFilter filter, TranslationContext ctx)
-    {
-        switch (expr)
-        {
-            // !string.IsNullOrEmpty(x.Attr) → not-null AND ne ""
-            case MethodCallExpression { Method: { Name: "IsNullOrEmpty", DeclaringType: var dt } } isNullCall
-                when dt == typeof(string):
-            {
-                var resolved = ResolveMethodAttribute(isNullCall, ctx);
-                var subFilter = new FetchFilter { Type = FilterType.And };
-                subFilter.Conditions.Add(new FetchCondition { Attribute = resolved.Name, EntityAlias = resolved.EntityAlias, Operator = ConditionOperator.NotNull });
-                subFilter.Conditions.Add(new FetchCondition { Attribute = resolved.Name, EntityAlias = resolved.EntityAlias, Operator = ConditionOperator.NotEqual, Value = "" });
-                filter.Filters.Add(subFilter);
-                return;
-            }
-
-            // !x.Attr.Contains("value") → not-like
-            case MethodCallExpression { Method: { Name: "Contains" or "StartsWith" or "EndsWith" } } stringCall
-                when stringCall.Method.DeclaringType == typeof(string) && stringCall.Object is not null:
-            {
-                var (resolved, pattern) = ResolveStringMethodAttribute(stringCall, ctx);
-                filter.Conditions.Add(new FetchCondition
-                {
-                    Attribute = resolved.Name,
-                    EntityAlias = resolved.EntityAlias,
-                    Operator = ConditionOperator.NotLike,
-                    Value = pattern
-                });
-                return;
-            }
-
-            default:
-                throw new NotSupportedException(
-                    $"Unsupported negated Where predicate: {expr.NodeType}");
         }
     }
 
