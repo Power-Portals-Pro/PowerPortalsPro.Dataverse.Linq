@@ -1521,5 +1521,4 @@ public class QueryableIntegrationTests : IntegrationTestBase
             r.Count.Should().BeGreaterThan(0);
         });
     }
-
 }

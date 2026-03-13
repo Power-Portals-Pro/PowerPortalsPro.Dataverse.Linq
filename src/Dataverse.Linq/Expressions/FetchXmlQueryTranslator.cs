@@ -203,6 +203,11 @@ internal static class FetchXmlQueryTranslator
                         HandleTerminalOperator(call, ctx);
                         return;
 
+                    case nameof(Queryable.Distinct):
+                        TranslateCore(call.Arguments[0], ctx);
+                        ctx.Query.Distinct = true;
+                        return;
+
                     case nameof(Queryable.GroupBy):
                         HandleGroupBy(call, ctx);
                         return;
