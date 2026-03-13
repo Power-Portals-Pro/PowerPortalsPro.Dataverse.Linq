@@ -37,4 +37,12 @@ public class CustomContact : Entity
         get => GetAttributeValue<EntityReference>("new_parentaccount");
         set => SetAttributeValue("new_parentaccount", value);
     }
+
+    [AttributeLogicalName("new_parentaccount")]
+    public Guid? ParentAccountId
+    {
+        get => GetAttributeValue<EntityReference>("new_parentaccount")?.Id;
+        set => SetAttributeValue("new_parentaccount",
+            value.HasValue ? new EntityReference(CustomAccount.LogicalName, value.Value) : null);
+    }
 }

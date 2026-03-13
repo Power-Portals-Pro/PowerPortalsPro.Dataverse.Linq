@@ -17,6 +17,13 @@ public class CustomAccount : Entity
         Attributes.AddRange(entity.Attributes);
     }
 
+    [AttributeLogicalName("new_customaccountid")]
+    public Guid AccountId
+    {
+        get => Id;
+        set => Id = value;
+    }
+
     [AttributeLogicalName("new_name")]
     public string? Name
     {
