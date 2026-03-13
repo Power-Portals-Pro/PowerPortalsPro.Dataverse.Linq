@@ -3,7 +3,6 @@ using Dataverse.Linq.Tests.Proxies;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.PowerPlatform.Dataverse.Client;
-using Microsoft.Xrm.Sdk;
 
 namespace Dataverse.Linq.Tests;
 
@@ -1408,6 +1407,35 @@ public class QueryableIntegrationTests : IntegrationTestBase
         var count = Service.Queryable<CustomAccount>().LongCount();
 
         count.Should().Be(all.Count);
+    }
+
+    // -------------------------------------------------------------------------
+    // Join with complex where and string interpolation projection
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ToListAsync_JoinWithComplexWhereAndInterpolation_ReturnsResults()
+    {
+        var accounts = await (from a in Service.Queryable<CustomAccount>()
+                              join c in Service.Queryable<CustomContact>()
+                                on a.CustomAccountId equals c.ParentAccount.Id
+                              where a.PercentComplete != null
+                                && (c.LastName.StartsWith("Last1")
+                                    || c.LastName.StartsWith("Last2"))
+                                && (a.NumberOfEmployees > 30
+                                    || a.PercentComplete < 30)
+                              select new
+                              {
+                                  a.Name,
+                                  Combined = $"{c.FirstName} {c.LastName}",
+                              }).ToListAsync();
+
+        accounts.Should().NotBeEmpty();
+        accounts.Should().AllSatisfy(r =>
+        {
+            r.Name.Should().NotBeNullOrEmpty();
+            r.Combined.Should().NotBeNullOrEmpty();
+        });
     }
 
 }

@@ -261,15 +261,7 @@ internal static class FetchXmlQueryTranslator
         var linkColumns = new List<string>();
 
         foreach (var arg in GetProjectionArguments(lambda.Body))
-        {
-            var resolved = ResolveAttribute(arg, ctx);
-            if (resolved is null) continue;
-
-            if (resolved.Value.EntityAlias is null)
-                rootColumns.Add(resolved.Value.Name);
-            else
-                linkColumns.Add(resolved.Value.Name);
-        }
+            CollectJoinAttributes(arg, ctx, rootColumns, linkColumns);
 
         if (rootColumns.Count > 0)
             ApplyColumns(ctx.Query, rootColumns);
@@ -282,6 +274,51 @@ internal static class FetchXmlQueryTranslator
 
         ctx.Query.Projector = RebuildJoinProjector(lambda, ctx);
         ctx.Query.ProjectionType = lambda.ReturnType;
+    }
+
+    /// <summary>
+    /// Recursively walks an expression to find all attribute references in a join
+    /// projection. Handles simple property access as well as complex expressions
+    /// like string interpolation (<c>string.Concat</c> / <c>string.Format</c>).
+    /// </summary>
+    private static void CollectJoinAttributes(
+        Expression expr, TranslationContext ctx,
+        List<string> rootColumns, List<string> linkColumns)
+    {
+        var resolved = ResolveAttribute(expr, ctx);
+        if (resolved is not null)
+        {
+            if (resolved.Value.EntityAlias is null)
+                rootColumns.Add(resolved.Value.Name);
+            else
+                linkColumns.Add(resolved.Value.Name);
+            return;
+        }
+
+        // Walk into sub-expressions to find nested attribute references
+        switch (expr)
+        {
+            case MethodCallExpression mc:
+                if (mc.Object is not null)
+                    CollectJoinAttributes(mc.Object, ctx, rootColumns, linkColumns);
+                foreach (var a in mc.Arguments)
+                    CollectJoinAttributes(a, ctx, rootColumns, linkColumns);
+                break;
+
+            case BinaryExpression binary:
+                CollectJoinAttributes(binary.Left, ctx, rootColumns, linkColumns);
+                CollectJoinAttributes(binary.Right, ctx, rootColumns, linkColumns);
+                break;
+
+            case UnaryExpression unary:
+                CollectJoinAttributes(unary.Operand, ctx, rootColumns, linkColumns);
+                break;
+
+            case NewArrayExpression newArray:
+                foreach (var element in newArray.Expressions)
+                    CollectJoinAttributes(element, ctx, rootColumns, linkColumns);
+                break;
+        }
     }
 
     // -------------------------------------------------------------------------

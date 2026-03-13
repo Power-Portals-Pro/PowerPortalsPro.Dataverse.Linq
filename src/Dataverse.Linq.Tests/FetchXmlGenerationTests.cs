@@ -1851,6 +1851,52 @@ public class FetchXmlGenerationTests
     }
 
     // -------------------------------------------------------------------------
+    // Join with complex where and string interpolation projection
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_JoinWithComplexWhereAndInterpolation_GeneratesCorrectFetchXml()
+    {
+        var fetchXml = (from a in _service.Queryable<CustomAccount>()
+                        join c in _service.Queryable<CustomContact>()
+                            on a.CustomAccountId equals c.ParentAccount.Id
+                        where a.PercentComplete != null
+                            && (c.LastName.StartsWith("Last1")
+                                || c.LastName.StartsWith("Last2"))
+                            && (a.NumberOfEmployees > 30
+                                || a.PercentComplete < 30)
+                        select new
+                        {
+                            a.Name,
+                            Combined = $"{c.FirstName} {c.LastName}",
+                        }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+                <filter type="and">
+                  <condition attribute="new_percentcomplete" operator="not-null" />
+                  <filter type="or">
+                    <condition entityname="c" attribute="new_lastname" operator="like" value="Last1%" />
+                    <condition entityname="c" attribute="new_lastname" operator="like" value="Last2%" />
+                  </filter>
+                  <filter type="or">
+                    <condition attribute="new_numberofemployees" operator="gt" value="30" />
+                    <condition attribute="new_percentcomplete" operator="lt" value="30" />
+                  </filter>
+                </filter>
+                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="inner">
+                  <attribute name="new_firstname" />
+                  <attribute name="new_lastname" />
+                </link-entity>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    // -------------------------------------------------------------------------
     // Aggregate operators — Min / Max / Sum / Average / Count
     // -------------------------------------------------------------------------
 

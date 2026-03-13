@@ -112,7 +112,10 @@
       "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"FullyQualifiedName~Count_|FullyQualifiedName~Min_|FullyQualifiedName~Max_|FullyQualifiedName~Sum_|FullyQualifiedName~Average_|FullyQualifiedName~LongCount|FullyQualifiedName~MoneyValue\" --no-restore --logger \"console;verbosity=detailed\" 2>&1 | grep -E \"FAIL|Passed|Expected|but found\")",
       "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"FullyQualifiedName~Count_|FullyQualifiedName~Min_|FullyQualifiedName~Max_|FullyQualifiedName~Sum_|FullyQualifiedName~Average_|FullyQualifiedName~LongCount|FullyQualifiedName~MoneyValue\" --no-restore --logger \"console;verbosity=detailed\" 2>&1 | grep -E \"FAIL|Passed\\\\b|Expected|but found\")",
       "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"FullyQualifiedName~Average_WithSelector\" --no-restore --logger \"console;verbosity=detailed\" 2>&1 | grep -E \"FAIL|Passed\\\\b|Expected|but found\")",
-      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --no-restore 2>&1 | tail -5)"
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --no-restore 2>&1 | tail -5)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"FullyQualifiedName~JoinWithComplexWhereAndInterpolation\" --no-restore --logger \"console;verbosity=detailed\" 2>&1 | grep -A 30 \"System.Exception\")",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"FullyQualifiedName~JoinWithComplex\" --no-restore --logger \"console;verbosity=detailed\" 2>&1 | grep -E \"FAIL|Passed\\\\b|Exception|Error\" | head -20)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"FullyQualifiedName~JoinWithComplex\" --no-restore --logger \"console;verbosity=detailed\" 2>&1 | grep -E \"FAIL|Passed\\\\b|Expected|but found|differ\" | head -20)"
     ]
   }
 }
