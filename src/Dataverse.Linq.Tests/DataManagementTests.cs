@@ -57,6 +57,9 @@ public class DataManagementTests : IntegrationTestBase
         await Service.ExecuteAsync(requests);
     }
 
+    private static readonly CustomAccount.AccountRating_Enum[] Ratings =
+        [CustomAccount.AccountRating_Enum.Cold, CustomAccount.AccountRating_Enum.Warm, CustomAccount.AccountRating_Enum.Hot];
+
     private async Task<List<Guid>> SeedAccountsAsync(int count)
     {
         var requests = new ExecuteMultipleRequest
@@ -72,6 +75,30 @@ public class DataManagementTests : IntegrationTestBase
                 ["new_name"] = $"Custom Account {i:D3}",
                 ["new_website"] = $"https://account{i:D3}.example.com"
             };
+
+            // Each column uses a different modulus so nulls are spread across
+            // different records, giving varied test coverage.
+            if (i % 5 != 0)
+                account["new_accountrating"] = new OptionSetValue((int)Ratings[i % 3]);
+            if (i % 7 != 0)
+                account["new_creditlimit"] = new Money(i * 1000m + 0.50m);
+            if (i % 4 != 0)
+                account["new_datecompanywasorganized"] = new DateTime(2000 + (i % 25), (i % 12) + 1, (i % 28) + 1);
+            if (i % 6 != 0)
+                account["new_description"] = $"Description for account {i:D3}";
+            if (i % 5 != 1)
+                account["new_ispreferredaccount"] = i % 2 == 0;
+            if (i % 3 != 0)
+                account["new_latitude"] = 30.0 + (i % 60);
+            if (i % 3 != 0)
+                account["new_longitude"] = -120.0 + (i % 120);
+            if (i % 8 != 0)
+                account["new_numberofemployees"] = i * 10;
+            if (i % 4 != 1)
+                account["new_percentcomplete"] = (decimal)(i % 101);
+            if (i % 6 != 1)
+                account["new_primaryemail"] = $"account{i:D3}@example.com";
+
             requests.Requests.Add(new CreateRequest { Target = account });
         }
 

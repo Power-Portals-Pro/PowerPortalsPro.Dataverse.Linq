@@ -36,4 +36,22 @@ public static class ServiceClientExtensions
 
         return Task.FromResult(queryable.ToList());
     }
+
+    /// <summary>
+    /// Translates the LINQ query into its FetchXml representation without executing it.
+    /// Useful for debugging, logging, or inspecting the generated query.
+    /// </summary>
+    public static string ToFetchXml<TElement>(this IQueryable<TElement> queryable)
+    {
+        var providerType = queryable.Provider.GetType();
+
+        if (providerType.IsGenericType &&
+            providerType.GetGenericTypeDefinition() == typeof(DataverseQueryProvider<>))
+        {
+            return ((dynamic)queryable.Provider).GenerateFetchXml(queryable.Expression);
+        }
+
+        throw new InvalidOperationException(
+            "ToFetchXml can only be used with Dataverse queryables created via Queryable<T>().");
+    }
 }

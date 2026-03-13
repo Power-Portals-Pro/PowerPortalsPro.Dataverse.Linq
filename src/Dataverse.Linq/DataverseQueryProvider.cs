@@ -84,6 +84,12 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
         return RetrieveAll(fetchXml).Select(e => e.ToEntity<T>()).ToList();
     }
 
+    internal string GenerateFetchXml(Expression expression)
+    {
+        var query = FetchXmlQueryTranslator.Translate<T>(expression, Columns);
+        return FetchXmlBuilder.Build(query);
+    }
+
     // -------------------------------------------------------------------------
     // Async execution
     // -------------------------------------------------------------------------
