@@ -1,4 +1,4 @@
-using Dataverse.Linq.Tests.ProxyClasses;
+using Dataverse.Linq.Tests.Proxies;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.PowerPlatform.Dataverse.Client;
@@ -128,7 +128,7 @@ public class QueryableIntegrationTests : IntegrationTestBase
     {
         var results = await (from a in Service.Queryable<CustomAccount>()
                              join c in Service.Queryable<CustomContact>()
-                                 on a.AccountId equals c.ParentAccountId
+                                 on a.CustomAccountId equals c.ParentAccount.Id
                              select new { a.Name, c.FirstName, c.LastName }).ToListAsync();
 
         results.Should().NotBeEmpty();
@@ -146,7 +146,7 @@ public class QueryableIntegrationTests : IntegrationTestBase
     {
         var results = await (from a in Service.Queryable<CustomAccount>()
                              join c in Service.Queryable<CustomContact>()
-                                 on a.AccountId equals c.ParentAccountId
+                                 on a.CustomAccountId equals c.ParentAccount.Id
                              select new { a.Name, c.FirstName, c.LastName }).ToListAsync();
 
         results.Should().HaveCount(500);
@@ -157,7 +157,7 @@ public class QueryableIntegrationTests : IntegrationTestBase
     {
         var results = await (from a in Service.Queryable<CustomAccount>()
                              join c in Service.Queryable<CustomContact>()
-                                 on a.AccountId equals c.ParentAccountId
+                                 on a.CustomAccountId equals c.ParentAccount.Id
                              select new { a.Name, c.FirstName, c.LastName }).ToListAsync();
 
         results.Should().AllSatisfy(r => r.Name.Should().NotBeNullOrEmpty());
@@ -168,7 +168,7 @@ public class QueryableIntegrationTests : IntegrationTestBase
     {
         var results = await (from a in Service.Queryable<CustomAccount>()
                              join c in Service.Queryable<CustomContact>()
-                                 on a.AccountId equals c.ParentAccountId
+                                 on a.CustomAccountId equals c.ParentAccount.Id
                              select new { a.Name, c.FirstName, c.LastName }).ToListAsync();
 
         results.Should().AllSatisfy(r =>
@@ -183,7 +183,7 @@ public class QueryableIntegrationTests : IntegrationTestBase
     {
         var results = await (from a in Service.Queryable<CustomAccount>()
                              join c in Service.Queryable<CustomContact>()
-                                 on a.AccountId equals c.ParentAccountId
+                                 on a.CustomAccountId equals c.ParentAccount.Id
                              select new { a.Name, c.FirstName, c.LastName }).ToListAsync();
 
         results.GroupBy(r => r.Name)
@@ -199,7 +199,7 @@ public class QueryableIntegrationTests : IntegrationTestBase
     {
         var results = await (from a in Service.Queryable<CustomAccount>()
                              join c in Service.Queryable<CustomContact>()
-                                 on a.AccountId equals c.ParentAccount.Id into contacts
+                                 on a.CustomAccountId equals c.ParentAccount.Id into contacts
                              from c in contacts.DefaultIfEmpty()
                              where c == null
                              select new { a.Name }).ToListAsync();
@@ -213,7 +213,7 @@ public class QueryableIntegrationTests : IntegrationTestBase
     {
         var results = await (from a in Service.Queryable<CustomAccount>()
                              join c in Service.Queryable<CustomContact>()
-                                 on a.AccountId equals c.ParentAccount.Id into contacts
+                                 on a.CustomAccountId equals c.ParentAccount.Id into contacts
                              from c in contacts.DefaultIfEmpty()
                              select new { a.Name }).ToListAsync();
 
@@ -227,7 +227,7 @@ public class QueryableIntegrationTests : IntegrationTestBase
     {
         var results = await (from a in Service.Queryable<CustomAccount>()
                              join c in Service.Queryable<CustomContact>()
-                                 on a.AccountId equals c.ParentAccountId
+                                 on a.CustomAccountId equals c.ParentAccount.Id
                              select new { a.Name, c.FirstName, c.LastName }).ToListAsync();
 
         results.Should().AllSatisfy(r =>
@@ -243,7 +243,7 @@ public class QueryableIntegrationTests : IntegrationTestBase
     {
         var results = await (from a in Service.Queryable<CustomAccount>()
                              join c in Service.Queryable<CustomContact>()
-                                 on a.AccountId equals c.ParentAccount.Id into contacts
+                                 on a.CustomAccountId equals c.ParentAccount.Id into contacts
                              from c in contacts.DefaultIfEmpty()
                              select new { a.Name }).ToListAsync();
 

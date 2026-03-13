@@ -1,4 +1,4 @@
-using Dataverse.Linq.Tests.ProxyClasses;
+using Dataverse.Linq.Tests.Proxies;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.Xrm.Sdk;
