@@ -828,4 +828,64 @@ public class QueryableIntegrationTests : IntegrationTestBase
         results.Should().NotBeEmpty();
     }
 
+    // -------------------------------------------------------------------------
+    // Where — User / Business unit operators
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ToListAsync_WhereEqualUserId_ReturnsRecordsOwnedByCurrentUser()
+    {
+        var results = await Service.Queryable<CustomAccount>()
+            .Where(a => a.Owner.Id.EqualUserId())
+            .ToListAsync();
+
+        // The current user should own the seeded records
+        results.Should().NotBeEmpty();
+
+        // All returned records should share the same owner (the current user)
+        results.Select(r => r.Owner.Id).Distinct().Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task ToListAsync_WhereNotEqualUserId_ReturnsRecordsNotOwnedByCurrentUser()
+    {
+        var ownedByMe = await Service.Queryable<CustomAccount>()
+            .Where(a => a.Owner.Id.EqualUserId())
+            .ToListAsync();
+        var all = await Service.Queryable<CustomAccount>().ToListAsync();
+
+        var results = await Service.Queryable<CustomAccount>()
+            .Where(a => a.Owner.Id.NotEqualUserId())
+            .ToListAsync();
+
+        // eq-userid + ne-userid should cover all records
+        results.Should().HaveCount(all.Count - ownedByMe.Count);
+    }
+
+    [Fact]
+    public async Task ToListAsync_WhereEqualBusinessId_ReturnsRecordsInCurrentBusinessUnit()
+    {
+        var results = await Service.Queryable<CustomAccount>()
+            .Where(a => a.OwningBusinessUnit.Id.EqualBusinessId())
+            .ToListAsync();
+
+        results.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public async Task ToListAsync_WhereNotEqualBusinessId_ReturnsRecordsNotInCurrentBusinessUnit()
+    {
+        var allInBu = await Service.Queryable<CustomAccount>()
+            .Where(a => a.OwningBusinessUnit.Id.EqualBusinessId())
+            .ToListAsync();
+        var all = await Service.Queryable<CustomAccount>().ToListAsync();
+
+        var results = await Service.Queryable<CustomAccount>()
+            .Where(a => a.OwningBusinessUnit.Id.NotEqualBusinessId())
+            .ToListAsync();
+
+        // Records not in current BU = total - records in current BU
+        results.Should().HaveCount(all.Count - allInBu.Count);
+    }
+
 }

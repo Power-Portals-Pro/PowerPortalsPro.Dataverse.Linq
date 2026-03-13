@@ -75,12 +75,22 @@ internal static class FetchXmlQueryTranslator
         ["EqualUserOrUserHierarchyAndTeams"] = ConditionOperator.EqualUserOrUserHierarchyAndTeams,
     };
 
+    private static readonly Dictionary<string, ConditionOperator> UserOperatorMap = new()
+    {
+        ["EqualUserId"] = ConditionOperator.EqualUserId,
+        ["NotEqualUserId"] = ConditionOperator.NotEqualUserId,
+        ["EqualBusinessId"] = ConditionOperator.EqualBusinessId,
+        ["NotEqualBusinessId"] = ConditionOperator.NotEqualBusinessId,
+    };
+
     private static bool TryGetExtensionOperator(Type? declaringType, string methodName, out ConditionOperator op)
     {
         if (declaringType == typeof(Extensions.DateTimeExtensions))
             return DateTimeOperatorMap.TryGetValue(methodName, out op);
         if (declaringType == typeof(Extensions.HierarchyExtensions))
             return HierarchyOperatorMap.TryGetValue(methodName, out op);
+        if (declaringType == typeof(Extensions.UserExtensions))
+            return UserOperatorMap.TryGetValue(methodName, out op);
         op = default;
         return false;
     }

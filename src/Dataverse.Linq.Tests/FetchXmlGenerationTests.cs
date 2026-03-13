@@ -1280,4 +1280,88 @@ public class FetchXmlGenerationTests
             </fetch>
             """);
     }
+
+    // -------------------------------------------------------------------------
+    // Where — User / Business unit operators
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_WhereEqualUserId_GeneratesEqUserIdFilter()
+    {
+        var fetchXml = _service.Queryable<CustomContact>()
+            .Where(c => c.Owner.Id.EqualUserId())
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customcontact">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="ownerid" operator="eq-userid" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WhereNotEqualUserId_GeneratesNeUserIdFilter()
+    {
+        var fetchXml = _service.Queryable<CustomContact>()
+            .Where(c => c.Owner.Id.NotEqualUserId())
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customcontact">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="ownerid" operator="ne-userid" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WhereEqualBusinessId_GeneratesEqBusinessIdFilter()
+    {
+        var fetchXml = _service.Queryable<CustomContact>()
+            .Where(c => c.OwningBusinessUnit.Id.EqualBusinessId())
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customcontact">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="owningbusinessunit" operator="eq-businessid" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WhereNotEqualBusinessId_GeneratesNeBusinessIdFilter()
+    {
+        var fetchXml = _service.Queryable<CustomContact>()
+            .Where(c => c.OwningBusinessUnit.Id.NotEqualBusinessId())
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customcontact">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="owningbusinessunit" operator="ne-businessid" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
 }
