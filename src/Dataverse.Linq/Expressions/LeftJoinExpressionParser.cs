@@ -10,9 +10,9 @@ internal static class LeftJoinExpressionParser
     /// <summary>
     /// Detects the left-join LINQ pattern:
     ///   Select( Where( SelectMany( GroupJoin(...) ) ) )
-    /// and returns a <see cref="LeftJoinInfo"/> when matched, or null otherwise.
+    /// and returns a <see cref="JoinInfo"/> when matched, or null otherwise.
     /// </summary>
-    internal static LeftJoinInfo? TryParse(Expression expression)
+    internal static JoinInfo? TryParse(Expression expression)
     {
         LambdaExpression? selectLambda = null;
         var filterNullInner = false;
@@ -70,15 +70,19 @@ internal static class LeftJoinExpressionParser
             projector = RebuildProjector(projectionSource, outerPath, outerEntityType);
         }
 
-        return new LeftJoinInfo(
+        return new JoinInfo(
             outerLogicalName,
             outerKeyAttr,
             innerLogicalName,
             innerKeyAttr,
             InnerAlias: "je0",
+            IsOuterJoin: true,
             outerColumns,
-            filterNullInner,
-            projector
+            InnerColumns: null,
+            ResultSelector: null,
+            projector,
+            FilterWhereInnerIsNull: filterNullInner,
+            InnerEntityType: null
         );
     }
 

@@ -36,9 +36,12 @@ internal static class JoinExpressionParser
             innerEntityLogicalName,
             innerKeyAttribute,
             InnerAlias: "je0",
+            IsOuterJoin: false,
             outerColumns,
             innerColumns,
-            resultLambda.Compile(),
+            ResultSelector: resultLambda.Compile(),
+            Projector: null,
+            FilterWhereInnerIsNull: false,
             innerEntityType
         );
     }

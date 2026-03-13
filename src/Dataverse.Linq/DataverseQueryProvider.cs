@@ -46,24 +46,27 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
     /// </summary>
     public TResult Execute<TResult>(Expression expression)
     {
-        var leftJoinInfo = LeftJoinExpressionParser.TryParse(expression);
-        if (leftJoinInfo is not null)
-        {
-            var elementType = typeof(TResult).GetGenericArguments()[0];
-            var method = typeof(DataverseQueryProvider<T>)
-                .GetMethod(nameof(FetchLeftJoinList), BindingFlags.NonPublic | BindingFlags.Instance)!
-                .MakeGenericMethod(elementType);
-            return (TResult)method.Invoke(this, [leftJoinInfo])!;
-        }
+        var joinInfo = LeftJoinExpressionParser.TryParse(expression)
+            ?? JoinExpressionParser.TryParse(expression);
 
-        var joinInfo = JoinExpressionParser.TryParse(expression);
         if (joinInfo is not null)
         {
             var elementType = typeof(TResult).GetGenericArguments()[0];
-            var method = typeof(DataverseQueryProvider<T>)
-                .GetMethod(nameof(FetchJoinedList), BindingFlags.NonPublic | BindingFlags.Instance)!
-                .MakeGenericMethod(joinInfo.InnerEntityType, elementType);
-            return (TResult)method.Invoke(this, [joinInfo])!;
+
+            if (joinInfo.IsOuterJoin)
+            {
+                var method = typeof(DataverseQueryProvider<T>)
+                    .GetMethod(nameof(FetchLeftJoinList), BindingFlags.NonPublic | BindingFlags.Instance)!
+                    .MakeGenericMethod(elementType);
+                return (TResult)method.Invoke(this, [joinInfo])!;
+            }
+            else
+            {
+                var method = typeof(DataverseQueryProvider<T>)
+                    .GetMethod(nameof(FetchJoinedList), BindingFlags.NonPublic | BindingFlags.Instance)!
+                    .MakeGenericMethod(joinInfo.InnerEntityType!, elementType);
+                return (TResult)method.Invoke(this, [joinInfo])!;
+            }
         }
 
         var (selectColumns, projector) = SelectExpressionParser.Parse(expression);
@@ -90,22 +93,25 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
         // TResult = Task<List<TElement>>
         var elementType = typeof(TResult).GetGenericArguments()[0].GetGenericArguments()[0];
 
-        var leftJoinInfo = LeftJoinExpressionParser.TryParse(expression);
-        if (leftJoinInfo is not null)
-        {
-            var method = typeof(DataverseQueryProvider<T>)
-                .GetMethod(nameof(FetchLeftJoinListAsync), BindingFlags.NonPublic | BindingFlags.Instance)!
-                .MakeGenericMethod(elementType);
-            return (TResult)method.Invoke(this, [leftJoinInfo, cancellationToken])!;
-        }
+        var joinInfo = LeftJoinExpressionParser.TryParse(expression)
+            ?? JoinExpressionParser.TryParse(expression);
 
-        var joinInfo = JoinExpressionParser.TryParse(expression);
         if (joinInfo is not null)
         {
-            var method = typeof(DataverseQueryProvider<T>)
-                .GetMethod(nameof(FetchJoinedListAsync), BindingFlags.NonPublic | BindingFlags.Instance)!
-                .MakeGenericMethod(joinInfo.InnerEntityType, elementType);
-            return (TResult)method.Invoke(this, [joinInfo, cancellationToken])!;
+            if (joinInfo.IsOuterJoin)
+            {
+                var method = typeof(DataverseQueryProvider<T>)
+                    .GetMethod(nameof(FetchLeftJoinListAsync), BindingFlags.NonPublic | BindingFlags.Instance)!
+                    .MakeGenericMethod(elementType);
+                return (TResult)method.Invoke(this, [joinInfo, cancellationToken])!;
+            }
+            else
+            {
+                var method = typeof(DataverseQueryProvider<T>)
+                    .GetMethod(nameof(FetchJoinedListAsync), BindingFlags.NonPublic | BindingFlags.Instance)!
+                    .MakeGenericMethod(joinInfo.InnerEntityType!, elementType);
+                return (TResult)method.Invoke(this, [joinInfo, cancellationToken])!;
+            }
         }
 
         var (selectColumns, projector) = SelectExpressionParser.Parse(expression);
@@ -140,9 +146,9 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
         return RetrieveAll(fetchXml).Select(e => e.ToEntity<T>()).ToList();
     }
 
-    private List<TElement> FetchLeftJoinList<TElement>(LeftJoinInfo joinInfo)
+    private List<TElement> FetchLeftJoinList<TElement>(JoinInfo joinInfo)
     {
-        var fetchXml = FetchXmlBuilder.BuildLeftJoin(joinInfo);
+        var fetchXml = FetchXmlBuilder.BuildJoin(joinInfo);
         return RetrieveAll(fetchXml).Select(e =>
         {
             var outer = e.ToEntity<T>();
@@ -160,7 +166,7 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
         {
             var outer = e.ToEntity<T>();
             var inner = ExtractLinkedEntity<TInner>(e, joinInfo.InnerAlias, joinInfo.InnerEntityLogicalName);
-            return (TElement)joinInfo.ResultSelector.DynamicInvoke(outer, inner)!;
+            return (TElement)joinInfo.ResultSelector!.DynamicInvoke(outer, inner)!;
         }).ToList();
     }
 
@@ -216,9 +222,9 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
     }
 
     private async Task<List<TElement>> FetchLeftJoinListAsync<TElement>(
-        LeftJoinInfo joinInfo, CancellationToken cancellationToken)
+        JoinInfo joinInfo, CancellationToken cancellationToken)
     {
-        var fetchXml = FetchXmlBuilder.BuildLeftJoin(joinInfo);
+        var fetchXml = FetchXmlBuilder.BuildJoin(joinInfo);
         var entities = await RetrieveAllAsync(fetchXml, cancellationToken);
         return entities.Select(e =>
         {
@@ -240,7 +246,7 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
         {
             var outer = e.ToEntity<T>();
             var inner = ExtractLinkedEntity<TInner>(e, joinInfo.InnerAlias, joinInfo.InnerEntityLogicalName);
-            return (TElement)joinInfo.ResultSelector.DynamicInvoke(outer, inner)!;
+            return (TElement)joinInfo.ResultSelector!.DynamicInvoke(outer, inner)!;
         }).ToList();
     }
 

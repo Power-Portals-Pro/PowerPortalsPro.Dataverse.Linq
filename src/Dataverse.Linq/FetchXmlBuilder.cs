@@ -12,14 +12,9 @@ internal static class FetchXmlBuilder
         BuildFetchXml(
             join.OuterEntityLogicalName,
             join.OuterColumns,
-            new LinkSpec(join.InnerEntityLogicalName, join.InnerKeyAttribute, join.OuterKeyAttribute, join.InnerAlias, "inner", join.InnerColumns),
-            nullFilter: null);
-
-    internal static string BuildLeftJoin(LeftJoinInfo join) =>
-        BuildFetchXml(
-            join.OuterEntityLogicalName,
-            join.OuterColumns,
-            new LinkSpec(join.InnerEntityLogicalName, join.InnerKeyAttribute, join.OuterKeyAttribute, join.InnerAlias, "outer"),
+            new LinkSpec(join.InnerEntityLogicalName, join.InnerKeyAttribute, join.OuterKeyAttribute, join.InnerAlias,
+                join.IsOuterJoin ? "outer" : "inner",
+                join.InnerColumns),
             join.FilterWhereInnerIsNull
                 ? new NullFilterSpec(join.InnerAlias, join.InnerEntityLogicalName + "id")
                 : null);
