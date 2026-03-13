@@ -46,7 +46,7 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
     /// </summary>
     public TResult Execute<TResult>(Expression expression)
     {
-        var query = FetchXmlQueryTranslator.Translate<T>(expression, Columns);
+        var query = FetchXmlQueryTranslator.Translate<T>(expression, Columns, EntityLogicalName);
         var fetchXml = FetchXmlBuilder.Build(query);
         var entities = RetrieveAll(fetchXml);
 
@@ -68,7 +68,7 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
     {
         // TResult = Task<List<TElement>>
         var elementType = typeof(TResult).GetGenericArguments()[0].GetGenericArguments()[0];
-        var query = FetchXmlQueryTranslator.Translate<T>(expression, Columns);
+        var query = FetchXmlQueryTranslator.Translate<T>(expression, Columns, EntityLogicalName);
         var method = GetPrivateMethod(nameof(ExecuteQueryAsync)).MakeGenericMethod(elementType);
         return (TResult)method.Invoke(this, [query, cancellationToken])!;
     }
@@ -79,14 +79,14 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
 
     internal List<T> ExecuteList(Expression expression)
     {
-        var query = FetchXmlQueryTranslator.Translate<T>(expression, Columns);
+        var query = FetchXmlQueryTranslator.Translate<T>(expression, Columns, EntityLogicalName);
         var fetchXml = FetchXmlBuilder.Build(query);
         return RetrieveAll(fetchXml).Select(e => e.ToEntity<T>()).ToList();
     }
 
     internal string GenerateFetchXml(Expression expression)
     {
-        var query = FetchXmlQueryTranslator.Translate<T>(expression, Columns);
+        var query = FetchXmlQueryTranslator.Translate<T>(expression, Columns, EntityLogicalName);
         return FetchXmlBuilder.Build(query);
     }
 

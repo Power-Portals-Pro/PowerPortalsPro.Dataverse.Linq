@@ -23,6 +23,15 @@ public static class ServiceClientExtensions
     }
 
     /// <summary>
+    /// Creates a <see cref="DataverseQueryable{Entity}"/> for unbound queries using the
+    /// <see cref="Entity"/> base class directly (no proxy class required).
+    /// </summary>
+    public static DataverseQueryable<Entity> Queryable(this IOrganizationServiceAsync service, string entityLogicalName, params string[] columns)
+    {
+        return new DataverseQueryable<Entity>(service, entityLogicalName, columns.Length > 0 ? columns : null);
+    }
+
+    /// <summary>
     /// Asynchronously executes the query and returns all results as a <see cref="List{T}"/>.
     /// Works on both root queryables and projected queryables (e.g. after a Select clause).
     /// Handles paging automatically.

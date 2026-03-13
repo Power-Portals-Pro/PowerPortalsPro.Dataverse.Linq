@@ -24,11 +24,12 @@ internal static class FetchXmlQueryTranslator
     /// </param>
     internal static FetchXmlQuery Translate<T>(
         Expression expression,
-        IReadOnlyList<string>? defaultColumns = null) where T : Entity
+        IReadOnlyList<string>? defaultColumns = null,
+        string? entityLogicalName = null) where T : Entity
     {
         var query = new FetchXmlQuery
         {
-            EntityLogicalName = GetEntityLogicalName(typeof(T))
+            EntityLogicalName = entityLogicalName ?? GetEntityLogicalName(typeof(T))
         };
 
         var ctx = new TranslationContext(query, typeof(T));

@@ -1,6 +1,7 @@
 using Dataverse.Linq.Tests.Proxies;
 using FluentAssertions;
 using Microsoft.PowerPlatform.Dataverse.Client;
+using Microsoft.Xrm.Sdk;
 using NSubstitute;
 
 namespace Dataverse.Linq.Tests;
@@ -174,6 +175,41 @@ public class FetchXmlGenerationTests
                 <filter>
                   <condition entityname="c" attribute="new_customcontactid" operator="null" />
                 </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    // -------------------------------------------------------------------------
+    // Unbound entity queries
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_UnboundEntity_NoOperators_GeneratesAllAttributes()
+    {
+        var fetchXml = _service.Queryable("new_customaccount").ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <all-attributes />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_UnboundEntity_WithExplicitColumns_GeneratesSpecificAttributes()
+    {
+        var fetchXml = _service.Queryable("new_customaccount", "new_name", "new_website").ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+                <attribute name="new_website" />
               </entity>
             </fetch>
             """);
