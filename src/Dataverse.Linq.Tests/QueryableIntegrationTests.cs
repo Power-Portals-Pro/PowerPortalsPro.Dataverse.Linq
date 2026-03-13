@@ -104,19 +104,19 @@ public class QueryableIntegrationTests : IntegrationTestBase
     }
 
     [Fact]
-    public async Task ToListAsync_Returns100CustomAccountRecords()
+    public async Task ToListAsync_Returns150CustomAccountRecords()
     {
         var results = await Service.Queryable<CustomAccount>().ToListAsync();
 
-        results.Should().HaveCount(100);
+        results.Should().HaveCount(150);
     }
 
     [Fact]
-    public async Task ToListAsync_AllAccountsHavePrimaryContactSet()
+    public async Task ToListAsync_100AccountsHavePrimaryContactSet()
     {
         var results = await Service.Queryable<CustomAccount>().ToListAsync();
 
-        results.Should().AllSatisfy(r => r.PrimaryContact.Should().NotBeNull());
+        results.Count(r => r.PrimaryContact != null).Should().Be(100);
     }
 
     // -------------------------------------------------------------------------
@@ -204,8 +204,8 @@ public class QueryableIntegrationTests : IntegrationTestBase
                              where c == null
                              select new { a.Name }).ToListAsync();
 
-        // All accounts in the seed data have contacts, so no accounts should be returned
-        results.Should().BeEmpty();
+        // 50 accounts were seeded without any contacts
+        results.Should().HaveCount(50);
     }
 
     [Fact]
@@ -217,8 +217,8 @@ public class QueryableIntegrationTests : IntegrationTestBase
                              from c in contacts.DefaultIfEmpty()
                              select new { a.Name }).ToListAsync();
 
-        // Left join with no filter should return all 500 matched rows
-        results.Should().HaveCount(500);
+        // 100 accounts × 5 contacts = 500 matched rows, plus 50 accounts with no contacts
+        results.Should().HaveCount(550);
         results.Should().AllSatisfy(r => r.Name.Should().NotBeNullOrEmpty());
     }
 
@@ -247,6 +247,7 @@ public class QueryableIntegrationTests : IntegrationTestBase
                              from c in contacts.DefaultIfEmpty()
                              select new { a.Name }).ToListAsync();
 
-        results.Should().AllSatisfy(r => r.Name.Should().StartWith("Custom Account"));
+        results.Should().AllSatisfy(r =>
+            r.Name.Should().Match(n => n.StartsWith("Custom Account") || n.StartsWith("Empty Account")));
     }
 }

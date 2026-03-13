@@ -43,7 +43,7 @@ internal static class LeftJoinExpressionParser
         if (!IsQueryableMethod(current, nameof(Queryable.GroupJoin), out var groupJoinCall))
             return null;
 
-        var (outerLogicalName, _) = GetSourceInfo(groupJoinCall!.Arguments[0]);
+        var (outerLogicalName, outerEntityType) = GetSourceInfo(groupJoinCall!.Arguments[0]);
         var (innerLogicalName, _) = GetSourceInfo(groupJoinCall.Arguments[1]);
 
         var outerKeyAttr = GetAttributeName(ExtractLambda(groupJoinCall.Arguments[2]).Body)
@@ -52,8 +52,11 @@ internal static class LeftJoinExpressionParser
         var innerKeyAttr = GetAttributeName(ExtractLambda(groupJoinCall.Arguments[3]).Body)
             ?? throw new NotSupportedException("Inner join key must be a property decorated with [AttributeLogicalName].");
 
-        // Determine which property of the transparent identifier holds the outer entity
-        var outerPropertyName = GetOuterPropertyName(selectManyResultSelector);
+        // Determine which property of the transparent identifier holds the outer entity.
+        // Use the lambda's first parameter type to find the property whose type matches
+        // the outer entity — this avoids fragile parameter reference-equality checks.
+        var lambdaToInspect = selectLambda ?? selectManyResultSelector;
+        var outerPropertyName = GetOuterPropertyNameByType(lambdaToInspect, outerEntityType);
 
         IReadOnlyList<string>? outerColumns = null;
         Delegate? projector = null;
@@ -109,33 +112,16 @@ internal static class LeftJoinExpressionParser
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Finds the property name of the outer entity inside the SelectMany result selector.
-    /// Handles two shapes:
-    /// <list type="bullet">
-    ///   <item>Transparent identifier: <c>(x, c) => new { x.a, c }</c> → "a"</item>
-    ///   <item>Inlined projection (no Where, compiler optimization): <c>(x, c) => new { x.a.Name }</c> → "a"</item>
-    /// </list>
+    /// Finds the property on the lambda's first parameter type whose type IS (or is assignable from)
+    /// <paramref name="outerEntityType"/>. This is the transparent-identifier slot that holds the
+    /// outer entity — e.g. property "a" of type <c>CustomAccount</c> in <c>{ a, c }</c>.
     /// </summary>
-    private static string? GetOuterPropertyName(LambdaExpression selectManyResultSelector)
+    private static string? GetOuterPropertyNameByType(LambdaExpression lambda, Type outerEntityType)
     {
-        var xParam = selectManyResultSelector.Parameters[0];
-
-        if (selectManyResultSelector.Body is not NewExpression newExpr)
-            return null;
-
-        foreach (var arg in newExpr.Arguments)
-        {
-            // Transparent identifier shape: x.a (direct property of x)
-            if (arg is MemberExpression { Expression: ParameterExpression p } && p == xParam)
-                return ((MemberExpression)arg).Member.Name;
-
-            // Inlined projection shape: x.a.Property (two-level; outer entity is x.a)
-            if (arg is MemberExpression { Expression: MemberExpression { Expression: ParameterExpression p2, Member: { } outerMember } }
-                && p2 == xParam)
-                return outerMember.Name;
-        }
-
-        return null;
+        var paramType = lambda.Parameters[0].Type;
+        return paramType.GetProperties()
+            .FirstOrDefault(p => outerEntityType.IsAssignableFrom(p.PropertyType))
+            ?.Name;
     }
 
     private static IReadOnlyList<string>? ExtractOuterColumns(LambdaExpression selectLambda, string outerPropertyName)

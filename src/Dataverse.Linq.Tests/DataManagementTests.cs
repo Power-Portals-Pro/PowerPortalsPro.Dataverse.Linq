@@ -11,6 +11,7 @@ public class DataManagementTests : IntegrationTestBase
 {
     private ServiceClient Service => ServiceProvider.GetRequiredService<ServiceClient>();
 
+    //[Fact]
     [Fact(Skip = "Run on demand only")]
     public async Task SeedData()
     {
@@ -20,8 +21,10 @@ public class DataManagementTests : IntegrationTestBase
         var accountIds = await SeedAccountsAsync(100);
         var contactIds = await SeedContactsAsync(accountIds);
         await LinkContactsToAccountsAsync(accountIds, contactIds);
+        await SeedAccountsWithoutContactsAsync(50);
     }
 
+    //[Fact]
     [Fact(Skip = "Run on demand only")]
     public async Task DeleteAllData()
     {
@@ -32,6 +35,27 @@ public class DataManagementTests : IntegrationTestBase
     // -------------------------------------------------------------------------
     // Seeding
     // -------------------------------------------------------------------------
+
+    private async Task SeedAccountsWithoutContactsAsync(int count)
+    {
+        var requests = new ExecuteMultipleRequest
+        {
+            Settings = new ExecuteMultipleSettings { ContinueOnError = false, ReturnResponses = false },
+            Requests = new OrganizationRequestCollection()
+        };
+
+        for (var i = 1; i <= count; i++)
+        {
+            var account = new Entity(CustomAccount.LogicalName)
+            {
+                ["new_name"] = $"Empty Account {i:D3}",
+                ["new_website"] = $"https://empty{i:D3}.example.com"
+            };
+            requests.Requests.Add(new CreateRequest { Target = account });
+        }
+
+        await Service.ExecuteAsync(requests);
+    }
 
     private async Task<List<Guid>> SeedAccountsAsync(int count)
     {
