@@ -5,30 +5,36 @@ using Microsoft.PowerPlatform.Dataverse.Client;
 
 namespace Dataverse.Linq.Tests;
 
+[CollectionDefinition(nameof(DataSeedFixture))]
+public class DataSeedCollection : ICollectionFixture<DataSeedFixture> { }
+
+[Collection(nameof(DataSeedFixture))]
 public class QueryableIntegrationTests : IntegrationTestBase
 {
     private ServiceClient Service => ServiceProvider.GetRequiredService<ServiceClient>();
+
+    public QueryableIntegrationTests(DataSeedFixture _) { }
 
     // -------------------------------------------------------------------------
     // Basic retrieval
     // -------------------------------------------------------------------------
 
     [Fact]
-    public async Task ToListAsync_ReturnsAccounts()
+    public async Task ToListAsync_ReturnsRecords()
     {
-        var results = await Service.Queryable<Account>().ToListAsync();
+        var results = await Service.Queryable<CustomAccount>().ToListAsync();
 
         results.Should().NotBeEmpty();
-        results.Should().AllSatisfy(a => a.Id.Should().NotBe(Guid.Empty));
+        results.Should().AllSatisfy(r => r.Id.Should().NotBe(Guid.Empty));
     }
 
     [Fact]
-    public async Task ToListAsync_ReturnsAccountsWithAttributes()
+    public async Task ToListAsync_ReturnsRecordsWithAttributes()
     {
-        var results = await Service.Queryable<Account>().ToListAsync();
+        var results = await Service.Queryable<CustomAccount>().ToListAsync();
 
         results.Should().NotBeEmpty();
-        results.Should().AllSatisfy(a => a.Attributes.Should().NotBeEmpty());
+        results.Should().AllSatisfy(r => r.Attributes.Should().NotBeEmpty());
     }
 
     // -------------------------------------------------------------------------
@@ -38,18 +44,18 @@ public class QueryableIntegrationTests : IntegrationTestBase
     [Fact]
     public async Task ToListAsync_WithExplicitColumns_OnlyReturnsRequestedColumns()
     {
-        var results = await Service.Queryable<Account>("name").ToListAsync();
+        var results = await Service.Queryable<CustomAccount>("new_name").ToListAsync();
 
         results.Should().NotBeEmpty();
-        results.Should().AllSatisfy(a =>
-            a.Attributes.Keys.Should().OnlyContain(k => k == "name" || k == Account.PrimaryIdAttribute));
+        results.Should().AllSatisfy(r =>
+            r.Attributes.Keys.Should().OnlyContain(k => k == "new_name" || k == CustomAccount.PrimaryIdAttribute));
     }
 
     [Fact]
     public async Task ToListAsync_WithExplicitColumns_ReturnsFewerAttributesThanAllColumns()
     {
-        var allColumns = await Service.Queryable<Account>().ToListAsync();
-        var singleColumn = await Service.Queryable<Account>("name").ToListAsync();
+        var allColumns = await Service.Queryable<CustomAccount>().ToListAsync();
+        var singleColumn = await Service.Queryable<CustomAccount>("new_name").ToListAsync();
 
         allColumns.Should().NotBeEmpty();
         singleColumn.Should().NotBeEmpty();
@@ -63,25 +69,25 @@ public class QueryableIntegrationTests : IntegrationTestBase
     [Fact]
     public async Task ToListAsync_WithSelectProjection_ReturnsProjectedValues()
     {
-        var results = await (from a in Service.Queryable<Account>()
-                             select new { a.Name, a.Website }).ToListAsync();
+        var results = await (from r in Service.Queryable<CustomAccount>()
+                             select new { r.Name, r.Website }).ToListAsync();
 
         results.Should().NotBeEmpty();
-        results.Should().AllSatisfy(a =>
+        results.Should().AllSatisfy(r =>
         {
-            a.Should().NotBeNull();
-            a.GetType().GetProperties().Should().Contain(p => p.Name == nameof(a.Name));
-            a.GetType().GetProperties().Should().Contain(p => p.Name == nameof(a.Website));
+            r.Should().NotBeNull();
+            r.GetType().GetProperties().Should().Contain(p => p.Name == nameof(r.Name));
+            r.GetType().GetProperties().Should().Contain(p => p.Name == nameof(r.Website));
         });
     }
 
     [Fact]
     public async Task ToListAsync_WithSelectProjection_MatchesExplicitColumnQuery()
     {
-        var projected = await (from a in Service.Queryable<Account>()
-                               select new { a.Name, a.Website }).ToListAsync();
+        var projected = await (from r in Service.Queryable<CustomAccount>()
+                               select new { r.Name, r.Website }).ToListAsync();
 
-        var explicit_ = await Service.Queryable<Account>("name", "websiteurl").ToListAsync();
+        var explicit_ = await Service.Queryable<CustomAccount>("new_name", "new_website").ToListAsync();
 
         projected.Should().HaveSameCount(explicit_);
         projected.Select(p => p.Name).Should().BeEquivalentTo(explicit_.Select(e => e.Name));
@@ -90,16 +96,32 @@ public class QueryableIntegrationTests : IntegrationTestBase
     [Fact]
     public async Task ToListAsync_WithSelectProjectionIncludingEntityReference_ReturnsProjectedValues()
     {
-        var results = await (from a in Service.Queryable<Account>()
-                             select new { a.Name, a.Website, a.PrimaryContact }).ToListAsync();
+        var results = await (from r in Service.Queryable<CustomAccount>()
+                             select new { r.Name, r.Website, r.PrimaryContact }).ToListAsync();
 
         results.Should().NotBeEmpty();
-        results.Should().AllSatisfy(a =>
+        results.Should().AllSatisfy(r =>
         {
-            a.Should().NotBeNull();
-            a.GetType().GetProperties().Should().Contain(p => p.Name == nameof(a.Name));
-            a.GetType().GetProperties().Should().Contain(p => p.Name == nameof(a.Website));
-            a.GetType().GetProperties().Should().Contain(p => p.Name == nameof(a.PrimaryContact));
+            r.Should().NotBeNull();
+            r.GetType().GetProperties().Should().Contain(p => p.Name == nameof(r.Name));
+            r.GetType().GetProperties().Should().Contain(p => p.Name == nameof(r.Website));
+            r.GetType().GetProperties().Should().Contain(p => p.Name == nameof(r.PrimaryContact));
         });
+    }
+
+    [Fact]
+    public async Task ToListAsync_Returns100CustomAccountRecords()
+    {
+        var results = await Service.Queryable<CustomAccount>().ToListAsync();
+
+        results.Should().HaveCount(100);
+    }
+
+    [Fact]
+    public async Task ToListAsync_AllAccountsHavePrimaryContactSet()
+    {
+        var results = await Service.Queryable<CustomAccount>().ToListAsync();
+
+        results.Should().AllSatisfy(r => r.PrimaryContact.Should().NotBeNull());
     }
 }
