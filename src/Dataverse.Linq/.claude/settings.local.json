@@ -83,7 +83,23 @@
       "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet build src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj 2>&1 | tail -10)",
       "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet build src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj 2>&1 | tail -5)",
       "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"DisplayName~CrossTableRating\" --no-restore 2>&1 | tail -15)",
-      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"DisplayName~CrossTableRating\" --no-restore 2>&1 | tail -10)"
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"DisplayName~CrossTableRating\" --no-restore 2>&1 | tail -10)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet build src/XrmToolkit/Dataverse.Linq/Dataverse.Linq.csproj 2>&1 | tail -10)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"DisplayName~WhereAny|DisplayName~WhereNotAny\" --no-restore 2>&1 | tail -30)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"DisplayName~WhereAny|DisplayName~WhereNotAny\" --no-restore 2>&1 | tail -15)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"DisplayName~WhereAnyInOrFilter\" --no-restore 2>&1 | grep -A 20 \"Error Message\")",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"DisplayName~WhereAnyInOrFilter\" --no-restore 2>&1 | grep -A 10 \"Error Message\")",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"DisplayName~WhereAnyInOrFilter\" --no-restore 2>&1 | grep \"Error Message\" -A 3)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"DisplayName~WhereAnyInOrFilter\" --no-restore 2>&1 | tail -20)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"DisplayName~WhereAnyInOrFilter\" --no-restore 2>&1 | grep \"Error Message\" -A 20)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"DisplayName~WhereAnyInOrFilter\" --no-restore 2>&1 | grep \"Error Message\" -A 10)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"DisplayName~WhereAnyInOrFilter\" --no-restore 2>&1 | grep \"Error Message\" -A 5)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"DisplayName~WhereAny|DisplayName~WhereNotAny\" --no-restore 2>&1 | tail -10)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"FullyQualifiedName~FetchXmlGenerationTests\" --no-restore 2>&1 | tail -5)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"DisplayName~WhereAny&FullyQualifiedName~Integration\" --no-restore 2>&1 | tail -20)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"DisplayName~WhereAny&FullyQualifiedName~Integration\" --no-restore -v n 2>&1 | grep -E \"Passed|Failed\")",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"DisplayName~WhereNotAny&FullyQualifiedName~Integration\" --no-restore 2>&1 | tail -10)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"DisplayName~WhereAnyInOrFilter\" --no-restore 2>&1 | grep \"↓\\\\|↑\" -A 1)"
     ]
   }
 }

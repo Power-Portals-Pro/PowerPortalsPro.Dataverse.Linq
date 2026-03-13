@@ -20,9 +20,9 @@ public class FetchXmlGenerationTests
         System.Linq.Expressions.Expression expression) where TEntity : Entity
     {
         var entityLogicalName = typeof(TEntity).GetCustomAttribute<EntityLogicalNameAttribute>()!.LogicalName;
-        var query = Dataverse.Linq.Expressions.FetchXmlQueryTranslator.Translate<TEntity>(
+        var query = Expressions.FetchXmlQueryTranslator.Translate<TEntity>(
             expression, null, entityLogicalName);
-        return Dataverse.Linq.FetchXmlBuilder.Build(query);
+        return FetchXmlBuilder.Build(query);
     }
 
     // -------------------------------------------------------------------------
@@ -1761,5 +1761,92 @@ public class FetchXmlGenerationTests
 
         act.Should().Throw<NotSupportedException>()
             .WithMessage("*same type*");
+    }
+
+    // -------------------------------------------------------------------------
+    // Where — Any() (link-type="any" / "not any")
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_WhereAny_GeneratesLinkTypeAny()
+    {
+        var fetchXml = _service.Queryable<CustomContact>()
+            .Where(contact => _service.Queryable<CustomAccount>().Any(
+                a => a.PrimaryContact.Id == contact.CustomContactId
+                     && a.Name == "Contoso"))
+            .Select(contact => new { contact.Name })
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customcontact">
+                <attribute name="new_name" />
+                <filter type="and">
+                  <link-entity name="new_customaccount" from="new_primarycontact" to="new_customcontactid" alias="a" link-type="any">
+                    <filter type="and">
+                      <condition attribute="new_name" operator="eq" value="Contoso" />
+                    </filter>
+                  </link-entity>
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WhereNotAny_GeneratesLinkTypeNotAny()
+    {
+        var fetchXml = _service.Queryable<CustomContact>()
+            .Where(contact => !_service.Queryable<CustomAccount>().Any(
+                a => a.PrimaryContact.Id == contact.CustomContactId
+                     && a.Name == "Contoso"))
+            .Select(contact => new { contact.Name })
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customcontact">
+                <attribute name="new_name" />
+                <filter type="and">
+                  <link-entity name="new_customaccount" from="new_primarycontact" to="new_customcontactid" alias="a" link-type="not any">
+                    <filter type="and">
+                      <condition attribute="new_name" operator="eq" value="Contoso" />
+                    </filter>
+                  </link-entity>
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WhereAnyInOrFilter_GeneratesCorrectStructure()
+    {
+        var fetchXml = _service.Queryable<CustomContact>()
+            .Where(contact => _service.Queryable<CustomAccount>().Any(
+                                  a => a.PrimaryContact.Id == contact.CustomContactId
+                                       && a.Name == "Contoso")
+                              || contact.Status == CustomContact.CustomContact_Status.Inactive)
+            .Select(contact => new { contact.Name })
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customcontact">
+                <attribute name="new_name" />
+                <filter type="or">
+                  <link-entity name="new_customaccount" from="new_primarycontact" to="new_customcontactid" alias="a" link-type="any">
+                    <filter type="and">
+                      <condition attribute="new_name" operator="eq" value="Contoso" />
+                    </filter>
+                  </link-entity>
+                  <condition attribute="statecode" operator="eq" value="1" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
     }
 }

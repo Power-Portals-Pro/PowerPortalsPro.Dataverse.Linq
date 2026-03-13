@@ -322,8 +322,8 @@ internal static class FetchXmlQueryTranslator
         TranslatePredicate(lambda.Body, rootFilter, ctx);
 
         // Collapse unnecessary nesting: if root has exactly one sub-filter and no
-        // conditions, promote the sub-filter to root level.
-        if (rootFilter.Conditions.Count == 0 && rootFilter.Filters.Count == 1)
+        // conditions or links, promote the sub-filter to root level.
+        if (rootFilter.Conditions.Count == 0 && rootFilter.Links.Count == 0 && rootFilter.Filters.Count == 1)
         {
             var child = rootFilter.Filters[0];
             rootFilter.Type = child.Type;
@@ -332,6 +332,8 @@ internal static class FetchXmlQueryTranslator
                 rootFilter.Conditions.Add(c);
             foreach (var f in child.Filters)
                 rootFilter.Filters.Add(f);
+            foreach (var l in child.Links)
+                rootFilter.Links.Add(l);
         }
     }
 
@@ -425,6 +427,12 @@ internal static class FetchXmlQueryTranslator
                 filter.Conditions.Add(condition);
                 return;
             }
+
+            // Queryable.Any(source, predicate) → link-type="any" / negated → "not any"
+            case MethodCallExpression { Method: { Name: "Any", DeclaringType: var anyDeclType } } anyCall
+                when anyDeclType == typeof(Queryable) && anyCall.Arguments.Count == 2:
+                HandleAnyPredicate(anyCall, filter, negated);
+                return;
 
             // && → AND filter (flatten if parent is already AND)
             case BinaryExpression { NodeType: ExpressionType.AndAlso } andExpr:
@@ -629,12 +637,192 @@ internal static class FetchXmlQueryTranslator
         return Nullable.GetUnderlyingType(type) ?? type;
     }
 
+    // -------------------------------------------------------------------------
+    // Any() → link-type="any" / "not any"
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Translates a <c>Queryable.Any(source, predicate)</c> call into a
+    /// <see cref="FetchLinkEntity"/> with <c>link-type="any"</c> (or <c>"not any"</c>
+    /// when negated) nested inside the current filter.
+    /// </summary>
+    private static void HandleAnyPredicate(
+        MethodCallExpression anyCall, FetchFilter filter, bool negated)
+    {
+        var (innerLogicalName, _) = GetSourceInfoFromType(anyCall.Arguments[0]);
+        var lambda = ExtractLambda(anyCall.Arguments[1]);
+        var innerParam = lambda.Parameters[0];
+
+        // Flatten AndAlso chain and separate join vs filter conditions.
+        var allConditions = FlattenAndAlso(lambda.Body);
+        string? from = null, to = null;
+        var filterConditions = new List<Expression>();
+
+        foreach (var condition in allConditions)
+        {
+            if (from is null && TryExtractJoinCondition(condition, innerParam, out var f, out var t))
+            {
+                from = f;
+                to = t;
+            }
+            else
+            {
+                filterConditions.Add(condition);
+            }
+        }
+
+        if (from is null || to is null)
+            throw new NotSupportedException(
+                "Any() predicate must contain a join condition that compares an inner entity " +
+                "attribute to an outer entity attribute (e.g. a.PrimaryContactId.Id == contact.ContactId).");
+
+        var linkEntity = new FetchLinkEntity
+        {
+            Name = innerLogicalName,
+            From = from,
+            To = to,
+            Alias = innerParam.Name!,
+            LinkType = negated ? "not any" : "any"
+        };
+
+        // Translate remaining conditions as filters on the link-entity.
+        if (filterConditions.Count > 0)
+        {
+            linkEntity.Filter = new FetchFilter { Type = FilterType.And };
+            // Create a minimal context for the inner entity so that
+            // attribute resolution works against the inner parameter.
+            var innerQuery = new FetchXmlQuery { EntityLogicalName = innerLogicalName };
+            var innerCtx = new TranslationContext(innerQuery, innerParam.Type);
+            foreach (var fc in filterConditions)
+                TranslatePredicate(fc, linkEntity.Filter, innerCtx);
+        }
+
+        filter.Links.Add(linkEntity);
+    }
+
+    /// <summary>
+    /// Flattens a chain of <see cref="ExpressionType.AndAlso"/> nodes into a flat list.
+    /// </summary>
+    private static List<Expression> FlattenAndAlso(Expression expr)
+    {
+        var result = new List<Expression>();
+        if (expr is BinaryExpression { NodeType: ExpressionType.AndAlso } binary)
+        {
+            result.AddRange(FlattenAndAlso(binary.Left));
+            result.AddRange(FlattenAndAlso(binary.Right));
+        }
+        else
+        {
+            result.Add(expr);
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Checks whether a binary Equal expression represents a join condition
+    /// (one side references the inner parameter, the other references the outer).
+    /// Returns the inner attribute as <paramref name="from"/> and the outer as <paramref name="to"/>.
+    /// </summary>
+    private static bool TryExtractJoinCondition(
+        Expression condition, ParameterExpression innerParam,
+        out string from, out string to)
+    {
+        from = null!;
+        to = null!;
+
+        if (condition is not BinaryExpression { NodeType: ExpressionType.Equal } binary)
+            return false;
+
+        var leftAttr = GetAttributeName(binary.Left);
+        var rightAttr = GetAttributeName(binary.Right);
+        if (leftAttr is null || rightAttr is null)
+            return false;
+
+        var leftRefsInner = ReferencesParameter(binary.Left, innerParam);
+        var rightRefsInner = ReferencesParameter(binary.Right, innerParam);
+
+        if (leftRefsInner && !rightRefsInner)
+        {
+            from = leftAttr;
+            to = rightAttr;
+            return true;
+        }
+        if (rightRefsInner && !leftRefsInner)
+        {
+            from = rightAttr;
+            to = leftAttr;
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Returns <c>true</c> if <paramref name="expr"/> contains a reference
+    /// to the given <paramref name="param"/>.
+    /// </summary>
+    private static bool ReferencesParameter(Expression expr, ParameterExpression param)
+    {
+        return expr switch
+        {
+            _ when expr == param => true,
+            UnaryExpression u => ReferencesParameter(u.Operand, param),
+            MemberExpression m => m.Expression is not null && ReferencesParameter(m.Expression, param),
+            MethodCallExpression mc =>
+                (mc.Object is not null && ReferencesParameter(mc.Object, param))
+                || mc.Arguments.Any(a => ReferencesParameter(a, param)),
+            BinaryExpression b =>
+                ReferencesParameter(b.Left, param) || ReferencesParameter(b.Right, param),
+            _ => false
+        };
+    }
+
+    /// <summary>
+    /// Gets entity info from the source expression's generic type argument
+    /// without requiring a runtime <see cref="DataverseQueryable{T}"/> instance.
+    /// Used for <c>Any()</c> where the source may be captured in a closure.
+    /// </summary>
+    private static (string EntityLogicalName, Type EntityType) GetSourceInfoFromType(Expression sourceExpr)
+    {
+        // Try the existing runtime approach first (works for direct DataverseQueryable constants).
+        if (sourceExpr is ConstantExpression { Value: { } val })
+        {
+            var type = val.GetType();
+            if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(DataverseQueryable<>))
+            {
+                var entityType = type.GetGenericArguments()[0];
+                return (GetEntityLogicalName(entityType), entityType);
+            }
+        }
+
+        // Fall back to the expression's declared type (e.g. IQueryable<T>).
+        var exprType = sourceExpr.Type;
+        if (exprType.IsGenericType)
+        {
+            var entityType = exprType.GetGenericArguments()[0];
+            if (entityType.GetCustomAttribute<EntityLogicalNameAttribute>() is not null)
+                return (GetEntityLogicalName(entityType), entityType);
+        }
+
+        throw new NotSupportedException(
+            "Any() source must be a DataverseQueryable<T> or IQueryable<T> where T has [EntityLogicalName].");
+    }
+
     private static bool IsNullConstant(Expression expr) =>
         expr is ConstantExpression { Value: null }
         || (expr is UnaryExpression { NodeType: ExpressionType.Convert } convert
             && convert.Operand is ConstantExpression { Value: null });
 
     private static object? EvaluateValue(Expression expr)
+    {
+        var result = EvaluateValueCore(expr);
+        // Convert enum values to their underlying integer for FetchXml serialization.
+        if (result is not null && result.GetType().IsEnum)
+            return Convert.ChangeType(result, Enum.GetUnderlyingType(result.GetType()));
+        return result;
+    }
+
+    private static object? EvaluateValueCore(Expression expr)
     {
         if (expr is ConstantExpression constant)
             return constant.Value;

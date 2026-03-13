@@ -85,6 +85,9 @@ internal static class FetchXmlBuilder
         var element = new XElement("filter",
             new XAttribute("type", filter.Type == FilterType.Or ? "or" : "and"));
 
+        foreach (var link in filter.Links)
+            element.Add(BuildLinkEntity(link));
+
         foreach (var condition in filter.Conditions)
             element.Add(BuildCondition(condition));
 

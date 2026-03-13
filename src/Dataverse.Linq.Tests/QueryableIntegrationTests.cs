@@ -1266,4 +1266,49 @@ public class QueryableIntegrationTests : IntegrationTestBase
         });
     }
 
+    // -------------------------------------------------------------------------
+    // Any() — link-type="any" / "not any"
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ToListAsync_WhereAny_ReturnsContactsThatArePrimaryContactOfMatchingAccount()
+    {
+        // Find contacts that are the primary contact of an account named "Custom Account 001".
+        var results = await Service.Queryable<CustomContact>()
+            .Where(contact => Service.Queryable<CustomAccount>().Any(
+                a => a.PrimaryContact.Id == contact.CustomContactId
+                     && a.Name == "Custom Account 001"))
+            .ToListAsync();
+
+        results.Should().HaveCount(1);
+    }
+
+    [Fact]
+    public async Task ToListAsync_WhereNotAny_ReturnsContactsThatAreNotPrimaryContactOfMatchingAccount()
+    {
+        // Find contacts that are NOT the primary contact of any account named "Custom Account 001".
+        var allContacts = await Service.Queryable<CustomContact>().ToListAsync();
+        var results = await Service.Queryable<CustomContact>()
+            .Where(contact => !Service.Queryable<CustomAccount>().Any(
+                a => a.PrimaryContact.Id == contact.CustomContactId
+                     && a.Name == "Custom Account 001"))
+            .ToListAsync();
+
+        // All contacts except the one primary contact of "Custom Account 001"
+        results.Should().HaveCount(allContacts.Count - 1);
+    }
+
+    [Fact]
+    public async Task ToListAsync_WhereAnyWithoutFilter_ReturnsContactsThatArePrimaryContactOfAnyAccount()
+    {
+        // Find contacts that are the primary contact of any account.
+        var results = await Service.Queryable<CustomContact>()
+            .Where(contact => Service.Queryable<CustomAccount>().Any(
+                a => a.PrimaryContact.Id == contact.CustomContactId))
+            .ToListAsync();
+
+        // Each of the 100 accounts has a primary contact (the first contact per account group).
+        results.Should().HaveCount(100);
+    }
+
 }
