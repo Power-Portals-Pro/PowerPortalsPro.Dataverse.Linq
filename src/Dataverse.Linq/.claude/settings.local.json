@@ -33,7 +33,8 @@
       "Bash(cd \"D:/Code/XrmToolkit - Dev/src/XrmToolkit\" && dotnet test Dataverse.Linq.Tests --filter \"FullyQualifiedName~FetchXmlGeneration\" --no-restore 2>&1 | tail -20)",
       "Bash(cd \"D:/Code/XrmToolkit - Dev/src/XrmToolkit\" && dotnet test Dataverse.Linq.Tests --filter \"FullyQualifiedName~FetchXmlGeneration\" --no-restore 2>&1 | tail -5)",
       "Bash(cd \"D:/Code/XrmToolkit - Dev/src/XrmToolkit\" && dotnet test Dataverse.Linq.Tests --filter \"FullyQualifiedName~FetchXmlGeneration\" --no-restore 2>&1 | tail -10)",
-      "Bash(cd \"D:/Code/XrmToolkit - Dev/src/XrmToolkit\" && dotnet build Dataverse.Linq.Tests --no-restore 2>&1 | tail -5)"
+      "Bash(cd \"D:/Code/XrmToolkit - Dev/src/XrmToolkit\" && dotnet build Dataverse.Linq.Tests --no-restore 2>&1 | tail -5)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev/src/XrmToolkit\" && dotnet test Dataverse.Linq.Tests --filter \"FullyQualifiedName~FetchXmlGeneration\" --no-restore 2>&1 | tail -3)"
     ]
   }
 }

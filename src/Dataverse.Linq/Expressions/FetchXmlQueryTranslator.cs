@@ -79,6 +79,14 @@ internal static class FetchXmlQueryTranslator
                         HandleSelectMany(call, ctx);
                         return;
 
+                    case nameof(Queryable.OrderBy):
+                    case nameof(Queryable.OrderByDescending):
+                    case nameof(Queryable.ThenBy):
+                    case nameof(Queryable.ThenByDescending):
+                        TranslateCore(call.Arguments[0], ctx);
+                        HandleOrderBy(call, ctx);
+                        return;
+
                     default:
                         throw new NotSupportedException(
                             $"LINQ operator '{call.Method.Name}' is not supported.");
@@ -153,6 +161,23 @@ internal static class FetchXmlQueryTranslator
         throw new NotSupportedException(
             "General Where predicates are not yet supported. " +
             "Currently only null-checks on joined entities (where c == null) are handled.");
+    }
+
+    // -------------------------------------------------------------------------
+    // OrderBy / ThenBy
+    // -------------------------------------------------------------------------
+
+    private static void HandleOrderBy(MethodCallExpression call, TranslationContext ctx)
+    {
+        var lambda = ExtractLambda(call.Arguments[1]);
+        var descending = call.Method.Name is nameof(Queryable.OrderByDescending)
+                                           or nameof(Queryable.ThenByDescending);
+
+        var attribute = GetAttributeName(lambda.Body)
+            ?? throw new NotSupportedException(
+                "OrderBy key must be a property decorated with [AttributeLogicalName].");
+
+        ctx.Query.Orders.Add(new FetchOrder { Attribute = attribute, Descending = descending });
     }
 
     // -------------------------------------------------------------------------

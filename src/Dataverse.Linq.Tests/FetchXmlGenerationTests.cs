@@ -214,4 +214,82 @@ public class FetchXmlGenerationTests
             </fetch>
             """);
     }
+
+    // -------------------------------------------------------------------------
+    // Ordering
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_WithOrderByAscending_GeneratesOrderElement()
+    {
+        var fetchXml = (from a in _service.Queryable<CustomAccount>()
+                        orderby a.Name
+                        select a).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <order attribute="new_name" descending="false" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WithOrderByDescending_GeneratesDescendingOrderElement()
+    {
+        var fetchXml = (from a in _service.Queryable<CustomAccount>()
+                        orderby a.Name descending
+                        select a).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <order attribute="new_name" descending="true" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WithMultipleOrderClauses_GeneratesMultipleOrderElements()
+    {
+        var fetchXml = (from a in _service.Queryable<CustomAccount>()
+                        orderby a.Name descending, a.Website
+                        select a).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <order attribute="new_name" descending="true" />
+                <order attribute="new_website" descending="false" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WithOrderByAndSelectProjection_GeneratesBoth()
+    {
+        var fetchXml = (from a in _service.Queryable<CustomAccount>()
+                        orderby a.Name
+                        select new { a.Name, a.Website }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+                <attribute name="new_website" />
+                <order attribute="new_name" descending="false" />
+              </entity>
+            </fetch>
+            """);
+    }
 }

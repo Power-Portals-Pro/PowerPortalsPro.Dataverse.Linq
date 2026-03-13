@@ -325,4 +325,51 @@ public class QueryableIntegrationTests : IntegrationTestBase
             r.GetAttributeValue<string>("new_name").Should().NotBeNullOrEmpty();
         });
     }
+
+    // -------------------------------------------------------------------------
+    // Ordering
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ToListAsync_WithOrderByAscending_ReturnsRecordsInAscendingOrder()
+    {
+        var results = await (from a in Service.Queryable<CustomAccount>()
+                             orderby a.Name
+                             select a).ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Select(r => r.Name).Should().BeInAscendingOrder();
+    }
+
+    [Fact]
+    public async Task ToListAsync_WithOrderByDescending_ReturnsRecordsInDescendingOrder()
+    {
+        var results = await (from a in Service.Queryable<CustomAccount>()
+                             orderby a.Name descending
+                             select a).ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Select(r => r.Name).Should().BeInDescendingOrder();
+    }
+
+    [Fact]
+    public async Task ToListAsync_WithOrderByAndSelectProjection_ReturnsOrderedProjectedValues()
+    {
+        var results = await (from a in Service.Queryable<CustomAccount>()
+                             orderby a.Name
+                             select new { a.Name, a.Website }).ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Select(r => r.Name).Should().BeInAscendingOrder();
+    }
+
+    [Fact]
+    public async Task ToListAsync_WithOrderBy_Returns150Records()
+    {
+        var results = await (from a in Service.Queryable<CustomAccount>()
+                             orderby a.Name
+                             select a).ToListAsync();
+
+        results.Should().HaveCount(150);
+    }
 }
