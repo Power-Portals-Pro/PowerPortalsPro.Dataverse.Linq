@@ -2,7 +2,6 @@ using Dataverse.Linq.Extensions;
 using Dataverse.Linq.Model;
 using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.Xrm.Sdk;
-using Microsoft.Xrm.Sdk.Client;
 using Microsoft.Xrm.Sdk.Query;
 using System.Linq.Expressions;
 using System.Reflection;
@@ -17,7 +16,7 @@ namespace Dataverse.Linq.Expressions;
 /// </summary>
 internal static class FetchXmlQueryTranslator
 {
-    private static readonly Dictionary<string, ConditionOperator> DateTimeOperatorMap = new()
+    private static readonly Dictionary<string, ConditionOperator> _dateTimeOperatorMap = new()
     {
         ["Last7Days"] = ConditionOperator.Last7Days,
         ["LastFiscalPeriod"] = ConditionOperator.LastFiscalPeriod,
@@ -66,7 +65,7 @@ internal static class FetchXmlQueryTranslator
         ["NotBetween"] = ConditionOperator.NotBetween,
     };
 
-    private static readonly Dictionary<string, ConditionOperator> HierarchyOperatorMap = new()
+    private static readonly Dictionary<string, ConditionOperator> _hierarchyOperatorMap = new()
     {
         ["Above"] = ConditionOperator.Above,
         ["AboveOrEqual"] = ConditionOperator.AboveOrEqual,
@@ -77,7 +76,7 @@ internal static class FetchXmlQueryTranslator
         ["EqualUserOrUserHierarchyAndTeams"] = ConditionOperator.EqualUserOrUserHierarchyAndTeams,
     };
 
-    private static readonly Dictionary<string, ConditionOperator> UserOperatorMap = new()
+    private static readonly Dictionary<string, ConditionOperator> _userOperatorMap = new()
     {
         ["EqualUserId"] = ConditionOperator.EqualUserId,
         ["NotEqualUserId"] = ConditionOperator.NotEqualUserId,
@@ -85,12 +84,12 @@ internal static class FetchXmlQueryTranslator
         ["NotEqualBusinessId"] = ConditionOperator.NotEqualBusinessId,
     };
 
-    private static readonly Dictionary<string, ConditionOperator> MultiSelectOperatorMap = new()
+    private static readonly Dictionary<string, ConditionOperator> _multiSelectOperatorMap = new()
     {
         ["ContainsValues"] = ConditionOperator.ContainValues,
     };
 
-    private static readonly Dictionary<string, string> AggregateFunctionMap = new()
+    private static readonly Dictionary<string, string> _aggregateFunctionMap = new()
     {
         [nameof(Queryable.Count)] = "count",
         [nameof(Queryable.LongCount)] = "count",
@@ -103,14 +102,14 @@ internal static class FetchXmlQueryTranslator
 
     private static bool TryGetExtensionOperator(Type? declaringType, string methodName, out ConditionOperator op)
     {
-        if (declaringType == typeof(Extensions.DateTimeExtensions))
-            return DateTimeOperatorMap.TryGetValue(methodName, out op);
-        if (declaringType == typeof(Extensions.HierarchyExtensions))
-            return HierarchyOperatorMap.TryGetValue(methodName, out op);
-        if (declaringType == typeof(Extensions.UserExtensions))
-            return UserOperatorMap.TryGetValue(methodName, out op);
-        if (declaringType == typeof(Extensions.MultiSelectExtensions))
-            return MultiSelectOperatorMap.TryGetValue(methodName, out op);
+        if (declaringType == typeof(DateTimeExtensions))
+            return _dateTimeOperatorMap.TryGetValue(methodName, out op);
+        if (declaringType == typeof(HierarchyExtensions))
+            return _hierarchyOperatorMap.TryGetValue(methodName, out op);
+        if (declaringType == typeof(UserExtensions))
+            return _userOperatorMap.TryGetValue(methodName, out op);
+        if (declaringType == typeof(MultiSelectExtensions))
+            return _multiSelectOperatorMap.TryGetValue(methodName, out op);
         op = default;
         return false;
     }
@@ -131,6 +130,12 @@ internal static class FetchXmlQueryTranslator
     /// <param name="defaultColumns">
     /// Columns specified at queryable creation time (e.g. <c>Queryable&lt;T&gt;("col1","col2")</c>).
     /// Applied only when no <c>Select</c> operator narrows the column list.
+    /// </param>
+    /// <param name="entityLogicalName">
+    /// The Dataverse entity logical name. If <c>null</c>, derived from the <typeparamref name="T"/> attribute.
+    /// </param>
+    /// <param name="service">
+    /// Optional organization service used for metadata lookups during translation.
     /// </param>
     internal static FetchXmlQuery Translate<T>(
         Expression expression,
@@ -233,50 +238,92 @@ internal static class FetchXmlQueryTranslator
                             $"LINQ operator '{call.Method.Name}' is not supported.");
                 }
 
-            case MethodCallExpression { Method: { Name: nameof(ServiceClientExtensions.WithPageSize),
-                    DeclaringType: var dt } } pageSizeCall
+            case MethodCallExpression
+            {
+                Method:
+                {
+                    Name: nameof(ServiceClientExtensions.WithPageSize),
+                    DeclaringType: var dt
+                }
+            } pageSizeCall
                 when dt == typeof(ServiceClientExtensions):
                 TranslateCore(pageSizeCall.Arguments[0], ctx);
                 ctx.Query.PageSize = (int)((ConstantExpression)pageSizeCall.Arguments[1]).Value!;
                 return;
 
-            case MethodCallExpression { Method: { Name: nameof(ServiceClientExtensions.WithPage),
-                    DeclaringType: var dtP } } pageCall
+            case MethodCallExpression
+            {
+                Method:
+                {
+                    Name: nameof(ServiceClientExtensions.WithPage),
+                    DeclaringType: var dtP
+                }
+            } pageCall
                 when dtP == typeof(ServiceClientExtensions):
                 TranslateCore(pageCall.Arguments[0], ctx);
                 ctx.Query.Page = (int)((ConstantExpression)pageCall.Arguments[1]).Value!;
                 return;
 
-            case MethodCallExpression { Method: { Name: nameof(ServiceClientExtensions.WithAggregateLimit),
-                    DeclaringType: var dtAL } } aggLimitCall
+            case MethodCallExpression
+            {
+                Method:
+                {
+                    Name: nameof(ServiceClientExtensions.WithAggregateLimit),
+                    DeclaringType: var dtAL
+                }
+            } aggLimitCall
                 when dtAL == typeof(ServiceClientExtensions):
                 TranslateCore(aggLimitCall.Arguments[0], ctx);
                 ctx.Query.AggregateLimit = (int)((ConstantExpression)aggLimitCall.Arguments[1]).Value!;
                 return;
 
-            case MethodCallExpression { Method: { Name: nameof(ServiceClientExtensions.WithDatasource),
-                    DeclaringType: var dtDS } } datasourceCall
+            case MethodCallExpression
+            {
+                Method:
+                {
+                    Name: nameof(ServiceClientExtensions.WithDatasource),
+                    DeclaringType: var dtDS
+                }
+            } datasourceCall
                 when dtDS == typeof(ServiceClientExtensions):
                 TranslateCore(datasourceCall.Arguments[0], ctx);
                 ctx.Query.Datasource = (FetchDatasource)((ConstantExpression)datasourceCall.Arguments[1]).Value!;
                 return;
 
-            case MethodCallExpression { Method: { Name: nameof(ServiceClientExtensions.WithLateMaterialize),
-                    DeclaringType: var dtLM } } lateMaterializeCall
+            case MethodCallExpression
+            {
+                Method:
+                {
+                    Name: nameof(ServiceClientExtensions.WithLateMaterialize),
+                    DeclaringType: var dtLM
+                }
+            } lateMaterializeCall
                 when dtLM == typeof(ServiceClientExtensions):
                 TranslateCore(lateMaterializeCall.Arguments[0], ctx);
                 ctx.Query.LateMaterialize = true;
                 return;
 
-            case MethodCallExpression { Method: { Name: nameof(ServiceClientExtensions.WithNoLock),
-                    DeclaringType: var dtNL } } noLockCall
+            case MethodCallExpression
+            {
+                Method:
+                {
+                    Name: nameof(ServiceClientExtensions.WithNoLock),
+                    DeclaringType: var dtNL
+                }
+            } noLockCall
                 when dtNL == typeof(ServiceClientExtensions):
                 TranslateCore(noLockCall.Arguments[0], ctx);
                 ctx.Query.NoLock = true;
                 return;
 
-            case MethodCallExpression { Method: { Name: nameof(ServiceClientExtensions.WithQueryHints),
-                    DeclaringType: var dtQH } } queryHintsCall
+            case MethodCallExpression
+            {
+                Method:
+                {
+                    Name: nameof(ServiceClientExtensions.WithQueryHints),
+                    DeclaringType: var dtQH
+                }
+            } queryHintsCall
                 when dtQH == typeof(ServiceClientExtensions):
                 TranslateCore(queryHintsCall.Arguments[0], ctx);
                 var hintsArray = (NewArrayExpression)queryHintsCall.Arguments[1];
@@ -285,15 +332,27 @@ internal static class FetchXmlQueryTranslator
                     .ToList();
                 return;
 
-            case MethodCallExpression { Method: { Name: nameof(ServiceClientExtensions.WithUseRawOrderBy),
-                    DeclaringType: var dtRO } } rawOrderByCall
+            case MethodCallExpression
+            {
+                Method:
+                {
+                    Name: nameof(ServiceClientExtensions.WithUseRawOrderBy),
+                    DeclaringType: var dtRO
+                }
+            } rawOrderByCall
                 when dtRO == typeof(ServiceClientExtensions):
                 TranslateCore(rawOrderByCall.Arguments[0], ctx);
                 ctx.Query.UseRawOrderBy = true;
                 return;
 
-            case MethodCallExpression { Method: { Name: nameof(ServiceClientExtensions.CountColumn),
-                    DeclaringType: var dtCC } } countColumnCall
+            case MethodCallExpression
+            {
+                Method:
+                {
+                    Name: nameof(ServiceClientExtensions.CountColumn),
+                    DeclaringType: var dtCC
+                }
+            } countColumnCall
                 when dtCC == typeof(ServiceClientExtensions):
                 HandleAggregateOperator(countColumnCall, ctx);
                 return;
@@ -347,7 +406,7 @@ internal static class FetchXmlQueryTranslator
                 foreach (var ra in rowAggregates)
                     ctx.Query.Attributes.Add(new FetchAttribute
                     {
-                        Name = ctx.Query.EntityLogicalName + "id",
+                        Name = $"{ctx.Query.EntityLogicalName}id",
                         Alias = ra.Alias,
                         RowAggregate = "CountChildren"
                     });
@@ -376,7 +435,7 @@ internal static class FetchXmlQueryTranslator
 
         foreach (var (alias, columns) in columnsByAlias)
         {
-            if (alias == "")
+            if (alias == string.Empty)
             {
                 ctx.Query.ApplyColumns(columns);
             }
@@ -406,7 +465,7 @@ internal static class FetchXmlQueryTranslator
         var resolved = ResolveAttribute(expr, ctx);
         if (resolved is not null)
         {
-            var key = resolved.Value.EntityAlias ?? "";
+            var key = resolved.Value.EntityAlias ?? string.Empty;
             if (!columnsByAlias.TryGetValue(key, out var list))
             {
                 list = [];
@@ -458,7 +517,7 @@ internal static class FetchXmlQueryTranslator
             filter.Conditions.Add(new FetchCondition
             {
                 EntityAlias = link.Alias,
-                Attribute = link.Name + "id",
+                Attribute = $"{link.Name}id",
                 Operator = ConditionOperator.Null
             });
             return;
@@ -496,33 +555,33 @@ internal static class FetchXmlQueryTranslator
             // string.IsNullOrEmpty(x.Attr) → null OR eq ""  /  negated → not-null AND ne ""
             case MethodCallExpression { Method: { Name: "IsNullOrEmpty", DeclaringType: var dt } } isNullCall
                 when dt == typeof(string):
-            {
-                var resolved = ResolveMethodAttribute(isNullCall, ctx);
-                var (filterType, nullOp, emptyOp) = negated
-                    ? (FilterType.And, ConditionOperator.NotNull, ConditionOperator.NotEqual)
-                    : (FilterType.Or, ConditionOperator.Null, ConditionOperator.Equal);
-                var subFilter = new FetchFilter { Type = filterType };
-                subFilter.Conditions.Add(new FetchCondition { Attribute = resolved.Name, EntityAlias = resolved.EntityAlias, Operator = nullOp });
-                subFilter.Conditions.Add(new FetchCondition { Attribute = resolved.Name, EntityAlias = resolved.EntityAlias, Operator = emptyOp, Value = "" });
-                filter.Filters.Add(subFilter);
-                return;
-            }
+                {
+                    var resolved = ResolveMethodAttribute(isNullCall, ctx);
+                    var (filterType, nullOp, emptyOp) = negated
+                        ? (FilterType.And, ConditionOperator.NotNull, ConditionOperator.NotEqual)
+                        : (FilterType.Or, ConditionOperator.Null, ConditionOperator.Equal);
+                    var subFilter = new FetchFilter { Type = filterType };
+                    subFilter.Conditions.Add(new FetchCondition { Attribute = resolved.Name, EntityAlias = resolved.EntityAlias, Operator = nullOp });
+                    subFilter.Conditions.Add(new FetchCondition { Attribute = resolved.Name, EntityAlias = resolved.EntityAlias, Operator = emptyOp, Value = string.Empty });
+                    filter.Filters.Add(subFilter);
+                    return;
+                }
 
             // collection.Contains(x.Attr) → in  /  negated → not-in
             case MethodCallExpression { Method: { Name: "Contains" } } containsCall
                 when TryResolveInPredicate(containsCall, ctx) is { } inResult:
-            {
-                var condition = new FetchCondition
                 {
-                    Attribute = inResult.Resolved.Name,
-                    EntityAlias = inResult.Resolved.EntityAlias,
-                    Operator = negated ? ConditionOperator.NotIn : ConditionOperator.In
-                };
-                foreach (var val in inResult.Values)
-                    condition.Values.Add(val);
-                filter.Conditions.Add(condition);
-                return;
-            }
+                    var condition = new FetchCondition
+                    {
+                        Attribute = inResult.Resolved.Name,
+                        EntityAlias = inResult.Resolved.EntityAlias,
+                        Operator = negated ? ConditionOperator.NotIn : ConditionOperator.In
+                    };
+                    foreach (var val in inResult.Values)
+                        condition.Values.Add(val);
+                    filter.Conditions.Add(condition);
+                    return;
+                }
 
             // x.MultiSelectProp.Contains(enumValue) → contain-values / negated → not-contain-values
             case MethodCallExpression { Method: { Name: "Contains" }, Object: { } obj } multiSelectCall
@@ -530,115 +589,115 @@ internal static class FetchXmlQueryTranslator
                 && ResolveAttribute(obj, ctx) is { } msResolved
                 && obj.Type.IsGenericType
                 && obj.Type != typeof(string):
-            {
-                var value = multiSelectCall.Arguments[0].EvaluateValue();
-                var condition = new FetchCondition
                 {
-                    Attribute = msResolved.Name,
-                    EntityAlias = msResolved.EntityAlias,
-                    Operator = negated ? ConditionOperator.DoesNotContainValues : ConditionOperator.ContainValues
-                };
-                condition.Values.Add(value!);
-                filter.Conditions.Add(condition);
-                return;
-            }
+                    var value = multiSelectCall.Arguments[0].EvaluateValue();
+                    var condition = new FetchCondition
+                    {
+                        Attribute = msResolved.Name,
+                        EntityAlias = msResolved.EntityAlias,
+                        Operator = negated ? ConditionOperator.DoesNotContainValues : ConditionOperator.ContainValues
+                    };
+                    condition.Values.Add(value!);
+                    filter.Conditions.Add(condition);
+                    return;
+                }
 
             // x.Attr.Contains("value") / StartsWith / EndsWith → like  /  negated → not-like
             case MethodCallExpression { Method: { Name: "Contains" or "StartsWith" or "EndsWith" } } stringCall
                 when stringCall.Method.DeclaringType == typeof(string) && stringCall.Object is not null:
-            {
-                var (resolved, pattern) = ResolveStringMethodAttribute(stringCall, ctx);
-                filter.Conditions.Add(new FetchCondition
                 {
-                    Attribute = resolved.Name,
-                    EntityAlias = resolved.EntityAlias,
-                    Operator = negated ? ConditionOperator.NotLike : ConditionOperator.Like,
-                    Value = pattern
-                });
-                return;
-            }
+                    var (resolved, pattern) = ResolveStringMethodAttribute(stringCall, ctx);
+                    filter.Conditions.Add(new FetchCondition
+                    {
+                        Attribute = resolved.Name,
+                        EntityAlias = resolved.EntityAlias,
+                        Operator = negated ? ConditionOperator.NotLike : ConditionOperator.Like,
+                        Value = pattern
+                    });
+                    return;
+                }
 
             // Extension method operators (DateTime, hierarchy, multi-select) → condition operators
             case MethodCallExpression { Method.DeclaringType: var declType } dateCall
                 when TryGetExtensionOperator(declType, dateCall.Method.Name, out var dateOp):
-            {
-                var resolved = ResolveMethodAttribute(dateCall, ctx);
-                var effectiveOp = negated ? NegateOperator(dateOp) : dateOp;
-                var condition = new FetchCondition
                 {
-                    Attribute = resolved.Name,
-                    EntityAlias = resolved.EntityAlias,
-                    Operator = effectiveOp
-                };
-                // arg[0] is the 'this' parameter; remaining args are values
-                var extraArgs = dateCall.Arguments.Count - 1;
-                if (extraArgs == 1)
-                {
-                    var value = dateCall.Arguments[1].EvaluateValue();
-                    if (value is System.Collections.IEnumerable enumerable and not string)
+                    var resolved = ResolveMethodAttribute(dateCall, ctx);
+                    var effectiveOp = negated ? NegateOperator(dateOp) : dateOp;
+                    var condition = new FetchCondition
                     {
-                        foreach (var item in enumerable)
-                            condition.Values.Add(item!);
-                    }
-                    else
+                        Attribute = resolved.Name,
+                        EntityAlias = resolved.EntityAlias,
+                        Operator = effectiveOp
+                    };
+                    // arg[0] is the 'this' parameter; remaining args are values
+                    var extraArgs = dateCall.Arguments.Count - 1;
+                    if (extraArgs == 1)
                     {
-                        condition.Value = value;
+                        var value = dateCall.Arguments[1].EvaluateValue();
+                        if (value is System.Collections.IEnumerable enumerable and not string)
+                        {
+                            foreach (var item in enumerable)
+                                condition.Values.Add(item!);
+                        }
+                        else
+                        {
+                            condition.Value = value;
+                        }
                     }
+                    else if (extraArgs > 1)
+                    {
+                        for (var i = 1; i < dateCall.Arguments.Count; i++)
+                            condition.Values.Add(dateCall.Arguments[i].EvaluateValue()!);
+                    }
+                    filter.Conditions.Add(condition);
+                    return;
                 }
-                else if (extraArgs > 1)
-                {
-                    for (var i = 1; i < dateCall.Arguments.Count; i++)
-                        condition.Values.Add(dateCall.Arguments[i].EvaluateValue()!);
-                }
-                filter.Conditions.Add(condition);
-                return;
-            }
 
             // x.MultiSelectProp.Equals(value) or .Equals(collection) → eq/ne or in/not-in
             // C# resolves this to object.Equals(object) since instance methods shadow extension methods.
             // Also handles explicit MultiSelectExtensions.Equals(collection, values) calls.
             case MethodCallExpression { Method: { Name: "Equals" } } equalsCall
-                when (equalsCall.Method.DeclaringType == typeof(Extensions.MultiSelectExtensions)
+                when (equalsCall.Method.DeclaringType == typeof(MultiSelectExtensions)
                     || (equalsCall.Method.DeclaringType == typeof(object)
                         && equalsCall.Object is { } eqObj
                         && eqObj.Type.IsGenericType
                         && eqObj.Type != typeof(string)
                         && ResolveAttribute(eqObj, ctx) is not null)):
-            {
-                // Extension method: args[0] = collection, args[1] = value
-                // Instance method: Object = collection, args[0] = value
-                var isExtension = equalsCall.Method.DeclaringType == typeof(Extensions.MultiSelectExtensions);
-                var attrExpr = isExtension ? equalsCall.Arguments[0] : equalsCall.Object!;
-                var valueExpr = isExtension ? equalsCall.Arguments[1] : equalsCall.Arguments[0];
-
-                var resolved = ResolveAttribute(attrExpr, ctx)
-                    ?? throw new NotSupportedException("Equals target must resolve to an attribute.");
-                var value = valueExpr.EvaluateValue();
-
-                if (value is System.Collections.IEnumerable enumerable and not string)
                 {
-                    var condition = new FetchCondition
+                    // Extension method: args[0] = collection, args[1] = value
+                    // Instance method: Object = collection, args[0] = value
+                    var isExtension = equalsCall.Method.DeclaringType == typeof(MultiSelectExtensions);
+                    var attrExpr = isExtension ? equalsCall.Arguments[0] : equalsCall.Object!;
+                    var valueExpr = isExtension ? equalsCall.Arguments[1] : equalsCall.Arguments[0];
+
+                    var resolved = ResolveAttribute(attrExpr, ctx)
+                        ?? throw new NotSupportedException("Equals target must resolve to an attribute.");
+                    var value = valueExpr.EvaluateValue();
+
+                    if (value is System.Collections.IEnumerable enumerable and not string)
                     {
-                        Attribute = resolved.Name,
-                        EntityAlias = resolved.EntityAlias,
-                        Operator = negated ? ConditionOperator.NotIn : ConditionOperator.In
-                    };
-                    foreach (var item in enumerable)
-                        condition.Values.Add(item!);
-                    filter.Conditions.Add(condition);
-                }
-                else
-                {
-                    filter.Conditions.Add(new FetchCondition
+                        var condition = new FetchCondition
+                        {
+                            Attribute = resolved.Name,
+                            EntityAlias = resolved.EntityAlias,
+                            Operator = negated ? ConditionOperator.NotIn : ConditionOperator.In
+                        };
+                        foreach (var item in enumerable)
+                            condition.Values.Add(item!);
+                        filter.Conditions.Add(condition);
+                    }
+                    else
                     {
-                        Attribute = resolved.Name,
-                        EntityAlias = resolved.EntityAlias,
-                        Operator = negated ? ConditionOperator.NotEqual : ConditionOperator.Equal,
-                        Value = value
-                    });
+                        filter.Conditions.Add(new FetchCondition
+                        {
+                            Attribute = resolved.Name,
+                            EntityAlias = resolved.EntityAlias,
+                            Operator = negated ? ConditionOperator.NotEqual : ConditionOperator.Equal,
+                            Value = value
+                        });
+                    }
+                    return;
                 }
-                return;
-            }
 
             // Queryable.Any(source, predicate) → link-type="any" / negated → "not any"
             case MethodCallExpression { Method: { Name: "Any", DeclaringType: var anyDeclType } } anyCall
@@ -1186,7 +1245,7 @@ internal static class FetchXmlQueryTranslator
             _ => throw new NotSupportedException($"Unsupported aggregate method '{methodName}'.")
         };
 
-        var fetchXmlFunction = AggregateFunctionMap[methodName];
+        var fetchXmlFunction = _aggregateFunctionMap[methodName];
 
         // Recurse into the source expression
         TranslateCore(call.Arguments[0], ctx);
@@ -1206,7 +1265,7 @@ internal static class FetchXmlQueryTranslator
             ctx.Query.Attributes.Clear();
             ctx.Query.Attributes.Add(new FetchAttribute
             {
-                Name = ctx.Query.EntityLogicalName + "id",
+                Name = $"{ctx.Query.EntityLogicalName}id",
                 Alias = fetchXmlFunction,
                 Aggregate = fetchXmlFunction
             });
@@ -1340,7 +1399,7 @@ internal static class FetchXmlQueryTranslator
             // Simple element: group participant by key → element is a single entity
             var mapping = ResolveElementToJoinEntity(body, joinMappings);
             if (mapping is not null)
-                result[""] = mapping;
+                result[string.Empty] = mapping;
         }
 
         return result;
@@ -1508,9 +1567,9 @@ internal static class FetchXmlQueryTranslator
         }
         // Extension method date grouping: Week(), Quarter(), FiscalPeriod(), FiscalYear()
         else if (expr is MethodCallExpression
-                 {
-                     Method: { Name: var methodName, DeclaringType: var dt }
-                 } mc
+        {
+            Method: { Name: var methodName, DeclaringType: var dt }
+        } mc
                  && dt == typeof(DateTimeExtensions)
                  && methodName is "Week" or "Quarter" or "FiscalPeriod" or "FiscalYear")
         {
@@ -1550,7 +1609,7 @@ internal static class FetchXmlQueryTranslator
         MethodCallExpression mc, TranslationContext ctx)
     {
         var methodName = mc.Method.Name;
-        if (!AggregateFunctionMap.TryGetValue(methodName, out var aggregateFunc))
+        if (!_aggregateFunctionMap.TryGetValue(methodName, out var aggregateFunc))
             throw new NotSupportedException($"Unsupported group aggregate '{methodName}'.");
 
         // Count() / LongCount() with no selector — use element entity primary key
@@ -1560,10 +1619,10 @@ internal static class FetchXmlQueryTranslator
             if (elementInfo is not null)
             {
                 var entityName = elementInfo.EntityType.GetEntityLogicalName();
-                return (entityName + "id", aggregateFunc, elementInfo.LinkAlias);
+                return ($"{entityName}id", aggregateFunc, elementInfo.LinkAlias);
             }
 
-            return (ctx.Query.EntityLogicalName + "id", aggregateFunc, null);
+            return ($"{ctx.Query.EntityLogicalName}id", aggregateFunc, null);
         }
 
         // Aggregate with selector — extract attribute from the lambda
@@ -1595,7 +1654,7 @@ internal static class FetchXmlQueryTranslator
             return null;
 
         // Simple element (Form 1: group entity by key)
-        if (ctx.GroupElementMappings.TryGetValue("", out var direct))
+        if (ctx.GroupElementMappings.TryGetValue(string.Empty, out var direct))
             return direct;
 
         // Composite element: prefer link entities over root
@@ -1621,7 +1680,7 @@ internal static class FetchXmlQueryTranslator
         var entityExpr = access.Value.EntityExpression;
 
         // Simple element (Form 1): ip => ip.attr — entityExpr is the parameter itself
-        if (entityExpr == param && elementMappings.TryGetValue("", out var directEntity))
+        if (entityExpr == param && elementMappings.TryGetValue(string.Empty, out var directEntity))
             return new ResolvedAttribute(access.Value.AttributeName, directEntity.LinkAlias);
 
         // Composite element (Form 2): x => x.participant.attr — entityExpr is param.propName
@@ -2033,14 +2092,14 @@ internal static class FetchXmlQueryTranslator
             var current = expr;
             while (current is MemberExpression me)
             {
-                if (joinMappings.TryGetValue(me.Member.Name, out mapping))
+                if (joinMappings.TryGetValue(me.Member.Name, out mapping!))
                     return true;
                 current = me.Expression;
             }
 
             // Direct parameter access (e.g., o.Name where o is a join parameter)
             if (current is ParameterExpression param
-                && joinMappings.TryGetValue(param.Name!, out mapping))
+                && joinMappings.TryGetValue(param.Name!, out mapping!))
             {
                 return true;
             }

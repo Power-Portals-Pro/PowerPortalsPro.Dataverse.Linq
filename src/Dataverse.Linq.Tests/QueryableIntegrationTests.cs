@@ -4,7 +4,6 @@ using Dataverse.Linq.Tests.Proxies;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.PowerPlatform.Dataverse.Client;
-using Microsoft.Xrm.Sdk;
 
 namespace Dataverse.Linq.Tests;
 
@@ -1921,7 +1920,7 @@ public class QueryableIntegrationTests(ServiceClientFixture fixture) : Integrati
                       select new
                       {
                           Count = g.Count(),
-                          ColumnCount = g.CountColumn(x => x.NumberOfEmployees),
+                          ColumnCount = g.CountColumn(x => x.NumberOfEmployees!),
                           Maximum = g.Max(x => x.NumberOfEmployees),
                           Minimum = g.Min(x => x.NumberOfEmployees),
                           Sum = g.Sum(x => x.NumberOfEmployees),
@@ -2400,9 +2399,11 @@ public class QueryableIntegrationTests(ServiceClientFixture fixture) : Integrati
     [Fact]
     public async Task WithNoLock_ReturnsRecords()
     {
+#pragma warning disable CS0618 // Type or member is obsolete
         var results = await Service.Queryable<CustomAccount>()
             .WithNoLock()
             .ToListAsync();
+#pragma warning restore CS0618 // Type or member is obsolete
 
         results.Should().HaveCount(150);
     }
@@ -2410,10 +2411,12 @@ public class QueryableIntegrationTests(ServiceClientFixture fixture) : Integrati
     [Fact]
     public async Task WithNoLock_WithFilter_ReturnsFilteredRecords()
     {
+#pragma warning disable CS0618 // Type or member is obsolete
         var results = await Service.Queryable<CustomAccount>()
             .WithNoLock()
             .Where(a => a.Name != null)
             .ToListAsync();
+#pragma warning restore CS0618 // Type or member is obsolete
 
         results.Should().HaveCount(150);
     }

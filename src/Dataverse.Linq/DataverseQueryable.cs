@@ -26,10 +26,14 @@ public class DataverseQueryable<T> : IQueryable<T>, IOrderedQueryable<T> where T
         Expression = expression;
     }
 
+    /// <inheritdoc />
     public Type ElementType => typeof(T);
+    /// <inheritdoc />
     public Expression Expression { get; }
+    /// <inheritdoc />
     public IQueryProvider Provider => _provider;
 
+    /// <inheritdoc />
     public IEnumerator<T> GetEnumerator() =>
         _provider.ExecuteList(Expression).GetEnumerator();
 

@@ -8,6 +8,10 @@ using System.Reflection;
 
 namespace Dataverse.Linq;
 
+/// <summary>
+/// Extension methods for <see cref="IOrganizationServiceAsync"/> that provide LINQ query
+/// entry points, async execution, paging, FetchXml configuration, and aggregate operations.
+/// </summary>
 public static class ServiceClientExtensions
 {
     /// <summary>

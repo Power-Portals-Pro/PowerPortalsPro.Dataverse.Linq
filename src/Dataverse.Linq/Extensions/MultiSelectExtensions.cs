@@ -32,7 +32,7 @@ public static class MultiSelectExtensions
         else if (collection != null && (values?.Length ?? 0) == 0)
             return false;
 
-        return collection!.Intersect(values).Any();
+        return collection!.Intersect(values!).Any();
     }
 
     /// <summary>

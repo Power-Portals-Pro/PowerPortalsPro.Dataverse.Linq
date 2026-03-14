@@ -2,14 +2,26 @@ using System.Reflection;
 
 namespace Dataverse.Linq.Model;
 
+/// <summary>
+/// Marks an enum field with its corresponding FetchXml string representation.
+/// </summary>
 [AttributeUsage(AttributeTargets.Field)]
 public sealed class FetchXmlValueAttribute(string value) : Attribute
 {
+    /// <summary>
+    /// The FetchXml string value for the decorated enum field.
+    /// </summary>
     public string Value { get; } = value;
 }
 
+/// <summary>
+/// Specifies the FetchXml <c>datasource</c> attribute value.
+/// </summary>
 public enum FetchDatasource
 {
+    /// <summary>
+    /// Queries long-term retained data.
+    /// </summary>
     [FetchXmlValue("retained")]
     Retained,
 }

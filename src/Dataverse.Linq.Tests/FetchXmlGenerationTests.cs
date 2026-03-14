@@ -30,7 +30,7 @@ public class FetchXmlGenerationTests
                 // Set PrimaryIdAttribute via reflection (it has no public setter)
                 typeof(EntityMetadata)
                     .GetProperty(nameof(EntityMetadata.PrimaryIdAttribute))!
-                    .SetValue(metadata, entityRequest.LogicalName + "id");
+                    .SetValue(metadata, $"{entityRequest.LogicalName}id");
                 var response = new RetrieveEntityResponse();
                 response.Results["EntityMetadata"] = metadata;
                 return response;
@@ -2951,7 +2951,7 @@ public class FetchXmlGenerationTests
                             on o.Contact.Id equals c.CustomContactId
                         where c.FirstName.Contains("Jane")
                         where o.StatusReason_OptionSetValue.Value == (int)CustomOpportunity.CustomOpportunity_StatusReason.Won
-                        group o by o.ActualCloseDate.Value.Year into g
+                        group o by o.ActualCloseDate!.Value.Year into g
                         orderby g.Key ascending
                         select new
                         {
@@ -3037,7 +3037,7 @@ public class FetchXmlGenerationTests
                         {
                             Average = g.Average(x => x.NumberOfEmployees),
                             Count = g.Count(),
-                            ColumnCount = g.CountColumn(x => x.NumberOfEmployees),
+                            ColumnCount = g.CountColumn(x => x.NumberOfEmployees!.Value),
                             Maximum = g.Max(x => x.NumberOfEmployees),
                             Minimum = g.Min(x => x.NumberOfEmployees),
                             Sum = g.Sum(x => x.NumberOfEmployees),
