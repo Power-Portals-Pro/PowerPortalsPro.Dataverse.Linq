@@ -16,6 +16,7 @@ internal enum QueryTerminalOperator
     Average,
     Count,
     LongCount,
+    CountColumn,
 }
 
 /// <summary>

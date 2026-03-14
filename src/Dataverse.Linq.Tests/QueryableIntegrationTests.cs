@@ -1457,6 +1457,32 @@ public class QueryableIntegrationTests : IntegrationTestBase
         count.Should().Be(all.Count);
     }
 
+    [Fact]
+    public async Task CountColumn_CountsNonNullValues()
+    {
+        var all = await Service.Queryable<CustomAccount>().ToListAsync();
+        var expectedNonNull = all.Count(a => a.NumberOfEmployees != null);
+
+        var countColumn = Service.Queryable<CustomAccount>()
+            .Select(a => a.NumberOfEmployees)
+            .CountColumn();
+
+        countColumn.Should().Be(expectedNonNull);
+    }
+
+    [Fact]
+    public async Task CountColumnAsync_CountsNonNullValues()
+    {
+        var all = await Service.Queryable<CustomAccount>().ToListAsync();
+        var expectedNonNull = all.Count(a => a.NumberOfEmployees != null);
+
+        var countColumn = await Service.Queryable<CustomAccount>()
+            .Select(a => a.NumberOfEmployees)
+            .CountColumnAsync();
+
+        countColumn.Should().Be(expectedNonNull);
+    }
+
     // -------------------------------------------------------------------------
     // Join with complex where and string interpolation projection
     // -------------------------------------------------------------------------

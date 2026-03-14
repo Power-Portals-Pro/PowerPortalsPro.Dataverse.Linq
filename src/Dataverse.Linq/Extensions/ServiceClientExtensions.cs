@@ -252,6 +252,42 @@ public static class ServiceClientExtensions
     }
 
     /// <summary>
+    /// Counts non-null values of the column projected by a preceding <c>Select</c>.
+    /// Translates to FetchXml <c>aggregate="countcolumn"</c>.
+    /// Usage: <c>query.Select(x => x.SomeColumn).CountColumn()</c>
+    /// </summary>
+    public static int CountColumn<TSource>(this IQueryable<TSource> queryable)
+    {
+        var expression = Expression.Call(
+            typeof(ServiceClientExtensions),
+            nameof(CountColumn),
+            [typeof(TSource)],
+            queryable.Expression);
+
+        return queryable.Provider.Execute<int>(expression);
+    }
+
+    /// <summary>
+    /// Asynchronously counts non-null values of the column projected by a preceding <c>Select</c>.
+    /// Translates to FetchXml <c>aggregate="countcolumn"</c>.
+    /// </summary>
+    public static Task<int> CountColumnAsync<TSource>(
+        this IQueryable<TSource> queryable,
+        CancellationToken cancellationToken = default)
+    {
+        var expression = Expression.Call(
+            typeof(ServiceClientExtensions),
+            nameof(CountColumn),
+            [typeof(TSource)],
+            queryable.Expression);
+
+        if (queryable.Provider is IAsyncQueryProvider asyncProvider)
+            return asyncProvider.ExecuteAsync<Task<int>>(expression, cancellationToken);
+
+        return Task.FromResult(queryable.Provider.Execute<int>(expression));
+    }
+
+    /// <summary>
     /// Translates the LINQ query into its FetchXml representation without executing it.
     /// Useful for debugging, logging, or inspecting the generated query.
     /// </summary>

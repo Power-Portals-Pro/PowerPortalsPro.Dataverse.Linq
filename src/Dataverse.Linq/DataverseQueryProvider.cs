@@ -54,7 +54,8 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
         // Aggregate terminal operator (Min, Max, Sum, Average, Count)
         if (query.TerminalOperator is QueryTerminalOperator.Min or QueryTerminalOperator.Max
             or QueryTerminalOperator.Sum or QueryTerminalOperator.Average
-            or QueryTerminalOperator.Count or QueryTerminalOperator.LongCount)
+            or QueryTerminalOperator.Count or QueryTerminalOperator.LongCount
+            or QueryTerminalOperator.CountColumn)
             return ExtractAggregateResult<TResult>(entities, query.TerminalOperator);
 
         // Scalar terminal operator (First, Single, etc.)
@@ -85,7 +86,8 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
         // Aggregate terminal operator: TResult = Task<TElement>
         if (query.TerminalOperator is QueryTerminalOperator.Min or QueryTerminalOperator.Max
             or QueryTerminalOperator.Sum or QueryTerminalOperator.Average
-            or QueryTerminalOperator.Count or QueryTerminalOperator.LongCount)
+            or QueryTerminalOperator.Count or QueryTerminalOperator.LongCount
+            or QueryTerminalOperator.CountColumn)
         {
             var elementType = typeof(TResult).GetGenericArguments()[0];
             var method = GetPrivateMethod(nameof(ExecuteAggregateAsync)).MakeGenericMethod(elementType);
@@ -227,6 +229,7 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
             QueryTerminalOperator.Sum => "sum",
             QueryTerminalOperator.Average => "avg",
             QueryTerminalOperator.Count or QueryTerminalOperator.LongCount => "count",
+            QueryTerminalOperator.CountColumn => "countcolumn",
             _ => throw new InvalidOperationException($"Unexpected aggregate operator '{op}'.")
         };
 

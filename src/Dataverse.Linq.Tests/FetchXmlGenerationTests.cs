@@ -2304,6 +2304,58 @@ public class FetchXmlGenerationTests
             """);
     }
 
+    [Fact]
+    public void ToFetchXml_CountColumn_GeneratesAggregateCountColumn()
+    {
+        var queryable = _service.Queryable<CustomAccount>()
+            .Select(a => a.NumberOfEmployees);
+
+        var expr = System.Linq.Expressions.Expression.Call(
+            typeof(ServiceClientExtensions),
+            nameof(ServiceClientExtensions.CountColumn),
+            [typeof(int?)],
+            queryable.Expression);
+
+        var fetchXml = TranslateToFetchXml<CustomAccount>(expr);
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="new_customaccount">
+                <attribute name="new_numberofemployees" alias="countcolumn" aggregate="countcolumn" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_CountColumnWithWhere_GeneratesAggregateCountColumnWithFilter()
+    {
+        var queryable = _service.Queryable<CustomAccount>()
+            .Where(a => a.Name.Contains("ABC"))
+            .Select(a => a.NumberOfEmployees);
+
+        var expr = System.Linq.Expressions.Expression.Call(
+            typeof(ServiceClientExtensions),
+            nameof(ServiceClientExtensions.CountColumn),
+            [typeof(int?)],
+            queryable.Expression);
+
+        var fetchXml = TranslateToFetchXml<CustomAccount>(expr);
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="new_customaccount">
+                <attribute name="new_numberofemployees" alias="countcolumn" aggregate="countcolumn" />
+                <filter type="and">
+                  <condition attribute="new_name" operator="like" value="%ABC%" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
     // -------------------------------------------------------------------------
     // GroupBy — grouped aggregate queries
     // -------------------------------------------------------------------------

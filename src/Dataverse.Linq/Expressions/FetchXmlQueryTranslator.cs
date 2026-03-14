@@ -97,6 +97,7 @@ internal static class FetchXmlQueryTranslator
         [nameof(Queryable.Average)] = "avg",
         [nameof(Queryable.Min)] = "min",
         [nameof(Queryable.Max)] = "max",
+        [nameof(ServiceClientExtensions.CountColumn)] = "countcolumn",
     };
 
     private static bool TryGetExtensionOperator(Type? declaringType, string methodName, out ConditionOperator op)
@@ -230,6 +231,12 @@ internal static class FetchXmlQueryTranslator
                 when dt == typeof(ServiceClientExtensions):
                 TranslateCore(pageSizeCall.Arguments[0], ctx);
                 ctx.Query.PageSize = (int)((ConstantExpression)pageSizeCall.Arguments[1]).Value!;
+                return;
+
+            case MethodCallExpression { Method: { Name: nameof(ServiceClientExtensions.CountColumn),
+                    DeclaringType: var dtCC } } countColumnCall
+                when dtCC == typeof(ServiceClientExtensions):
+                HandleAggregateOperator(countColumnCall, ctx);
                 return;
 
             default:
@@ -1124,6 +1131,7 @@ internal static class FetchXmlQueryTranslator
     {
         var methodName = call.Method.Name;
         var isCount = methodName is nameof(Queryable.Count) or nameof(Queryable.LongCount);
+        var isCountColumn = methodName is nameof(ServiceClientExtensions.CountColumn);
 
         ctx.Query.TerminalOperator = methodName switch
         {
@@ -1133,6 +1141,7 @@ internal static class FetchXmlQueryTranslator
             nameof(Queryable.Average) => QueryTerminalOperator.Average,
             nameof(Queryable.Count) => QueryTerminalOperator.Count,
             nameof(Queryable.LongCount) => QueryTerminalOperator.LongCount,
+            nameof(ServiceClientExtensions.CountColumn) => QueryTerminalOperator.CountColumn,
             _ => throw new NotSupportedException($"Unsupported aggregate method '{methodName}'.")
         };
 
