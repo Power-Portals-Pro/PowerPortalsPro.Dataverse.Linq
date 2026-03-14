@@ -1720,6 +1720,50 @@ public class FetchXmlGenerationTests
             """);
     }
 
+    [Fact]
+    public void ToFetchXml_WhereListContainsEnum_GeneratesContainValuesFilter()
+    {
+        var fetchXml = _service.Queryable<CustomContact>()
+            .Where(c => c.FavoriteColors.Contains(CustomContact.Color.Red))
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customcontact">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_favoritecolors" operator="contain-values">
+                    <value>100000000</value>
+                  </condition>
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WhereNegatedListContainsEnum_GeneratesDoesNotContainValuesFilter()
+    {
+        var fetchXml = _service.Queryable<CustomContact>()
+            .Where(c => !c.FavoriteColors.Contains(CustomContact.Color.Blue))
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customcontact">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_favoritecolors" operator="not-contain-values">
+                    <value>100000002</value>
+                  </condition>
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
     // -------------------------------------------------------------------------
     // Where — Column-to-column comparison (valueof)
     // -------------------------------------------------------------------------

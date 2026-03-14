@@ -1188,6 +1188,32 @@ public class QueryableIntegrationTests : IntegrationTestBase
         negatedContain.Select(r => r.CustomContactId).Should().BeEquivalentTo(doesNotContain.Select(r => r.CustomContactId));
     }
 
+    [Fact]
+    public async Task ToListAsync_WhereListContainsEnum_ReturnsMatchingRecords()
+    {
+        var results = await Service.Queryable<CustomContact>()
+            .Where(c => c.FavoriteColors.Contains(CustomContact.Color.Red))
+            .ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Should().OnlyContain(r =>
+            r.FavoriteColors != null
+            && r.FavoriteColors.Contains(CustomContact.Color.Red));
+    }
+
+    [Fact]
+    public async Task ToListAsync_WhereNegatedListContainsEnum_ExcludesMatchingRecords()
+    {
+        var results = await Service.Queryable<CustomContact>()
+            .Where(c => !c.FavoriteColors.Contains(CustomContact.Color.Red))
+            .ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Should().OnlyContain(r =>
+            r.FavoriteColors == null
+            || !r.FavoriteColors.Contains(CustomContact.Color.Red));
+    }
+
     // -------------------------------------------------------------------------
     // Column-to-column comparison (valueof)
     // -------------------------------------------------------------------------

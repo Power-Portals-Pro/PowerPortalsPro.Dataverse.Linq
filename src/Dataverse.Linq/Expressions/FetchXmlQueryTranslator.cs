@@ -429,6 +429,25 @@ internal static class FetchXmlQueryTranslator
                 return;
             }
 
+            // x.MultiSelectProp.Contains(enumValue) → contain-values / negated → not-contain-values
+            case MethodCallExpression { Method: { Name: "Contains" }, Object: { } obj } multiSelectCall
+                when multiSelectCall.Arguments.Count == 1
+                && ResolveAttribute(obj, ctx) is { } msResolved
+                && obj.Type.IsGenericType
+                && obj.Type != typeof(string):
+            {
+                var value = EvaluateValue(multiSelectCall.Arguments[0]);
+                var condition = new FetchCondition
+                {
+                    Attribute = msResolved.Name,
+                    EntityAlias = msResolved.EntityAlias,
+                    Operator = negated ? ConditionOperator.DoesNotContainValues : ConditionOperator.ContainValues
+                };
+                condition.Values.Add(value!);
+                filter.Conditions.Add(condition);
+                return;
+            }
+
             // x.Attr.Contains("value") / StartsWith / EndsWith → like  /  negated → not-like
             case MethodCallExpression { Method: { Name: "Contains" or "StartsWith" or "EndsWith" } } stringCall
                 when stringCall.Method.DeclaringType == typeof(string) && stringCall.Object is not null:
