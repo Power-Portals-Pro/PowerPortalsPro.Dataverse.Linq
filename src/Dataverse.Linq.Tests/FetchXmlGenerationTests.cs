@@ -2285,6 +2285,47 @@ public class FetchXmlGenerationTests
     }
 
     // -------------------------------------------------------------------------
+    // WithAggregateLimit
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_WithAggregateLimit_GeneratesAggregateLimitAttribute()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .WithAggregateLimit(10000)
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregatelimit="10000">
+              <entity name="new_customaccount">
+                <all-attributes />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WithAggregateLimitOnGroupByQuery_GeneratesAggregateLimitAttribute()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .GroupBy(a => a.AccountRating)
+            .Select(g => new { Rating = g.Key, Count = g.Count() })
+            .WithAggregateLimit(25000)
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true" aggregatelimit="25000">
+              <entity name="new_customaccount">
+                <attribute name="new_accountrating" alias="rating" groupby="true" />
+                <attribute name="new_customaccountid" alias="count" aggregate="count" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    // -------------------------------------------------------------------------
     // Aggregate operators — Min / Max / Sum / Average / Count
     // -------------------------------------------------------------------------
 

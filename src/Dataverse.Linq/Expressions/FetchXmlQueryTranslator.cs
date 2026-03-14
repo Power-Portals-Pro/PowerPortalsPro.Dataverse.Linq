@@ -238,6 +238,13 @@ internal static class FetchXmlQueryTranslator
                 ctx.Query.PageSize = (int)((ConstantExpression)pageSizeCall.Arguments[1]).Value!;
                 return;
 
+            case MethodCallExpression { Method: { Name: nameof(ServiceClientExtensions.WithAggregateLimit),
+                    DeclaringType: var dtAL } } aggLimitCall
+                when dtAL == typeof(ServiceClientExtensions):
+                TranslateCore(aggLimitCall.Arguments[0], ctx);
+                ctx.Query.AggregateLimit = (int)((ConstantExpression)aggLimitCall.Arguments[1]).Value!;
+                return;
+
             case MethodCallExpression { Method: { Name: nameof(ServiceClientExtensions.CountColumn),
                     DeclaringType: var dtCC } } countColumnCall
                 when dtCC == typeof(ServiceClientExtensions):

@@ -26,6 +26,8 @@ internal static class FetchXmlBuilder
             fetchElement.Add(new XAttribute("distinct", "true"));
         if (query.Aggregate)
             fetchElement.Add(new XAttribute("aggregate", "true"));
+        if (query.AggregateLimit.HasValue)
+            fetchElement.Add(new XAttribute("aggregatelimit", query.AggregateLimit.Value));
 
         fetchElement.Add(BuildEntity(query));
         return fetchElement.ToString();

@@ -50,6 +50,28 @@ public static class ServiceClientExtensions
     }
 
     /// <summary>
+    /// Sets the aggregate limit for the query by adding the FetchXml <c>aggregatelimit</c> attribute.
+    /// The value must be between 1 and 50,000.
+    /// </summary>
+    public static IQueryable<TElement> WithAggregateLimit<TElement>(
+        this IQueryable<TElement> queryable,
+        int aggregateLimit)
+    {
+        if (aggregateLimit < 1 || aggregateLimit > 50_000)
+            throw new ArgumentOutOfRangeException(nameof(aggregateLimit), aggregateLimit,
+                "Aggregate limit must be between 1 and 50,000.");
+
+        var expression = Expression.Call(
+            typeof(ServiceClientExtensions),
+            nameof(WithAggregateLimit),
+            [typeof(TElement)],
+            queryable.Expression,
+            Expression.Constant(aggregateLimit));
+
+        return queryable.Provider.CreateQuery<TElement>(expression);
+    }
+
+    /// <summary>
     /// Asynchronously executes the query and returns all results as a <see cref="List{T}"/>.
     /// Works on both root queryables and projected queryables (e.g. after a Select clause).
     /// Handles paging automatically.

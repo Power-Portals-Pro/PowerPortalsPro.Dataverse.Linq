@@ -26,6 +26,10 @@ internal static class AggregateProjection
         if (targetType.IsInstanceOfType(raw))
             return (T)raw;
 
+        // Handle int → enum conversion (e.g. OptionSetValue → AccountRating_Enum)
+        if (targetType.IsEnum)
+            return (T)Enum.ToObject(targetType, raw);
+
         return (T)Convert.ChangeType(raw, targetType);
     }
 }

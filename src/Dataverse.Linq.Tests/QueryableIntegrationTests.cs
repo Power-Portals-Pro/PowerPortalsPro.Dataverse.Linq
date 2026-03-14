@@ -1386,6 +1386,22 @@ public class QueryableIntegrationTests(ServiceClientFixture fixture) : Integrati
     }
 
     // -------------------------------------------------------------------------
+    // WithAggregateLimit
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task WithAggregateLimit_GroupByQuery_ReturnsResults()
+    {
+        var results = await Service.Queryable<CustomAccount>()
+            .GroupBy(a => a.AccountRating)
+            .Select(g => new { Rating = g.Key, Count = g.Count() })
+            .WithAggregateLimit(10000)
+            .ToListAsync();
+
+        results.Should().NotBeEmpty();
+    }
+
+    // -------------------------------------------------------------------------
     // String.Length
     // -------------------------------------------------------------------------
 
