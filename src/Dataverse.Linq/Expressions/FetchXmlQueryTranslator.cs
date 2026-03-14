@@ -138,7 +138,7 @@ internal static class FetchXmlQueryTranslator
     {
         var query = new FetchXmlQuery
         {
-            EntityLogicalName = entityLogicalName ?? GetEntityLogicalName(typeof(T))
+            EntityLogicalName = entityLogicalName ?? typeof(T).GetEntityLogicalName()
         };
 
         var ctx = new TranslationContext(query, typeof(T));
@@ -308,7 +308,7 @@ internal static class FetchXmlQueryTranslator
 
     private static void HandleSelect(MethodCallExpression call, TranslationContext ctx)
     {
-        var lambda = ExtractLambda(call.Arguments[1]);
+        var lambda = call.Arguments[1].ExtractLambda();
 
         if (ctx.IsGrouped)
         {
@@ -324,9 +324,9 @@ internal static class FetchXmlQueryTranslator
         else if (ctx.OuterEntityPath is not null)
         {
             // After a left join — resolve member accesses through transparent identifiers
-            var columns = ExtractColumnsViaPath(lambda, ctx.OuterEntityPath);
+            var columns = lambda.ExtractColumnsViaPath(ctx.OuterEntityPath);
             if (columns is { Count: > 0 })
-                ApplyColumns(ctx.Query, columns);
+                ctx.Query.ApplyColumns(columns);
 
             ctx.Query.Projector = RebuildProjector(lambda, ctx.OuterEntityPath, ctx.OuterEntityType!);
             ctx.Query.ProjectionType = lambda.ReturnType;
@@ -334,12 +334,12 @@ internal static class FetchXmlQueryTranslator
         else
         {
             // Simple select on root entity
-            var columns = ExtractColumns(lambda.Body);
+            var columns = lambda.Body.ExtractColumns();
             if (columns is { Count: > 0 })
-                ApplyColumns(ctx.Query, columns);
+                ctx.Query.ApplyColumns(columns);
 
             // Check for CountChildren() calls in the projection
-            var rowAggregates = ExtractRowAggregates(lambda.Body);
+            var rowAggregates = lambda.Body.ExtractRowAggregates();
             if (rowAggregates is { Count: > 0 })
             {
                 foreach (var ra in rowAggregates)
@@ -369,18 +369,18 @@ internal static class FetchXmlQueryTranslator
         // Collect columns keyed by entity alias ("" = root entity)
         var columnsByAlias = new Dictionary<string, List<string>>();
 
-        foreach (var arg in GetProjectionArguments(lambda.Body))
+        foreach (var arg in lambda.Body.GetProjectionArguments())
             CollectJoinAttributesByAlias(arg, ctx, columnsByAlias);
 
         foreach (var (alias, columns) in columnsByAlias)
         {
             if (alias == "")
             {
-                ApplyColumns(ctx.Query, columns);
+                ctx.Query.ApplyColumns(columns);
             }
             else
             {
-                var link = FindLinkByAlias(ctx.Query.Links, alias);
+                var link = ctx.Query.Links.FindLinkByAlias(alias);
                 if (link is not null)
                 {
                     foreach (var col in columns)
@@ -446,10 +446,10 @@ internal static class FetchXmlQueryTranslator
 
     private static void HandleWhere(MethodCallExpression call, TranslationContext ctx)
     {
-        var lambda = ExtractLambda(call.Arguments[1]);
+        var lambda = call.Arguments[1].ExtractLambda();
 
         // Left-join null filter: where c == null
-        if (ctx.InnerEntityProperty is not null && IsNullCheck(lambda, ctx.InnerEntityProperty))
+        if (ctx.InnerEntityProperty is not null && lambda.IsNullCheck(ctx.InnerEntityProperty))
         {
             var link = ctx.Query.Links[^1];
             var filter = ctx.Query.Filter ??= new FetchFilter();
@@ -529,7 +529,7 @@ internal static class FetchXmlQueryTranslator
                 && obj.Type.IsGenericType
                 && obj.Type != typeof(string):
             {
-                var value = EvaluateValue(multiSelectCall.Arguments[0]);
+                var value = multiSelectCall.Arguments[0].EvaluateValue();
                 var condition = new FetchCondition
                 {
                     Attribute = msResolved.Name,
@@ -572,7 +572,7 @@ internal static class FetchXmlQueryTranslator
                 var extraArgs = dateCall.Arguments.Count - 1;
                 if (extraArgs == 1)
                 {
-                    var value = EvaluateValue(dateCall.Arguments[1]);
+                    var value = dateCall.Arguments[1].EvaluateValue();
                     if (value is System.Collections.IEnumerable enumerable and not string)
                     {
                         foreach (var item in enumerable)
@@ -586,7 +586,7 @@ internal static class FetchXmlQueryTranslator
                 else if (extraArgs > 1)
                 {
                     for (var i = 1; i < dateCall.Arguments.Count; i++)
-                        condition.Values.Add(EvaluateValue(dateCall.Arguments[i])!);
+                        condition.Values.Add(dateCall.Arguments[i].EvaluateValue()!);
                 }
                 filter.Conditions.Add(condition);
                 return;
@@ -611,7 +611,7 @@ internal static class FetchXmlQueryTranslator
 
                 var resolved = ResolveAttribute(attrExpr, ctx)
                     ?? throw new NotSupportedException("Equals target must resolve to an attribute.");
-                var value = EvaluateValue(valueExpr);
+                var value = valueExpr.EvaluateValue();
 
                 if (value is System.Collections.IEnumerable enumerable and not string)
                 {
@@ -677,7 +677,7 @@ internal static class FetchXmlQueryTranslator
         MethodCallExpression call, TranslationContext ctx)
     {
         var resolved = ResolveMethodAttribute(call, ctx);
-        var value = EvaluateValue(call.Arguments[0]);
+        var value = call.Arguments[0].EvaluateValue();
         var pattern = call.Method.Name switch
         {
             "Contains" => $"%{value}%",
@@ -719,7 +719,7 @@ internal static class FetchXmlQueryTranslator
         if (resolved is null)
             return null;
 
-        var collection = EvaluateValue(collectionExpr);
+        var collection = collectionExpr.EvaluateValue();
         if (collection is not System.Collections.IEnumerable enumerable)
             return null;
 
@@ -775,8 +775,8 @@ internal static class FetchXmlQueryTranslator
         // Both sides are attributes → column-to-column comparison (valueof)
         if (leftResolved is not null && rightResolved is not null)
         {
-            var leftType = UnwrapExpressionType(binary.Left);
-            var rightType = UnwrapExpressionType(binary.Right);
+            var leftType = binary.Left.UnwrapExpressionType();
+            var rightType = binary.Right.UnwrapExpressionType();
             if (leftType != rightType)
                 throw new NotSupportedException(
                     $"Column-to-column comparison requires both sides to have the same type. " +
@@ -819,7 +819,7 @@ internal static class FetchXmlQueryTranslator
         }
 
         // null comparison → null / not-null
-        if (IsNullConstant(valueExpr))
+        if (valueExpr.IsNullConstant())
         {
             filter.Conditions.Add(new FetchCondition
             {
@@ -830,7 +830,7 @@ internal static class FetchXmlQueryTranslator
             return;
         }
 
-        var value = EvaluateValue(valueExpr);
+        var value = valueExpr.EvaluateValue();
         filter.Conditions.Add(new FetchCondition
         {
             Attribute = attr.Name,
@@ -853,12 +853,12 @@ internal static class FetchXmlQueryTranslator
         Expression? valueExpr = null;
         var reversed = false;
 
-        if (IsStringLength(binary.Left))
+        if (binary.Left.IsStringLength())
         {
             lengthExpr = binary.Left;
             valueExpr = binary.Right;
         }
-        else if (IsStringLength(binary.Right))
+        else if (binary.Right.IsStringLength())
         {
             lengthExpr = binary.Right;
             valueExpr = binary.Left;
@@ -873,7 +873,7 @@ internal static class FetchXmlQueryTranslator
         var resolved = ResolveAttribute(memberExpr.Expression!, ctx)
             ?? throw new NotSupportedException("Could not resolve attribute for string.Length comparison.");
 
-        var lengthValue = Convert.ToInt32(EvaluateValue(valueExpr!));
+        var lengthValue = Convert.ToInt32(valueExpr!.EvaluateValue());
 
         // When the constant is on the left (e.g. 5 >= x.Name.Length), flip the operator
         if (reversed)
@@ -935,21 +935,6 @@ internal static class FetchXmlQueryTranslator
         return true;
     }
 
-    private static bool IsStringLength(Expression expr) =>
-        expr is MemberExpression { Member: { Name: "Length", DeclaringType: var dt } }
-        && dt == typeof(string);
-
-    /// <summary>
-    /// Unwraps Convert nodes and Nullable&lt;T&gt; to get the underlying CLR type of an expression.
-    /// </summary>
-    private static Type UnwrapExpressionType(Expression expr)
-    {
-        while (expr is UnaryExpression { NodeType: ExpressionType.Convert } convert)
-            expr = convert.Operand;
-        var type = expr.Type;
-        return Nullable.GetUnderlyingType(type) ?? type;
-    }
-
     // -------------------------------------------------------------------------
     // Any() → link-type="any" / "not any"
     // -------------------------------------------------------------------------
@@ -962,12 +947,12 @@ internal static class FetchXmlQueryTranslator
     private static void HandleAnyPredicate(
         MethodCallExpression anyCall, FetchFilter filter, bool negated)
     {
-        var (innerLogicalName, _) = GetSourceInfoFromType(anyCall.Arguments[0]);
-        var lambda = ExtractLambda(anyCall.Arguments[1]);
+        var (innerLogicalName, _) = anyCall.Arguments[0].GetSourceInfoFromType();
+        var lambda = anyCall.Arguments[1].ExtractLambda();
         var innerParam = lambda.Parameters[0];
 
         // Flatten AndAlso chain and separate join vs filter conditions.
-        var allConditions = FlattenAndAlso(lambda.Body);
+        var allConditions = lambda.Body.FlattenAndAlso();
         string? from = null, to = null;
         var filterConditions = new List<Expression>();
 
@@ -1014,24 +999,6 @@ internal static class FetchXmlQueryTranslator
     }
 
     /// <summary>
-    /// Flattens a chain of <see cref="ExpressionType.AndAlso"/> nodes into a flat list.
-    /// </summary>
-    private static List<Expression> FlattenAndAlso(Expression expr)
-    {
-        var result = new List<Expression>();
-        if (expr is BinaryExpression { NodeType: ExpressionType.AndAlso } binary)
-        {
-            result.AddRange(FlattenAndAlso(binary.Left));
-            result.AddRange(FlattenAndAlso(binary.Right));
-        }
-        else
-        {
-            result.Add(expr);
-        }
-        return result;
-    }
-
-    /// <summary>
     /// Checks whether a binary Equal expression represents a join condition
     /// (one side references the inner parameter, the other references the outer).
     /// Returns the inner attribute as <paramref name="from"/> and the outer as <paramref name="to"/>.
@@ -1046,13 +1013,13 @@ internal static class FetchXmlQueryTranslator
         if (condition is not BinaryExpression { NodeType: ExpressionType.Equal } binary)
             return false;
 
-        var leftAttr = GetAttributeName(binary.Left);
-        var rightAttr = GetAttributeName(binary.Right);
+        var leftAttr = binary.Left.GetAttributeName();
+        var rightAttr = binary.Right.GetAttributeName();
         if (leftAttr is null || rightAttr is null)
             return false;
 
-        var leftRefsInner = ReferencesParameter(binary.Left, innerParam);
-        var rightRefsInner = ReferencesParameter(binary.Right, innerParam);
+        var leftRefsInner = binary.Left.ReferencesParameter(innerParam);
+        var rightRefsInner = binary.Right.ReferencesParameter(innerParam);
 
         if (leftRefsInner && !rightRefsInner)
         {
@@ -1068,140 +1035,6 @@ internal static class FetchXmlQueryTranslator
         }
 
         return false;
-    }
-
-    /// <summary>
-    /// Returns <c>true</c> if <paramref name="expr"/> contains a reference
-    /// to the given <paramref name="param"/>.
-    /// </summary>
-    private static bool ReferencesParameter(Expression expr, ParameterExpression param)
-    {
-        return expr switch
-        {
-            _ when expr == param => true,
-            UnaryExpression u => ReferencesParameter(u.Operand, param),
-            MemberExpression m => m.Expression is not null && ReferencesParameter(m.Expression, param),
-            MethodCallExpression mc =>
-                (mc.Object is not null && ReferencesParameter(mc.Object, param))
-                || mc.Arguments.Any(a => ReferencesParameter(a, param)),
-            BinaryExpression b =>
-                ReferencesParameter(b.Left, param) || ReferencesParameter(b.Right, param),
-            _ => false
-        };
-    }
-
-    /// <summary>
-    /// Gets entity info from the source expression's generic type argument
-    /// without requiring a runtime <see cref="DataverseQueryable{T}"/> instance.
-    /// Used for <c>Any()</c> where the source may be captured in a closure.
-    /// </summary>
-    private static (string EntityLogicalName, Type EntityType) GetSourceInfoFromType(Expression sourceExpr)
-    {
-        // Try the existing runtime approach first (works for direct DataverseQueryable constants).
-        if (sourceExpr is ConstantExpression { Value: { } val })
-        {
-            var type = val.GetType();
-            if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(DataverseQueryable<>))
-            {
-                var entityType = type.GetGenericArguments()[0];
-                return (GetEntityLogicalName(entityType), entityType);
-            }
-        }
-
-        // Fall back to the expression's declared type (e.g. IQueryable<T>).
-        var exprType = sourceExpr.Type;
-        if (exprType.IsGenericType)
-        {
-            var entityType = exprType.GetGenericArguments()[0];
-            if (entityType.GetCustomAttribute<EntityLogicalNameAttribute>() is not null)
-                return (GetEntityLogicalName(entityType), entityType);
-        }
-
-        throw new NotSupportedException(
-            "Any() source must be a DataverseQueryable<T> or IQueryable<T> where T has [EntityLogicalName].");
-    }
-
-    private static bool IsNullConstant(Expression expr) =>
-        expr is ConstantExpression { Value: null }
-        || (expr is UnaryExpression { NodeType: ExpressionType.Convert } convert
-            && convert.Operand is ConstantExpression { Value: null });
-
-    private static object? EvaluateValue(Expression expr)
-    {
-        var result = EvaluateValueCore(expr);
-        // Convert enum values to their underlying integer for FetchXml serialization.
-        if (result is not null && result.GetType().IsEnum)
-            return Convert.ChangeType(result, Enum.GetUnderlyingType(result.GetType()));
-        // Convert enum arrays to their underlying integer arrays for FetchXml serialization.
-        if (result is Array arr && arr.Length > 0 && arr.GetType().GetElementType() is { IsEnum: true } elemType)
-        {
-            var intArray = new object[arr.Length];
-            var underlying = Enum.GetUnderlyingType(elemType);
-            for (var i = 0; i < arr.Length; i++)
-                intArray[i] = Convert.ChangeType(arr.GetValue(i)!, underlying);
-            return intArray;
-        }
-        return result;
-    }
-
-    private static object? EvaluateValueCore(Expression expr)
-    {
-        if (expr is ConstantExpression constant)
-            return constant.Value;
-
-        // Closure field/property access: closureInstance.field (may be nested)
-        if (expr is MemberExpression memberExpr)
-        {
-            var target = memberExpr.Expression is not null
-                ? EvaluateValue(memberExpr.Expression)
-                : null;
-            return memberExpr.Member switch
-            {
-                FieldInfo fi => fi.GetValue(target),
-                PropertyInfo pi => pi.GetValue(target),
-                _ => throw new NotSupportedException($"Unsupported member type: {memberExpr.Member.GetType()}")
-            };
-        }
-
-        // new[] { ... } inline array — use EvaluateValueCore to preserve element types
-        // (enum conversion happens in EvaluateValue after the array is constructed)
-        if (expr is NewArrayExpression newArray)
-        {
-            var items = newArray.Expressions.Select(e => EvaluateValueCore(e)).ToArray();
-            var array = Array.CreateInstance(newArray.Type.GetElementType()!, items.Length);
-            for (var i = 0; i < items.Length; i++)
-                array.SetValue(items[i], i);
-            return array;
-        }
-
-        // Convert / cast
-        if (expr is UnaryExpression { NodeType: ExpressionType.Convert } convert)
-            return EvaluateValue(convert.Operand);
-
-        // Method call (e.g. implicit conversions, static methods)
-        if (expr is MethodCallExpression methodCall)
-        {
-            // Implicit/explicit conversion operators with a single argument — just evaluate the argument
-            if (methodCall.Method is { IsSpecialName: true, Name: "op_Implicit" or "op_Explicit" }
-                && methodCall.Arguments.Count == 1)
-            {
-                return EvaluateValue(methodCall.Arguments[0]);
-            }
-
-            var target = methodCall.Object is not null ? EvaluateValue(methodCall.Object) : null;
-            var args = methodCall.Arguments.Select(a => EvaluateValue(a)).ToArray();
-            return methodCall.Method.Invoke(target, args);
-        }
-
-        // Constructor call (e.g. new DateTime(2020, 1, 1))
-        if (expr is NewExpression newExpr && newExpr.Constructor is not null)
-        {
-            var args = newExpr.Arguments.Select(a => EvaluateValue(a)).ToArray();
-            return newExpr.Constructor.Invoke(args);
-        }
-
-        throw new NotSupportedException(
-            $"Unable to evaluate expression of type {expr.GetType().Name} (NodeType={expr.NodeType}): {expr}");
     }
 
     // -------------------------------------------------------------------------
@@ -1229,7 +1062,7 @@ internal static class FetchXmlQueryTranslator
         }
 
         // Simple (non-join) resolution via GetAttributeName
-        var simple = GetAttributeName(expr);
+        var simple = expr.GetAttributeName();
         if (simple is not null)
             return new ResolvedAttribute(simple, null);
 
@@ -1239,7 +1072,7 @@ internal static class FetchXmlQueryTranslator
     private static ResolvedAttribute? ResolveJoinAttribute(
         Expression expr, Dictionary<string, JoinEntityInfo> joinMappings)
     {
-        var result = ResolveAttributeAccess(expr);
+        var result = expr.ResolveAttributeAccess();
         if (result is not { } access)
             return null;
 
@@ -1271,7 +1104,7 @@ internal static class FetchXmlQueryTranslator
 
     private static void HandleOrderBy(MethodCallExpression call, TranslationContext ctx)
     {
-        var lambda = ExtractLambda(call.Arguments[1]);
+        var lambda = call.Arguments[1].ExtractLambda();
         var descending = call.Method.Name is nameof(Queryable.OrderByDescending)
                                            or nameof(Queryable.ThenByDescending);
 
@@ -1307,7 +1140,7 @@ internal static class FetchXmlQueryTranslator
         // If the overload includes a predicate (2 arguments), apply it as a Where filter
         if (call.Arguments.Count == 2)
         {
-            var lambda = ExtractLambda(call.Arguments[1]);
+            var lambda = call.Arguments[1].ExtractLambda();
             var filter = ctx.Query.Filter ??= new FetchFilter { Type = FilterType.And };
             TranslatePredicate(lambda.Body, filter, ctx);
         }
@@ -1358,7 +1191,7 @@ internal static class FetchXmlQueryTranslator
             // Count(predicate) — apply as Where filter
             if (call.Arguments.Count == 2)
             {
-                var lambda = ExtractLambda(call.Arguments[1]);
+                var lambda = call.Arguments[1].ExtractLambda();
                 var filter = ctx.Query.Filter ??= new FetchFilter { Type = FilterType.And };
                 TranslatePredicate(lambda.Body, filter, ctx);
             }
@@ -1376,8 +1209,8 @@ internal static class FetchXmlQueryTranslator
         else if (call.Arguments.Count == 2)
         {
             // Min(selector), Max(selector), etc. — extract the attribute from the selector
-            var lambda = ExtractLambda(call.Arguments[1]);
-            var attrName = GetAttributeName(lambda.Body)
+            var lambda = call.Arguments[1].ExtractLambda();
+            var attrName = lambda.Body.GetAttributeName()
                 ?? throw new NotSupportedException(
                     $"Could not resolve attribute for '{methodName}'.");
 
@@ -1419,7 +1252,7 @@ internal static class FetchXmlQueryTranslator
         TranslateCore(call.Arguments[0], ctx);
 
         // Extract key selector
-        var keySelector = ExtractLambda(call.Arguments[1]);
+        var keySelector = call.Arguments[1].ExtractLambda();
 
         ctx.IsGrouped = true;
         ctx.Query.Aggregate = true;
@@ -1600,8 +1433,8 @@ internal static class FetchXmlQueryTranslator
         }
 
         // Aggregate with selector — extract attribute from the lambda
-        var selectorLambda = ExtractLambda(mc.Arguments[1]);
-        var attrName = GetAttributeName(selectorLambda.Body)
+        var selectorLambda = mc.Arguments[1].ExtractLambda();
+        var attrName = selectorLambda.Body.GetAttributeName()
             ?? throw new NotSupportedException(
                 $"Could not resolve attribute for grouped {methodName}.");
 
@@ -1618,8 +1451,8 @@ internal static class FetchXmlQueryTranslator
         // the prior Join and populates JoinMappings before we handle this one.
         TranslateCore(call.Arguments[0], ctx);
 
-        var (innerLogicalName, innerEntityType) = GetSourceInfoFromType(call.Arguments[1]);
-        var resultLambda = ExtractLambda(call.Arguments[4]);
+        var (innerLogicalName, innerEntityType) = call.Arguments[1].GetSourceInfoFromType();
+        var resultLambda = call.Arguments[4].ExtractLambda();
 
         // Chained join — the outer source is a prior join's transparent identifier
         if (ctx.JoinMappings is not null)
@@ -1628,7 +1461,7 @@ internal static class FetchXmlQueryTranslator
             return;
         }
 
-        var (outerLogicalName, outerEntityType) = GetSourceInfoFromType(call.Arguments[0]);
+        var (outerLogicalName, outerEntityType) = call.Arguments[0].GetSourceInfoFromType();
         var (outerKeyAttr, innerKeyAttr) = ExtractJoinKeys(call);
 
         // Root entity
@@ -1648,7 +1481,7 @@ internal static class FetchXmlQueryTranslator
         // Detect transparent identifier: (c, a) => new { c, a }
         // When subsequent operators (Where/OrderBy/Select) follow the join,
         // the compiler wraps the result in a TI rather than projecting directly.
-        if (IsTransparentIdentifier(resultLambda))
+        if (resultLambda.IsTransparentIdentifier())
         {
             ctx.JoinMappings = new Dictionary<string, JoinEntityInfo>
             {
@@ -1681,10 +1514,10 @@ internal static class FetchXmlQueryTranslator
         LambdaExpression resultLambda,
         TranslationContext ctx)
     {
-        var outerKeyLambda = ExtractLambda(call.Arguments[2]);
-        var innerKeyLambda = ExtractLambda(call.Arguments[3]);
+        var outerKeyLambda = call.Arguments[2].ExtractLambda();
+        var innerKeyLambda = call.Arguments[3].ExtractLambda();
 
-        var innerKeyAttr = GetAttributeName(innerKeyLambda.Body)
+        var innerKeyAttr = innerKeyLambda.Body.GetAttributeName()
             ?? throw new NotSupportedException(
                 "Inner join key must be a property decorated with [AttributeLogicalName].");
 
@@ -1710,7 +1543,7 @@ internal static class FetchXmlQueryTranslator
         }
         else
         {
-            var parentLink = FindLinkByAlias(ctx.Query.Links, outerKeyResolved.EntityAlias)
+            var parentLink = ctx.Query.Links.FindLinkByAlias(outerKeyResolved.EntityAlias)
                 ?? throw new NotSupportedException(
                     $"Could not find parent link entity with alias '{outerKeyResolved.EntityAlias}'.");
             parentLink.Links.Add(link);
@@ -1724,7 +1557,7 @@ internal static class FetchXmlQueryTranslator
             LinkAlias = link.Alias
         };
 
-        if (IsTransparentIdentifier(resultLambda))
+        if (resultLambda.IsTransparentIdentifier())
         {
             // Transparent identifier — further operators (Where/Select) follow.
             // Keep flattened mappings for downstream resolution.
@@ -1748,7 +1581,7 @@ internal static class FetchXmlQueryTranslator
     private static ResolvedAttribute? ResolveChainedJoinKey(
         Expression expr, Dictionary<string, JoinEntityInfo> joinMappings)
     {
-        var access = ResolveAttributeAccess(expr);
+        var access = expr.ResolveAttributeAccess();
         if (access is null)
             return null;
 
@@ -1770,29 +1603,6 @@ internal static class FetchXmlQueryTranslator
         return null;
     }
 
-    /// <summary>
-    /// Recursively searches link entities to find one with the given alias.
-    /// </summary>
-    private static FetchLinkEntity? FindLinkByAlias(List<FetchLinkEntity> links, string alias)
-    {
-        foreach (var link in links)
-        {
-            if (link.Alias == alias)
-                return link;
-
-            var nested = FindLinkByAlias(link.Links, alias);
-            if (nested is not null)
-                return nested;
-        }
-
-        return null;
-    }
-
-    private static bool IsTransparentIdentifier(LambdaExpression lambda) =>
-        lambda.Body is NewExpression ne
-        && ne.Arguments.Count > 0
-        && ne.Arguments.All(a => a is ParameterExpression);
-
     // -------------------------------------------------------------------------
     // SelectMany — left join when source is GroupJoin
     // -------------------------------------------------------------------------
@@ -1810,8 +1620,8 @@ internal static class FetchXmlQueryTranslator
         }
 
         // Extract join keys from GroupJoin
-        var (outerLogicalName, outerEntityType) = GetSourceInfoFromType(groupJoinCall.Arguments[0]);
-        var (innerLogicalName, _) = GetSourceInfoFromType(groupJoinCall.Arguments[1]);
+        var (outerLogicalName, outerEntityType) = groupJoinCall.Arguments[0].GetSourceInfoFromType();
+        var (innerLogicalName, _) = groupJoinCall.Arguments[1].GetSourceInfoFromType();
         var (outerKeyAttr, innerKeyAttr) = ExtractJoinKeys(groupJoinCall);
 
         // Root entity
@@ -1820,7 +1630,7 @@ internal static class FetchXmlQueryTranslator
         // Analyse the SelectMany result selector to determine whether the C# compiler
         // folded the final Select into it (no subsequent Where/Select) or created a
         // transparent-identifier wrapper (further operators follow).
-        var resultSelector = ExtractLambda(call.Arguments[2]);
+        var resultSelector = call.Arguments[2].ExtractLambda();
 
         // Link entity — use the LINQ parameter name as the alias
         ctx.Query.Links.Add(new FetchLinkEntity
@@ -1831,7 +1641,7 @@ internal static class FetchXmlQueryTranslator
             Alias = resultSelector.Parameters[1].Name!,
             LinkType = "outer"
         });
-        var outerPath = FindOuterPropertyPath(resultSelector.Parameters[0].Type, outerEntityType);
+        var outerPath = resultSelector.Parameters[0].Type.FindOuterPropertyPath(outerEntityType);
 
         if (outerPath is null)
             return;
@@ -1840,12 +1650,12 @@ internal static class FetchXmlQueryTranslator
         // If the selector IS the final projection (select folded in), this succeeds.
         // If it's a transparent-identifier wrapper, no columns are found and we
         // set up context for subsequent Select/Where instead.
-        var columns = ExtractColumnsViaPath(resultSelector, outerPath);
+        var columns = resultSelector.ExtractColumnsViaPath(outerPath);
 
         if (columns is { Count: > 0 })
         {
             // Select folded into SelectMany — handle projection here
-            ApplyColumns(ctx.Query, columns);
+            ctx.Query.ApplyColumns(columns);
 
             ctx.Query.Projector = RebuildProjector(resultSelector, outerPath, outerEntityType);
             ctx.Query.ProjectionType = resultSelector.ReturnType;
@@ -1856,7 +1666,7 @@ internal static class FetchXmlQueryTranslator
             // The outer path must be computed on the RESULT type (the TI), not the
             // parameter type, because subsequent lambdas receive the TI as their parameter.
             ctx.OuterEntityType = outerEntityType;
-            ctx.OuterEntityPath = FindOuterPropertyPath(resultSelector.ReturnType, outerEntityType);
+            ctx.OuterEntityPath = resultSelector.ReturnType.FindOuterPropertyPath(outerEntityType);
 
             // Identify the inner entity property in the TI for null-check detection.
             var innerParam = resultSelector.Parameters[1];
@@ -1877,244 +1687,15 @@ internal static class FetchXmlQueryTranslator
 
     private static (string OuterKey, string InnerKey) ExtractJoinKeys(MethodCallExpression joinCall)
     {
-        var outerKey = GetAttributeName(ExtractLambda(joinCall.Arguments[2]).Body)
+        var outerKey = joinCall.Arguments[2].ExtractLambda().Body.GetAttributeName()
             ?? throw new NotSupportedException(
                 "Outer join key must be a property decorated with [AttributeLogicalName].");
 
-        var innerKey = GetAttributeName(ExtractLambda(joinCall.Arguments[3]).Body)
+        var innerKey = joinCall.Arguments[3].ExtractLambda().Body.GetAttributeName()
             ?? throw new NotSupportedException(
                 "Inner join key must be a property decorated with [AttributeLogicalName].");
 
         return (outerKey, innerKey);
-    }
-
-    private static void ApplyColumns(FetchXmlQuery query, IReadOnlyList<string> columns)
-    {
-        query.AllAttributes = false;
-        foreach (var col in columns)
-            query.Attributes.Add(new FetchAttribute { Name = col });
-    }
-
-    // -------------------------------------------------------------------------
-    // Column extraction
-    // -------------------------------------------------------------------------
-
-    /// <summary>
-    /// Extracts the member-argument expressions from a projection body
-    /// (<see cref="NewExpression"/>, <see cref="MemberInitExpression"/>, or single
-    /// <see cref="MemberExpression"/>).
-    /// </summary>
-    private static IEnumerable<Expression> GetProjectionArguments(Expression body) => body switch
-    {
-        NewExpression ne => ne.Arguments,
-        MemberInitExpression init => init.Bindings
-            .OfType<MemberAssignment>().Select(b => b.Expression),
-        MemberExpression me => [me],
-        _ => []
-    };
-
-    private record RowAggregateInfo(string Alias);
-
-    /// <summary>
-    /// Scans a projection body for <see cref="ServiceClientExtensions.CountChildren"/> calls
-    /// and returns the alias (lowercased member name) for each one found.
-    /// </summary>
-    private static IReadOnlyList<RowAggregateInfo>? ExtractRowAggregates(Expression body)
-    {
-        List<RowAggregateInfo>? results = null;
-
-        if (body is NewExpression ne && ne.Members is not null)
-        {
-            for (var i = 0; i < ne.Arguments.Count; i++)
-            {
-                if (ne.Arguments[i] is MethodCallExpression { Method: { Name: nameof(ServiceClientExtensions.CountChildren) } } mc
-                    && mc.Method.DeclaringType == typeof(ServiceClientExtensions))
-                {
-                    var member = ne.Members[i];
-                    var memberName = member is MethodInfo { Name: ['g', 'e', 't', '_', ..] } getter
-                        ? getter.Name[4..] : member.Name;
-                    results ??= [];
-                    results.Add(new RowAggregateInfo(memberName.ToLowerInvariant()));
-                }
-            }
-        }
-        else if (body is MemberInitExpression init)
-        {
-            foreach (var binding in init.Bindings.OfType<MemberAssignment>())
-            {
-                if (binding.Expression is MethodCallExpression { Method: { Name: nameof(ServiceClientExtensions.CountChildren) } } mc
-                    && mc.Method.DeclaringType == typeof(ServiceClientExtensions))
-                {
-                    results ??= [];
-                    results.Add(new RowAggregateInfo(binding.Member.Name.ToLowerInvariant()));
-                }
-            }
-        }
-
-        return results;
-    }
-
-    /// <summary>
-    /// Rewrites <see cref="ServiceClientExtensions.CountChildren"/> calls in a projection
-    /// to <see cref="AggregateProjection.ExtractValue{T}"/> calls that read the aliased value
-    /// from the entity at runtime.
-    /// </summary>
-    private sealed class CountChildrenRewriter(ParameterExpression entityParam) : ExpressionVisitor
-    {
-        private static readonly MethodInfo ExtractMethod =
-            typeof(AggregateProjection).GetMethod(nameof(AggregateProjection.ExtractValue))!;
-
-        protected override Expression VisitNew(NewExpression node)
-        {
-            if (node.Members is null)
-                return base.VisitNew(node);
-
-            var changed = false;
-            var newArgs = new Expression[node.Arguments.Count];
-
-            for (var i = 0; i < node.Arguments.Count; i++)
-            {
-                if (node.Arguments[i] is MethodCallExpression { Method: { Name: nameof(ServiceClientExtensions.CountChildren) } } mc
-                    && mc.Method.DeclaringType == typeof(ServiceClientExtensions))
-                {
-                    var member = node.Members[i];
-                    var memberName = member is MethodInfo { Name: ['g', 'e', 't', '_', ..] } getter
-                        ? getter.Name[4..] : member.Name;
-                    var alias = memberName.ToLowerInvariant();
-
-                    newArgs[i] = Expression.Call(
-                        ExtractMethod.MakeGenericMethod(typeof(int)),
-                        entityParam,
-                        Expression.Constant(alias));
-                    changed = true;
-                }
-                else
-                {
-                    newArgs[i] = Visit(node.Arguments[i]);
-                }
-            }
-
-            return changed
-                ? Expression.New(node.Constructor!, newArgs, node.Members)
-                : base.VisitNew(node);
-        }
-
-        protected override Expression VisitMemberInit(MemberInitExpression node)
-        {
-            var changed = false;
-            var newBindings = new List<MemberBinding>(node.Bindings.Count);
-
-            foreach (var binding in node.Bindings)
-            {
-                if (binding is MemberAssignment assignment
-                    && assignment.Expression is MethodCallExpression { Method: { Name: nameof(ServiceClientExtensions.CountChildren) } } mc
-                    && mc.Method.DeclaringType == typeof(ServiceClientExtensions))
-                {
-                    var alias = assignment.Member.Name.ToLowerInvariant();
-                    var extractCall = Expression.Call(
-                        ExtractMethod.MakeGenericMethod(typeof(int)),
-                        entityParam,
-                        Expression.Constant(alias));
-                    newBindings.Add(Expression.Bind(assignment.Member, extractCall));
-                    changed = true;
-                }
-                else
-                {
-                    newBindings.Add(VisitMemberBinding(binding));
-                }
-            }
-
-            return changed
-                ? Expression.MemberInit(Visit(node.NewExpression) as NewExpression ?? node.NewExpression, newBindings)
-                : base.VisitMemberInit(node);
-        }
-    }
-
-    /// <summary>
-    /// Extracts attribute logical names from a simple select body (anonymous type,
-    /// member-init, or single property access).
-    /// </summary>
-    private static IReadOnlyList<string>? ExtractColumns(Expression body)
-    {
-        var columns = new List<string>();
-
-        foreach (var arg in GetProjectionArguments(body))
-        {
-            var name = GetAttributeName(arg);
-            if (name is not null)
-                columns.Add(name);
-        }
-
-        return columns.Count > 0 ? columns : null;
-    }
-
-    /// <summary>
-    /// Extracts attribute logical names from a lambda whose parameter is a transparent-
-    /// identifier type. Only members accessed through <paramref name="outerPath"/> are
-    /// collected; inner-entity references are ignored.
-    /// </summary>
-    private static IReadOnlyList<string>? ExtractColumnsViaPath(
-        LambdaExpression lambda, string[] outerPath)
-    {
-        var param = lambda.Parameters[0];
-        var columns = new List<string>();
-
-        foreach (var arg in GetProjectionArguments(lambda.Body))
-        {
-            if (arg is MemberExpression { Member: PropertyInfo prop, Expression: { } attrExpr }
-                && IsOuterEntityAccess(attrExpr, param, outerPath))
-            {
-                var name = prop.GetCustomAttribute<AttributeLogicalNameAttribute>()?.LogicalName;
-                if (name is not null)
-                    columns.Add(name);
-            }
-        }
-
-        return columns.Count > 0 ? columns : null;
-    }
-
-    // -------------------------------------------------------------------------
-    // Transparent identifier helpers
-    // -------------------------------------------------------------------------
-
-    /// <summary>
-    /// Recursively searches <paramref name="type"/> for a property whose type is (or is
-    /// assignable from) <paramref name="outerEntityType"/>, descending into compiler-generated
-    /// transparent-identifier types (<c>&lt;&gt;h__TransparentIdentifier</c>).
-    /// Returns the property-name chain or <c>null</c> if not found.
-    /// </summary>
-    private static string[]? FindOuterPropertyPath(Type type, Type outerEntityType, int maxDepth = 5)
-    {
-        foreach (var prop in type.GetProperties())
-        {
-            if (outerEntityType.IsAssignableFrom(prop.PropertyType))
-                return [prop.Name];
-
-            if (maxDepth > 1 && prop.PropertyType.Name.StartsWith("<>"))
-            {
-                var nested = FindOuterPropertyPath(prop.PropertyType, outerEntityType, maxDepth - 1);
-                if (nested is not null)
-                    return [prop.Name, .. nested];
-            }
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// Returns <c>true</c> when <paramref name="expr"/> matches the member-access chain
-    /// <c>param.path[0].path[1]...path[n-1]</c>.
-    /// </summary>
-    private static bool IsOuterEntityAccess(Expression expr, ParameterExpression param, string[] path)
-    {
-        for (var i = path.Length - 1; i >= 0; i--)
-        {
-            if (expr is not MemberExpression me || me.Member.Name != path[i])
-                return false;
-            expr = me.Expression!;
-        }
-
-        return expr is ParameterExpression p && p == param;
     }
 
     /// <summary>
@@ -2142,7 +1723,7 @@ internal static class FetchXmlQueryTranslator
         protected override Expression VisitMember(MemberExpression node)
         {
             if (node.Expression is not null
-                && IsOuterEntityAccess(node.Expression, originalParam, outerPath))
+                && node.Expression.IsOuterEntityAccess(originalParam, outerPath))
                 return Expression.MakeMemberAccess(outerParam, node.Member);
 
             return base.VisitMember(node);
@@ -2274,104 +1855,6 @@ internal static class FetchXmlQueryTranslator
             return false;
         }
     }
-
-    // -------------------------------------------------------------------------
-    // Null check detection
-    // -------------------------------------------------------------------------
-
-    /// <summary>
-    /// Returns <c>true</c> when the lambda body is <c>param.property == null</c>
-    /// where <paramref name="innerPropertyName"/> is the property holding the inner
-    /// entity in the transparent-identifier type.
-    /// </summary>
-    private static bool IsNullCheck(LambdaExpression lambda, string innerPropertyName)
-    {
-        if (lambda.Body is not BinaryExpression { NodeType: ExpressionType.Equal } binary)
-            return false;
-
-        var (memberSide, constSide) = binary.Left is ConstantExpression
-            ? (binary.Right, binary.Left)
-            : (binary.Left, binary.Right);
-
-        if (constSide is not ConstantExpression { Value: null })
-            return false;
-
-        return memberSide is MemberExpression { Member.Name: var name, Expression: ParameterExpression p }
-            && p == lambda.Parameters[0]
-            && name == innerPropertyName;
-    }
-
-    // -------------------------------------------------------------------------
-    // Shared helpers
-    // -------------------------------------------------------------------------
-
-    private static string GetEntityLogicalName(Type entityType) =>
-        entityType.GetCustomAttribute<EntityLogicalNameAttribute>()?.LogicalName
-        ?? throw new InvalidOperationException(
-            $"Type '{entityType.Name}' must be decorated with [EntityLogicalName].");
-
-    private static LambdaExpression ExtractLambda(Expression expr) =>
-        expr is UnaryExpression { NodeType: ExpressionType.Quote } unary
-            ? (LambdaExpression)unary.Operand
-            : (LambdaExpression)expr;
-
-    /// <summary>
-    /// Resolves an expression to an attribute name and the entity expression it's accessed on.
-    /// Handles direct property access, EntityReference.Id, Money.Value, OptionSetValue.Value,
-    /// and <see cref="Entity.GetAttributeValue{T}"/> calls with a string-constant argument.
-    /// Used by both <see cref="GetAttributeName"/> (simple) and
-    /// <see cref="ResolveJoinAttribute"/> (through transparent identifiers).
-    /// </summary>
-    private static (string AttributeName, Expression EntityExpression)? ResolveAttributeAccess(Expression expr)
-    {
-        if (expr is UnaryExpression { NodeType: ExpressionType.Convert } convert)
-            expr = convert.Operand;
-
-        // Entity.GetAttributeValue<T>("name")
-        if (expr is MethodCallExpression { Method.Name: nameof(Entity.GetAttributeValue) } getAttr
-            && getAttr.Arguments.Count == 1
-            && getAttr.Arguments[0] is ConstantExpression { Value: string constName }
-            && getAttr.Object is not null)
-        {
-            return (constName, getAttr.Object);
-        }
-
-        if (expr is not MemberExpression memberExpr || memberExpr.Expression is null)
-            return null;
-
-        // Direct property with [AttributeLogicalName]
-        if (memberExpr.Member is PropertyInfo directProp)
-        {
-            var attrName = directProp.GetCustomAttribute<AttributeLogicalNameAttribute>()?.LogicalName;
-            if (attrName is not null)
-                return (attrName, memberExpr.Expression);
-        }
-
-        // Two-level: unwrap .Id (EntityReference) or .Value (Money/OptionSetValue)
-        // to resolve the [AttributeLogicalName] on the parent property
-        if (memberExpr.Expression is MemberExpression { Member: PropertyInfo parentProp, Expression: { } parentContainer })
-        {
-            var isUnwrap = memberExpr.Member.Name switch
-            {
-                "Id" => true,
-                "Value" when memberExpr.Member.DeclaringType == typeof(Money)
-                          || memberExpr.Member.DeclaringType == typeof(OptionSetValue) => true,
-                _ => false
-            };
-
-            if (isUnwrap)
-            {
-                var attrName = parentProp.GetCustomAttribute<AttributeLogicalNameAttribute>()?.LogicalName;
-                if (attrName is not null)
-                    return (attrName, parentContainer);
-            }
-        }
-
-        return null;
-    }
-
-    private static string? GetAttributeName(Expression expr) =>
-        ResolveAttributeAccess(expr)?.AttributeName;
 
     // -------------------------------------------------------------------------
     // Translation context — carries state across recursive operator processing
