@@ -10,4 +10,5 @@ internal sealed class FetchAttribute
     public string? Aggregate { get; set; }
     public bool GroupBy { get; set; }
     public string? DateGrouping { get; set; }
+    public string? RowAggregate { get; set; }
 }

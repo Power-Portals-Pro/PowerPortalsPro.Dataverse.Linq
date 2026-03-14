@@ -281,7 +281,28 @@ internal static class FetchXmlQueryTranslator
             if (columns is { Count: > 0 })
                 ApplyColumns(ctx.Query, columns);
 
-            ctx.Query.Projector = lambda.Compile();
+            // Check for CountChildren() calls in the projection
+            var rowAggregates = ExtractRowAggregates(lambda.Body);
+            if (rowAggregates is { Count: > 0 })
+            {
+                foreach (var ra in rowAggregates)
+                    ctx.Query.Attributes.Add(new FetchAttribute
+                    {
+                        Name = ctx.Query.EntityLogicalName + "id",
+                        Alias = ra.Alias,
+                        RowAggregate = "CountChildren"
+                    });
+
+                // Rewrite the projector to extract aliased values for CountChildren() calls
+                var rewriter = new CountChildrenRewriter(lambda.Parameters[0]);
+                var rewritten = rewriter.Visit(lambda.Body);
+                ctx.Query.Projector = Expression.Lambda(rewritten, lambda.Parameters).Compile();
+            }
+            else
+            {
+                ctx.Query.Projector = lambda.Compile();
+            }
+
             ctx.Query.ProjectionType = lambda.ReturnType;
         }
     }
@@ -1573,6 +1594,123 @@ internal static class FetchXmlQueryTranslator
         MemberExpression me => [me],
         _ => []
     };
+
+    private record RowAggregateInfo(string Alias);
+
+    /// <summary>
+    /// Scans a projection body for <see cref="ServiceClientExtensions.CountChildren"/> calls
+    /// and returns the alias (lowercased member name) for each one found.
+    /// </summary>
+    private static IReadOnlyList<RowAggregateInfo>? ExtractRowAggregates(Expression body)
+    {
+        List<RowAggregateInfo>? results = null;
+
+        if (body is NewExpression ne && ne.Members is not null)
+        {
+            for (var i = 0; i < ne.Arguments.Count; i++)
+            {
+                if (ne.Arguments[i] is MethodCallExpression { Method: { Name: nameof(ServiceClientExtensions.CountChildren) } } mc
+                    && mc.Method.DeclaringType == typeof(ServiceClientExtensions))
+                {
+                    var member = ne.Members[i];
+                    var memberName = member is MethodInfo { Name: ['g', 'e', 't', '_', ..] } getter
+                        ? getter.Name[4..] : member.Name;
+                    results ??= [];
+                    results.Add(new RowAggregateInfo(memberName.ToLowerInvariant()));
+                }
+            }
+        }
+        else if (body is MemberInitExpression init)
+        {
+            foreach (var binding in init.Bindings.OfType<MemberAssignment>())
+            {
+                if (binding.Expression is MethodCallExpression { Method: { Name: nameof(ServiceClientExtensions.CountChildren) } } mc
+                    && mc.Method.DeclaringType == typeof(ServiceClientExtensions))
+                {
+                    results ??= [];
+                    results.Add(new RowAggregateInfo(binding.Member.Name.ToLowerInvariant()));
+                }
+            }
+        }
+
+        return results;
+    }
+
+    /// <summary>
+    /// Rewrites <see cref="ServiceClientExtensions.CountChildren"/> calls in a projection
+    /// to <see cref="AggregateProjection.ExtractValue{T}"/> calls that read the aliased value
+    /// from the entity at runtime.
+    /// </summary>
+    private sealed class CountChildrenRewriter(ParameterExpression entityParam) : ExpressionVisitor
+    {
+        private static readonly MethodInfo ExtractMethod =
+            typeof(AggregateProjection).GetMethod(nameof(AggregateProjection.ExtractValue))!;
+
+        protected override Expression VisitNew(NewExpression node)
+        {
+            if (node.Members is null)
+                return base.VisitNew(node);
+
+            var changed = false;
+            var newArgs = new Expression[node.Arguments.Count];
+
+            for (var i = 0; i < node.Arguments.Count; i++)
+            {
+                if (node.Arguments[i] is MethodCallExpression { Method: { Name: nameof(ServiceClientExtensions.CountChildren) } } mc
+                    && mc.Method.DeclaringType == typeof(ServiceClientExtensions))
+                {
+                    var member = node.Members[i];
+                    var memberName = member is MethodInfo { Name: ['g', 'e', 't', '_', ..] } getter
+                        ? getter.Name[4..] : member.Name;
+                    var alias = memberName.ToLowerInvariant();
+
+                    newArgs[i] = Expression.Call(
+                        ExtractMethod.MakeGenericMethod(typeof(int)),
+                        entityParam,
+                        Expression.Constant(alias));
+                    changed = true;
+                }
+                else
+                {
+                    newArgs[i] = Visit(node.Arguments[i]);
+                }
+            }
+
+            return changed
+                ? Expression.New(node.Constructor!, newArgs, node.Members)
+                : base.VisitNew(node);
+        }
+
+        protected override Expression VisitMemberInit(MemberInitExpression node)
+        {
+            var changed = false;
+            var newBindings = new List<MemberBinding>(node.Bindings.Count);
+
+            foreach (var binding in node.Bindings)
+            {
+                if (binding is MemberAssignment assignment
+                    && assignment.Expression is MethodCallExpression { Method: { Name: nameof(ServiceClientExtensions.CountChildren) } } mc
+                    && mc.Method.DeclaringType == typeof(ServiceClientExtensions))
+                {
+                    var alias = assignment.Member.Name.ToLowerInvariant();
+                    var extractCall = Expression.Call(
+                        ExtractMethod.MakeGenericMethod(typeof(int)),
+                        entityParam,
+                        Expression.Constant(alias));
+                    newBindings.Add(Expression.Bind(assignment.Member, extractCall));
+                    changed = true;
+                }
+                else
+                {
+                    newBindings.Add(VisitMemberBinding(binding));
+                }
+            }
+
+            return changed
+                ? Expression.MemberInit(Visit(node.NewExpression) as NewExpression ?? node.NewExpression, newBindings)
+                : base.VisitMemberInit(node);
+        }
+    }
 
     /// <summary>
     /// Extracts attribute logical names from a simple select body (anonymous type,

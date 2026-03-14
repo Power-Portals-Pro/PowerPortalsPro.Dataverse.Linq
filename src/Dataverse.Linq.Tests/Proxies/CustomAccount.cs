@@ -620,6 +620,19 @@ namespace Dataverse.Linq.Tests.Proxies
 
 
         /// <summary>
+        /// <para>Logical Name: new_parentaccountname</para>
+        /// <para>Max Length: 850 characters</para>
+        /// </summary>
+        [AttributeLogicalName("new_parentaccountname")]
+        public string new_ParentAccountName
+        {
+            get
+            {
+                return this.GetPropertyValue<string>("new_parentaccountname");
+            }
+        }
+
+        /// <summary>
         /// <para>Logical Name: new_primarycontactname</para>
         /// <para>Max Length: 850 characters</para>
         /// </summary>
@@ -754,6 +767,22 @@ namespace Dataverse.Linq.Tests.Proxies
             get
             {
                 return this.GetPropertyValue<string>("owningbusinessunitname");
+            }
+        }
+
+        /// <summary>
+        /// <para>Logical Name: new_parentaccount</para>
+        /// </summary>
+        [AttributeLogicalName("new_parentaccount")]
+        public EntityReference ParentAccount
+        {
+            get
+            {
+                return this.GetPropertyValue<EntityReference>("new_parentaccount");
+            }
+            set
+            {
+                this.SetPropertyValue<EntityReference>("new_parentaccount", value, nameof(ParentAccount));
             }
         }
 
@@ -1043,6 +1072,18 @@ namespace Dataverse.Linq.Tests.Proxies
         /// <para>Schema Name: new_customaccount_MailboxTrackingFolders</para>
         /// </summary>
         public List<Entity> GetMailboxAutoTrackingFolders_RegardingObjectId(IOrganizationService service, ColumnSet columns) { return BaseProxyClass.GetRelatedOneToManyEntities(service, this.Id, "mailboxtrackingfolder", "regardingobjectid", columns); }
+
+        /// <summary>
+        /// <para><b>CustomAccount (Parent Account)</b></para>
+        /// <para>Schema Name: new_customaccount_ParentAccount_new_customaccount</para>
+        /// </summary>
+        public List<CustomAccount> GetCustomAccounts_ParentAccount(IOrganizationService service, params string[] columns) { return BaseProxyClass.GetRelatedOneToManyEntities<CustomAccount>(service, this.Id, "new_customaccount", "new_parentaccount", columns); }
+
+        /// <summary>
+        /// <para><b>CustomAccount (Parent Account)</b></para>
+        /// <para>Schema Name: new_customaccount_ParentAccount_new_customaccount</para>
+        /// </summary>
+        public List<CustomAccount> GetCustomAccounts_ParentAccount(IOrganizationService service, ColumnSet columns) { return BaseProxyClass.GetRelatedOneToManyEntities<CustomAccount>(service, this.Id, "new_customaccount", "new_parentaccount", columns); }
 
         /// <summary>
         /// <para><b>CustomContact (Parent Account)</b></para>
@@ -1348,6 +1389,12 @@ namespace Dataverse.Linq.Tests.Proxies
             public const string new_ispreferredaccountName = "new_ispreferredaccountname";
 
             /// <summary>
+            /// <para>new_ParentAccountName</para>
+            /// <para>Logical Name = new_parentaccountname</para>
+            /// </summary>
+            public const string new_ParentAccountName = "new_parentaccountname";
+
+            /// <summary>
             /// <para>new_PrimaryContactName</para>
             /// <para>Logical Name = new_primarycontactname</para>
             /// </summary>
@@ -1406,6 +1453,12 @@ namespace Dataverse.Linq.Tests.Proxies
             /// <para>Logical Name = owningbusinessunitname</para>
             /// </summary>
             public const string OwningBusinessUnitName = "owningbusinessunitname";
+
+            /// <summary>
+            /// <para>Parent Account</para>
+            /// <para>Logical Name = new_parentaccount</para>
+            /// </summary>
+            public const string ParentAccount = "new_parentaccount";
 
             /// <summary>
             /// <para>Percent Complete</para>

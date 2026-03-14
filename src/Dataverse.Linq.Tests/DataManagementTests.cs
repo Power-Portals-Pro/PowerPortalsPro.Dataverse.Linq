@@ -20,6 +20,7 @@ public class DataManagementTests : IntegrationTestBase
         await DeleteAllAsync(CustomOpportunity.LogicalName);
 
         var accountIds = await SeedAccountsAsync(100);
+        await SetParentAccountsAsync(accountIds);
         var contactIds = await SeedContactsAsync(accountIds);
         await LinkContactsToAccountsAsync(accountIds, contactIds);
         await SeedAccountsWithoutContactsAsync(50);
@@ -120,6 +121,40 @@ public class DataManagementTests : IntegrationTestBase
         return response.Responses
             .Select(r => ((CreateResponse)r.Response).id)
             .ToList();
+    }
+
+    /// <summary>
+    /// Sets parent accounts to create a hierarchy for CountChildren testing.
+    /// Accounts 1-10 become parents; accounts 11-50 are assigned as children
+    /// (4 children per parent).
+    /// </summary>
+    private async Task SetParentAccountsAsync(List<Guid> accountIds)
+    {
+        const int parentCount = 10;
+        const int childrenPerParent = 4;
+
+        var requests = new ExecuteMultipleRequest
+        {
+            Settings = new ExecuteMultipleSettings { ContinueOnError = false, ReturnResponses = false },
+            Requests = new OrganizationRequestCollection()
+        };
+
+        for (var p = 0; p < parentCount; p++)
+        {
+            for (var c = 0; c < childrenPerParent; c++)
+            {
+                var childIndex = parentCount + (p * childrenPerParent) + c;
+                if (childIndex >= accountIds.Count) break;
+
+                var update = new Entity(CustomAccount.LogicalName, accountIds[childIndex])
+                {
+                    ["new_parentaccount"] = new EntityReference(CustomAccount.LogicalName, accountIds[p])
+                };
+                requests.Requests.Add(new UpdateRequest { Target = update });
+            }
+        }
+
+        await Service.ExecuteAsync(requests);
     }
 
     private async Task<List<Guid>> SeedContactsAsync(List<Guid> accountIds)

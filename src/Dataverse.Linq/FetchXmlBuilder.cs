@@ -151,6 +151,8 @@ internal static class FetchXmlBuilder
             element.Add(new XAttribute("groupby", "true"));
         if (attr.DateGrouping is not null)
             element.Add(new XAttribute("dategrouping", attr.DateGrouping));
+        if (attr.RowAggregate is not null)
+            element.Add(new XAttribute("rowaggregate", attr.RowAggregate));
 
         return element;
     }

@@ -1707,4 +1707,44 @@ public class QueryableIntegrationTests : IntegrationTestBase
         var expectedNonNull = all.Count(a => a.Description != null);
         totalDescriptionCount.Should().Be(expectedNonNull);
     }
+
+    // -------------------------------------------------------------------------
+    // RowAggregate — CountChildren
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task CountChildren_ReturnsChildCountPerAccount()
+    {
+        var allAccounts = await Service.Queryable<CustomAccount>().ToListAsync();
+
+        // Determine which accounts are parents by counting how many accounts reference them
+        var childCountByParent = allAccounts
+            .Where(a => a.ParentAccount != null)
+            .GroupBy(a => a.ParentAccount.Id)
+            .ToDictionary(g => g.Key, g => g.Count());
+
+        var results = await Service.Queryable<CustomAccount>()
+            .Select(a => new
+            {
+                a.CustomAccountId,
+                a.Name,
+                NumberOfChildren = a.CountChildren()
+            })
+            .ToListAsync();
+
+        results.Should().NotBeEmpty();
+
+        var withChildren = results.Where(r => r.NumberOfChildren > 0).ToList();
+        var withoutChildren = results.Where(r => r.NumberOfChildren == 0).ToList();
+
+        withChildren.Should().HaveCount(childCountByParent.Count);
+        withoutChildren.Should().NotBeEmpty();
+
+        // Verify each parent's child count matches
+        foreach (var result in withChildren)
+        {
+            childCountByParent.Should().ContainKey(result.CustomAccountId);
+            result.NumberOfChildren.Should().Be(childCountByParent[result.CustomAccountId]);
+        }
+    }
 }

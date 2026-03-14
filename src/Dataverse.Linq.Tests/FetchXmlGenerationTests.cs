@@ -2444,4 +2444,56 @@ public class FetchXmlGenerationTests
             </fetch>
             """);
     }
+
+    // -------------------------------------------------------------------------
+    // RowAggregate — CountChildren
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_CountChildren_GeneratesRowAggregate()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Select(a => new
+            {
+                a.Name,
+                NumberOfChildren = a.CountChildren()
+            })
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+                <attribute name="new_customaccountid" alias="numberofchildren" rowaggregate="CountChildren" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_CountChildrenWithFilter_GeneratesRowAggregateWithFilter()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Where(a => a.Name.Contains("Custom"))
+            .Select(a => new
+            {
+                a.Name,
+                Children = a.CountChildren()
+            })
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+                <attribute name="new_customaccountid" alias="children" rowaggregate="CountChildren" />
+                <filter type="and">
+                  <condition attribute="new_name" operator="like" value="%Custom%" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
 }

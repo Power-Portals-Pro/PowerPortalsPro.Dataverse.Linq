@@ -531,6 +531,18 @@ public static class ServiceClientExtensions
     }
 
     /// <summary>
+    /// Returns the count of child records for the entity.
+    /// Translates to FetchXml <c>rowaggregate="CountChildren"</c>.
+    /// This method is a placeholder for the Dataverse LINQ query provider and cannot be invoked directly.
+    /// Usage: <c>.Select(a => new { a.Name, Children = a.CountChildren() })</c>
+    /// </summary>
+    public static int CountChildren(this Entity entity)
+    {
+        throw new NotImplementedException(
+            "This method is a placeholder for the Dataverse LINQ query provider and cannot be invoked directly.");
+    }
+
+    /// <summary>
     /// Translates the LINQ query into its FetchXml representation without executing it.
     /// Useful for debugging, logging, or inspecting the generated query.
     /// </summary>
