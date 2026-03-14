@@ -2096,6 +2096,50 @@ public class FetchXmlGenerationTests
     }
 
     // -------------------------------------------------------------------------
+    // Take
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_Take_GeneratesTopAttribute()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Take(10)
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" top="10">
+              <entity name="new_customaccount">
+                <all-attributes />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_TakeWithWhereAndOrderBy_GeneratesTopWithFilterAndOrder()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Where(a => a.Name.Contains("Custom"))
+            .OrderByDescending(a => a.Name)
+            .Take(5)
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" top="5">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <order attribute="new_name" descending="true" />
+                <filter type="and">
+                  <condition attribute="new_name" operator="like" value="%Custom%" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    // -------------------------------------------------------------------------
     // Aggregate operators — Min / Max / Sum / Average / Count
     // -------------------------------------------------------------------------
 

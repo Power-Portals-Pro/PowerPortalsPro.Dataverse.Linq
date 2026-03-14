@@ -1359,6 +1359,33 @@ public class QueryableIntegrationTests : IntegrationTestBase
     }
 
     // -------------------------------------------------------------------------
+    // Take
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Take_LimitsResultCount()
+    {
+        var all = await Service.Queryable<CustomAccount>().ToListAsync();
+        var taken = await Service.Queryable<CustomAccount>().Take(5).ToListAsync();
+
+        all.Count.Should().BeGreaterThan(5);
+        taken.Should().HaveCount(5);
+    }
+
+    [Fact]
+    public async Task Take_WithWhereAndOrderBy_ReturnsLimitedOrderedResults()
+    {
+        var taken = await Service.Queryable<CustomAccount>()
+            .Where(a => a.Name.Contains("Custom"))
+            .OrderBy(a => a.Name)
+            .Take(3)
+            .ToListAsync();
+
+        taken.Should().HaveCount(3);
+        taken.Select(a => a.Name).Should().BeInAscendingOrder();
+    }
+
+    // -------------------------------------------------------------------------
     // Aggregate operators — Min / Max / Sum / Average / Count
     // -------------------------------------------------------------------------
 

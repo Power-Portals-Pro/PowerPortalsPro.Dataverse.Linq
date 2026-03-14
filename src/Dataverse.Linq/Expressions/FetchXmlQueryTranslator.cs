@@ -208,6 +208,11 @@ internal static class FetchXmlQueryTranslator
                         ctx.Query.Distinct = true;
                         return;
 
+                    case nameof(Queryable.Take):
+                        TranslateCore(call.Arguments[0], ctx);
+                        ctx.Query.Top = (int)((ConstantExpression)call.Arguments[1]).Value!;
+                        return;
+
                     case nameof(Queryable.GroupBy):
                         HandleGroupBy(call, ctx);
                         return;
