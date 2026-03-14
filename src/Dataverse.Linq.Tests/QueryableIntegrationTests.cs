@@ -1483,6 +1483,88 @@ public class QueryableIntegrationTests : IntegrationTestBase
         countColumn.Should().Be(expectedNonNull);
     }
 
+    [Fact]
+    public async Task CountAsync_MatchesListCount()
+    {
+        var all = await Service.Queryable<CustomAccount>().ToListAsync();
+        var count = await Service.Queryable<CustomAccount>().CountAsync();
+
+        count.Should().Be(all.Count);
+    }
+
+    [Fact]
+    public async Task CountAsync_WithPredicate_MatchesFilteredListCount()
+    {
+        var all = await Service.Queryable<CustomAccount>()
+            .Where(a => a.Name.Contains("00"))
+            .ToListAsync();
+
+        var count = await Service.Queryable<CustomAccount>()
+            .CountAsync(a => a.Name.Contains("00"));
+
+        count.Should().Be(all.Count);
+    }
+
+    [Fact]
+    public async Task LongCountAsync_MatchesListCount()
+    {
+        var all = await Service.Queryable<CustomAccount>().ToListAsync();
+        var count = await Service.Queryable<CustomAccount>().LongCountAsync();
+
+        count.Should().Be(all.Count);
+    }
+
+    [Fact]
+    public async Task MinAsync_WithSelector_MatchesLinqMin()
+    {
+        var all = await Service.Queryable<CustomAccount>().ToListAsync();
+        var expected = all.Min(a => a.NumberOfEmployees);
+
+        var min = await Service.Queryable<CustomAccount>()
+            .MinAsync(a => a.NumberOfEmployees);
+
+        min.Should().Be(expected);
+    }
+
+    [Fact]
+    public async Task MaxAsync_WithSelector_MatchesLinqMax()
+    {
+        var all = await Service.Queryable<CustomAccount>().ToListAsync();
+        var expected = all.Max(a => a.NumberOfEmployees);
+
+        var max = await Service.Queryable<CustomAccount>()
+            .MaxAsync(a => a.NumberOfEmployees);
+
+        max.Should().Be(expected);
+    }
+
+    [Fact]
+    public async Task SumAsync_WithSelect_MatchesLinqSum()
+    {
+        var all = await Service.Queryable<CustomAccount>().ToListAsync();
+        var expected = all.Sum(a => a.NumberOfEmployees);
+
+        var sum = await Service.Queryable<CustomAccount>()
+            .Select(a => a.NumberOfEmployees)
+            .SumAsync();
+
+        sum.Should().Be(expected);
+    }
+
+    [Fact]
+    public async Task AverageAsync_WithSelector_MatchesLinqAverage()
+    {
+        var all = await Service.Queryable<CustomAccount>().ToListAsync();
+        var expected = all.Where(a => a.PercentComplete != null)
+            .Average(a => a.PercentComplete);
+
+        var avg = await Service.Queryable<CustomAccount>()
+            .Select(a => a.PercentComplete)
+            .AverageAsync();
+
+        avg.Should().Be(expected);
+    }
+
     // -------------------------------------------------------------------------
     // Join with complex where and string interpolation projection
     // -------------------------------------------------------------------------

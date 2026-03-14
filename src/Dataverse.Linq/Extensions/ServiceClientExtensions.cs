@@ -251,6 +251,236 @@ public static class ServiceClientExtensions
         return Task.FromResult(queryable.SingleOrDefault(predicate));
     }
 
+    // -------------------------------------------------------------------------
+    // Async aggregate operators
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Asynchronously returns the number of elements in the sequence.
+    /// </summary>
+    public static Task<int> CountAsync<TElement>(
+        this IQueryable<TElement> queryable,
+        CancellationToken cancellationToken = default)
+    {
+        var expression = Expression.Call(
+            typeof(System.Linq.Queryable), nameof(System.Linq.Queryable.Count),
+            [typeof(TElement)], queryable.Expression);
+
+        if (queryable.Provider is IAsyncQueryProvider asyncProvider)
+            return asyncProvider.ExecuteAsync<Task<int>>(expression, cancellationToken);
+
+        return Task.FromResult(queryable.Count());
+    }
+
+    /// <summary>
+    /// Asynchronously returns the number of elements in the sequence that satisfy a condition.
+    /// </summary>
+    public static Task<int> CountAsync<TElement>(
+        this IQueryable<TElement> queryable,
+        Expression<Func<TElement, bool>> predicate,
+        CancellationToken cancellationToken = default)
+    {
+        var expression = Expression.Call(
+            typeof(System.Linq.Queryable), nameof(System.Linq.Queryable.Count),
+            [typeof(TElement)], queryable.Expression, predicate);
+
+        if (queryable.Provider is IAsyncQueryProvider asyncProvider)
+            return asyncProvider.ExecuteAsync<Task<int>>(expression, cancellationToken);
+
+        return Task.FromResult(queryable.Count(predicate));
+    }
+
+    /// <summary>
+    /// Asynchronously returns the number of elements in the sequence as a <see cref="long"/>.
+    /// </summary>
+    public static Task<long> LongCountAsync<TElement>(
+        this IQueryable<TElement> queryable,
+        CancellationToken cancellationToken = default)
+    {
+        var expression = Expression.Call(
+            typeof(System.Linq.Queryable), nameof(System.Linq.Queryable.LongCount),
+            [typeof(TElement)], queryable.Expression);
+
+        if (queryable.Provider is IAsyncQueryProvider asyncProvider)
+            return asyncProvider.ExecuteAsync<Task<long>>(expression, cancellationToken);
+
+        return Task.FromResult(queryable.LongCount());
+    }
+
+    /// <summary>
+    /// Asynchronously returns the minimum value using a selector.
+    /// </summary>
+    public static Task<TResult> MinAsync<TElement, TResult>(
+        this IQueryable<TElement> queryable,
+        Expression<Func<TElement, TResult>> selector,
+        CancellationToken cancellationToken = default)
+    {
+        var expression = Expression.Call(
+            typeof(System.Linq.Queryable), nameof(System.Linq.Queryable.Min),
+            [typeof(TElement), typeof(TResult)],
+            queryable.Expression, selector);
+
+        if (queryable.Provider is IAsyncQueryProvider asyncProvider)
+            return asyncProvider.ExecuteAsync<Task<TResult>>(expression, cancellationToken);
+
+        return Task.FromResult(queryable.Min(selector))!;
+    }
+
+    /// <summary>
+    /// Asynchronously returns the maximum value using a selector.
+    /// </summary>
+    public static Task<TResult> MaxAsync<TElement, TResult>(
+        this IQueryable<TElement> queryable,
+        Expression<Func<TElement, TResult>> selector,
+        CancellationToken cancellationToken = default)
+    {
+        var expression = Expression.Call(
+            typeof(System.Linq.Queryable), nameof(System.Linq.Queryable.Max),
+            [typeof(TElement), typeof(TResult)],
+            queryable.Expression, selector);
+
+        if (queryable.Provider is IAsyncQueryProvider asyncProvider)
+            return asyncProvider.ExecuteAsync<Task<TResult>>(expression, cancellationToken);
+
+        return Task.FromResult(queryable.Max(selector))!;
+    }
+
+    /// <summary>
+    /// Asynchronously computes the sum of a sequence of <see cref="int"/> values.
+    /// </summary>
+    public static Task<int> SumAsync(
+        this IQueryable<int> queryable,
+        CancellationToken cancellationToken = default)
+    {
+        var expression = Expression.Call(
+            typeof(System.Linq.Queryable), nameof(System.Linq.Queryable.Sum),
+            [], queryable.Expression);
+
+        if (queryable.Provider is IAsyncQueryProvider asyncProvider)
+            return asyncProvider.ExecuteAsync<Task<int>>(expression, cancellationToken);
+
+        return Task.FromResult(queryable.Sum());
+    }
+
+    /// <summary>
+    /// Asynchronously computes the sum of a sequence of nullable <see cref="int"/> values.
+    /// </summary>
+    public static Task<int?> SumAsync(
+        this IQueryable<int?> queryable,
+        CancellationToken cancellationToken = default)
+    {
+        var expression = Expression.Call(
+            typeof(System.Linq.Queryable), nameof(System.Linq.Queryable.Sum),
+            [], queryable.Expression);
+
+        if (queryable.Provider is IAsyncQueryProvider asyncProvider)
+            return asyncProvider.ExecuteAsync<Task<int?>>(expression, cancellationToken);
+
+        return Task.FromResult(queryable.Sum());
+    }
+
+    /// <summary>
+    /// Asynchronously computes the sum of a sequence of <see cref="decimal"/> values.
+    /// </summary>
+    public static Task<decimal> SumAsync(
+        this IQueryable<decimal> queryable,
+        CancellationToken cancellationToken = default)
+    {
+        var expression = Expression.Call(
+            typeof(System.Linq.Queryable), nameof(System.Linq.Queryable.Sum),
+            [], queryable.Expression);
+
+        if (queryable.Provider is IAsyncQueryProvider asyncProvider)
+            return asyncProvider.ExecuteAsync<Task<decimal>>(expression, cancellationToken);
+
+        return Task.FromResult(queryable.Sum());
+    }
+
+    /// <summary>
+    /// Asynchronously computes the sum of a sequence of nullable <see cref="decimal"/> values.
+    /// </summary>
+    public static Task<decimal?> SumAsync(
+        this IQueryable<decimal?> queryable,
+        CancellationToken cancellationToken = default)
+    {
+        var expression = Expression.Call(
+            typeof(System.Linq.Queryable), nameof(System.Linq.Queryable.Sum),
+            [], queryable.Expression);
+
+        if (queryable.Provider is IAsyncQueryProvider asyncProvider)
+            return asyncProvider.ExecuteAsync<Task<decimal?>>(expression, cancellationToken);
+
+        return Task.FromResult(queryable.Sum());
+    }
+
+    /// <summary>
+    /// Asynchronously computes the average of a sequence of <see cref="int"/> values.
+    /// </summary>
+    public static Task<double> AverageAsync(
+        this IQueryable<int> queryable,
+        CancellationToken cancellationToken = default)
+    {
+        var expression = Expression.Call(
+            typeof(System.Linq.Queryable), nameof(System.Linq.Queryable.Average),
+            [], queryable.Expression);
+
+        if (queryable.Provider is IAsyncQueryProvider asyncProvider)
+            return asyncProvider.ExecuteAsync<Task<double>>(expression, cancellationToken);
+
+        return Task.FromResult(queryable.Average());
+    }
+
+    /// <summary>
+    /// Asynchronously computes the average of a sequence of nullable <see cref="int"/> values.
+    /// </summary>
+    public static Task<double?> AverageAsync(
+        this IQueryable<int?> queryable,
+        CancellationToken cancellationToken = default)
+    {
+        var expression = Expression.Call(
+            typeof(System.Linq.Queryable), nameof(System.Linq.Queryable.Average),
+            [], queryable.Expression);
+
+        if (queryable.Provider is IAsyncQueryProvider asyncProvider)
+            return asyncProvider.ExecuteAsync<Task<double?>>(expression, cancellationToken);
+
+        return Task.FromResult(queryable.Average());
+    }
+
+    /// <summary>
+    /// Asynchronously computes the average of a sequence of <see cref="decimal"/> values.
+    /// </summary>
+    public static Task<decimal> AverageAsync(
+        this IQueryable<decimal> queryable,
+        CancellationToken cancellationToken = default)
+    {
+        var expression = Expression.Call(
+            typeof(System.Linq.Queryable), nameof(System.Linq.Queryable.Average),
+            [], queryable.Expression);
+
+        if (queryable.Provider is IAsyncQueryProvider asyncProvider)
+            return asyncProvider.ExecuteAsync<Task<decimal>>(expression, cancellationToken);
+
+        return Task.FromResult(queryable.Average());
+    }
+
+    /// <summary>
+    /// Asynchronously computes the average of a sequence of nullable <see cref="decimal"/> values.
+    /// </summary>
+    public static Task<decimal?> AverageAsync(
+        this IQueryable<decimal?> queryable,
+        CancellationToken cancellationToken = default)
+    {
+        var expression = Expression.Call(
+            typeof(System.Linq.Queryable), nameof(System.Linq.Queryable.Average),
+            [], queryable.Expression);
+
+        if (queryable.Provider is IAsyncQueryProvider asyncProvider)
+            return asyncProvider.ExecuteAsync<Task<decimal?>>(expression, cancellationToken);
+
+        return Task.FromResult(queryable.Average());
+    }
+
     /// <summary>
     /// Counts non-null values of the column projected by a preceding <c>Select</c>.
     /// Translates to FetchXml <c>aggregate="countcolumn"</c>.
