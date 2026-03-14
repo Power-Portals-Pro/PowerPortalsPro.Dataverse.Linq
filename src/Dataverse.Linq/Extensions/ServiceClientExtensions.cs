@@ -121,6 +121,24 @@ public static class ServiceClientExtensions
     }
 
     /// <summary>
+    /// Adds SQL query hints to the FetchXml <c>options</c> attribute as a comma-delimited string.
+    /// </summary>
+    public static IQueryable<TElement> WithQueryHints<TElement>(
+        this IQueryable<TElement> queryable,
+        params SqlQueryHint[] hints)
+    {
+        var expression = Expression.Call(
+            typeof(ServiceClientExtensions),
+            nameof(WithQueryHints),
+            [typeof(TElement)],
+            queryable.Expression,
+            Expression.NewArrayInit(typeof(SqlQueryHint),
+                hints.Select(h => Expression.Constant(h))));
+
+        return queryable.Provider.CreateQuery<TElement>(expression);
+    }
+
+    /// <summary>
     /// Asynchronously executes the query and returns all results as a <see cref="List{T}"/>.
     /// Works on both root queryables and projected queryables (e.g. after a Select clause).
     /// Handles paging automatically.

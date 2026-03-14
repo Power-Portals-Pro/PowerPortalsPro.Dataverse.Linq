@@ -266,6 +266,16 @@ internal static class FetchXmlQueryTranslator
                 ctx.Query.NoLock = true;
                 return;
 
+            case MethodCallExpression { Method: { Name: nameof(ServiceClientExtensions.WithQueryHints),
+                    DeclaringType: var dtQH } } queryHintsCall
+                when dtQH == typeof(ServiceClientExtensions):
+                TranslateCore(queryHintsCall.Arguments[0], ctx);
+                var hintsArray = (NewArrayExpression)queryHintsCall.Arguments[1];
+                ctx.Query.QueryHints = hintsArray.Expressions
+                    .Select(e => (SqlQueryHint)((ConstantExpression)e).Value!)
+                    .ToList();
+                return;
+
             case MethodCallExpression { Method: { Name: nameof(ServiceClientExtensions.CountColumn),
                     DeclaringType: var dtCC } } countColumnCall
                 when dtCC == typeof(ServiceClientExtensions):

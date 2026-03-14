@@ -34,6 +34,9 @@ internal static class FetchXmlBuilder
             fetchElement.Add(new XAttribute("latematerialize", "true"));
         if (query.NoLock)
             fetchElement.Add(new XAttribute("no-lock", "true"));
+        if (query.QueryHints is { Count: > 0 })
+            fetchElement.Add(new XAttribute("options",
+                string.Join(",", query.QueryHints.Select(h => h.ToFetchXmlString()))));
 
         fetchElement.Add(BuildEntity(query));
         return fetchElement.ToString();

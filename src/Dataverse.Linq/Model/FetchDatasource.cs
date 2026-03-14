@@ -14,12 +14,12 @@ public enum FetchDatasource
     Retained,
 }
 
-internal static class FetchDatasourceExtensions
+internal static class FetchXmlValueExtensions
 {
-    internal static string ToFetchXmlString(this FetchDatasource datasource)
+    internal static string ToFetchXmlString<TEnum>(this TEnum value) where TEnum : struct, Enum
     {
-        var member = typeof(FetchDatasource).GetField(datasource.ToString())!;
+        var member = typeof(TEnum).GetField(value.ToString()!)!;
         var attr = member.GetCustomAttribute<FetchXmlValueAttribute>();
-        return attr?.Value ?? datasource.ToString().ToLowerInvariant();
+        return attr?.Value ?? value.ToString()!.ToLowerInvariant();
     }
 }

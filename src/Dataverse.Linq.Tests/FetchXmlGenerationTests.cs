@@ -2457,6 +2457,65 @@ public class FetchXmlGenerationTests
     }
 
     // -------------------------------------------------------------------------
+    // WithQueryHints
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_WithQueryHintsSingle_GeneratesOptionsAttribute()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .WithQueryHints(SqlQueryHint.ForceOrder)
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" options="ForceOrder">
+              <entity name="new_customaccount">
+                <all-attributes />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WithQueryHintsMultiple_GeneratesCommaDelimitedOptionsAttribute()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .WithQueryHints(SqlQueryHint.LoopJoin, SqlQueryHint.DisableRowGoal, SqlQueryHint.NoPerformanceSpool)
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" options="LoopJoin,DisableRowGoal,NO_PERFORMANCE_SPOOL">
+              <entity name="new_customaccount">
+                <all-attributes />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WithQueryHintsAndFilter_GeneratesOptionsWithFilter()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Where(a => a.Name == "Test")
+            .WithQueryHints(SqlQueryHint.HashJoin, SqlQueryHint.EnableHistAmendmentForAscKeys)
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" options="HashJoin,ENABLE_HIST_AMENDMENT_FOR_ASC_KEYS">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_name" operator="eq" value="Test" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    // -------------------------------------------------------------------------
     // Aggregate operators — Min / Max / Sum / Average / Count
     // -------------------------------------------------------------------------
 
