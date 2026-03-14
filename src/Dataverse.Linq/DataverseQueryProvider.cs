@@ -47,7 +47,7 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
     /// </summary>
     public TResult Execute<TResult>(Expression expression)
     {
-        var query = FetchXmlQueryTranslator.Translate<T>(expression, Columns, EntityLogicalName);
+        var query = FetchXmlQueryTranslator.Translate<T>(expression, Columns, EntityLogicalName, Service);
         var fetchXml = FetchXmlBuilder.Build(query);
         var entities = RetrieveAll(fetchXml);
 
@@ -81,7 +81,7 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
 
     public TResult ExecuteAsync<TResult>(Expression expression, CancellationToken cancellationToken = default)
     {
-        var query = FetchXmlQueryTranslator.Translate<T>(expression, Columns, EntityLogicalName);
+        var query = FetchXmlQueryTranslator.Translate<T>(expression, Columns, EntityLogicalName, Service);
 
         // Aggregate terminal operator: TResult = Task<TElement>
         if (query.TerminalOperator is QueryTerminalOperator.Min or QueryTerminalOperator.Max
@@ -116,7 +116,7 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
 
     internal List<T> ExecuteList(Expression expression)
     {
-        var query = FetchXmlQueryTranslator.Translate<T>(expression, Columns, EntityLogicalName);
+        var query = FetchXmlQueryTranslator.Translate<T>(expression, Columns, EntityLogicalName, Service);
         var fetchXml = FetchXmlBuilder.Build(query);
         return RetrieveAll(fetchXml).Select(e => e.ToEntity<T>()).ToList();
     }
@@ -126,7 +126,7 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
         Func<List<TElement>, Task> onPage,
         CancellationToken cancellationToken)
     {
-        var query = FetchXmlQueryTranslator.Translate<T>(expression, Columns, EntityLogicalName);
+        var query = FetchXmlQueryTranslator.Translate<T>(expression, Columns, EntityLogicalName, Service);
         var fetchXml = FetchXmlBuilder.Build(query);
         var fetchDocument = XDocument.Parse(fetchXml);
         string? pagingCookie = null;
@@ -157,7 +157,7 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
         Expression expression,
         Action<List<TElement>> onPage)
     {
-        var query = FetchXmlQueryTranslator.Translate<T>(expression, Columns, EntityLogicalName);
+        var query = FetchXmlQueryTranslator.Translate<T>(expression, Columns, EntityLogicalName, Service);
         var fetchXml = FetchXmlBuilder.Build(query);
         var fetchDocument = XDocument.Parse(fetchXml);
         string? pagingCookie = null;
@@ -184,7 +184,7 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
 
     internal string GenerateFetchXml(Expression expression)
     {
-        var query = FetchXmlQueryTranslator.Translate<T>(expression, Columns, EntityLogicalName);
+        var query = FetchXmlQueryTranslator.Translate<T>(expression, Columns, EntityLogicalName, Service);
         return FetchXmlBuilder.Build(query);
     }
 

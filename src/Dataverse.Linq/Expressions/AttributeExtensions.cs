@@ -16,7 +16,8 @@ internal static class AttributeExtensions
     /// Handles direct property access, EntityReference.Id, Money.Value, OptionSetValue.Value,
     /// and <see cref="Entity.GetAttributeValue{T}"/> calls with a string-constant argument.
     /// </summary>
-    internal static (string AttributeName, Expression EntityExpression)? ResolveAttributeAccess(this Expression expr)
+    internal static (string AttributeName, Expression EntityExpression)? ResolveAttributeAccess(
+        this Expression expr, Func<string, string>? primaryKeyResolver = null)
     {
         if (expr is UnaryExpression { NodeType: ExpressionType.Convert } convert)
             expr = convert.Operand;
@@ -61,11 +62,29 @@ internal static class AttributeExtensions
             }
         }
 
+        // Entity.Id — resolve via primary key lookup when the entity type is known
+        if (memberExpr.Member.Name == "Id"
+            && typeof(Entity).IsAssignableFrom(memberExpr.Member.DeclaringType)
+            && primaryKeyResolver is not null)
+        {
+            var entityLogicalName = memberExpr.Expression.Type
+                .GetCustomAttribute<EntityLogicalNameAttribute>()?.LogicalName;
+
+            if (entityLogicalName is not null)
+            {
+                var primaryKey = primaryKeyResolver(entityLogicalName);
+                return (primaryKey, memberExpr.Expression);
+            }
+        }
+
         return null;
     }
 
     internal static string? GetAttributeName(this Expression expr) =>
         expr.ResolveAttributeAccess()?.AttributeName;
+
+    internal static string? GetAttributeName(this Expression expr, Func<string, string>? primaryKeyResolver) =>
+        expr.ResolveAttributeAccess(primaryKeyResolver)?.AttributeName;
 
     internal static string GetEntityLogicalName(this Type entityType) =>
         entityType.GetCustomAttribute<EntityLogicalNameAttribute>()?.LogicalName

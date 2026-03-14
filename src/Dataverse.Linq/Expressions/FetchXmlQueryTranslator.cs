@@ -1,5 +1,6 @@
 using Dataverse.Linq.Extensions;
 using Dataverse.Linq.Model;
+using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Client;
 using Microsoft.Xrm.Sdk.Query;
@@ -134,14 +135,15 @@ internal static class FetchXmlQueryTranslator
     internal static FetchXmlQuery Translate<T>(
         Expression expression,
         IReadOnlyList<string>? defaultColumns = null,
-        string? entityLogicalName = null) where T : Entity
+        string? entityLogicalName = null,
+        IOrganizationServiceAsync? service = null) where T : Entity
     {
         var query = new FetchXmlQuery
         {
             EntityLogicalName = entityLogicalName ?? typeof(T).GetEntityLogicalName()
         };
 
-        var ctx = new TranslationContext(query, typeof(T));
+        var ctx = new TranslationContext(query, typeof(T)) { Service = service };
         TranslateCore(expression, ctx);
 
         // If no operator narrowed the columns, apply provider-level defaults
@@ -641,7 +643,7 @@ internal static class FetchXmlQueryTranslator
             // Queryable.Any(source, predicate) → link-type="any" / negated → "not any"
             case MethodCallExpression { Method: { Name: "Any", DeclaringType: var anyDeclType } } anyCall
                 when anyDeclType == typeof(Queryable) && anyCall.Arguments.Count == 2:
-                HandleAnyPredicate(anyCall, filter, negated);
+                HandleAnyPredicate(anyCall, filter, negated, ctx.PrimaryKeyResolver);
                 return;
 
             // && → AND filter (flatten if parent is already AND)
@@ -945,7 +947,8 @@ internal static class FetchXmlQueryTranslator
     /// when negated) nested inside the current filter.
     /// </summary>
     private static void HandleAnyPredicate(
-        MethodCallExpression anyCall, FetchFilter filter, bool negated)
+        MethodCallExpression anyCall, FetchFilter filter, bool negated,
+        Func<string, string>? primaryKeyResolver = null)
     {
         var (innerLogicalName, _) = anyCall.Arguments[0].GetSourceInfoFromType();
         var lambda = anyCall.Arguments[1].ExtractLambda();
@@ -958,7 +961,7 @@ internal static class FetchXmlQueryTranslator
 
         foreach (var condition in allConditions)
         {
-            if (from is null && TryExtractJoinCondition(condition, innerParam, out var f, out var t))
+            if (from is null && TryExtractJoinCondition(condition, innerParam, out var f, out var t, primaryKeyResolver))
             {
                 from = f;
                 to = t;
@@ -1005,7 +1008,8 @@ internal static class FetchXmlQueryTranslator
     /// </summary>
     private static bool TryExtractJoinCondition(
         Expression condition, ParameterExpression innerParam,
-        out string from, out string to)
+        out string from, out string to,
+        Func<string, string>? primaryKeyResolver = null)
     {
         from = null!;
         to = null!;
@@ -1013,8 +1017,8 @@ internal static class FetchXmlQueryTranslator
         if (condition is not BinaryExpression { NodeType: ExpressionType.Equal } binary)
             return false;
 
-        var leftAttr = binary.Left.GetAttributeName();
-        var rightAttr = binary.Right.GetAttributeName();
+        var leftAttr = binary.Left.GetAttributeName(primaryKeyResolver);
+        var rightAttr = binary.Right.GetAttributeName(primaryKeyResolver);
         if (leftAttr is null || rightAttr is null)
             return false;
 
@@ -1056,13 +1060,13 @@ internal static class FetchXmlQueryTranslator
         // Join transparent identifier: x.entity.Property
         if (ctx.JoinMappings is not null)
         {
-            var joinResult = ResolveJoinAttribute(expr, ctx.JoinMappings);
+            var joinResult = ResolveJoinAttribute(expr, ctx.JoinMappings, ctx.PrimaryKeyResolver);
             if (joinResult is not null)
                 return joinResult;
         }
 
-        // Simple (non-join) resolution via GetAttributeName
-        var simple = expr.GetAttributeName();
+        // Simple (non-join) resolution via GetAttributeName (includes Entity.Id when resolver is available)
+        var simple = expr.GetAttributeName(ctx.PrimaryKeyResolver);
         if (simple is not null)
             return new ResolvedAttribute(simple, null);
 
@@ -1070,9 +1074,10 @@ internal static class FetchXmlQueryTranslator
     }
 
     private static ResolvedAttribute? ResolveJoinAttribute(
-        Expression expr, Dictionary<string, JoinEntityInfo> joinMappings)
+        Expression expr, Dictionary<string, JoinEntityInfo> joinMappings,
+        Func<string, string>? primaryKeyResolver = null)
     {
-        var result = expr.ResolveAttributeAccess();
+        var result = expr.ResolveAttributeAccess(primaryKeyResolver);
         if (result is not { } access)
             return null;
 
@@ -1210,7 +1215,7 @@ internal static class FetchXmlQueryTranslator
         {
             // Min(selector), Max(selector), etc. — extract the attribute from the selector
             var lambda = call.Arguments[1].ExtractLambda();
-            var attrName = lambda.Body.GetAttributeName()
+            var attrName = lambda.Body.GetAttributeName(ctx.PrimaryKeyResolver)
                 ?? throw new NotSupportedException(
                     $"Could not resolve attribute for '{methodName}'.");
 
@@ -1567,12 +1572,12 @@ internal static class FetchXmlQueryTranslator
         // Resolve through group element mappings for join + GroupBy
         if (ctx.GroupElementMappings is not null)
         {
-            var resolved = ResolveGroupElementAttribute(selectorLambda, ctx.GroupElementMappings);
+            var resolved = ResolveGroupElementAttribute(selectorLambda, ctx.GroupElementMappings, ctx.PrimaryKeyResolver);
             if (resolved is not null)
                 return (resolved.Value.Name, aggregateFunc, resolved.Value.EntityAlias);
         }
 
-        var attrName = selectorLambda.Body.GetAttributeName()
+        var attrName = selectorLambda.Body.GetAttributeName(ctx.PrimaryKeyResolver)
             ?? throw new NotSupportedException(
                 $"Could not resolve attribute for grouped {methodName}.");
 
@@ -1603,12 +1608,13 @@ internal static class FetchXmlQueryTranslator
     /// the attribute name and entity alias.
     /// </summary>
     private static ResolvedAttribute? ResolveGroupElementAttribute(
-        LambdaExpression selectorLambda, Dictionary<string, JoinEntityInfo> elementMappings)
+        LambdaExpression selectorLambda, Dictionary<string, JoinEntityInfo> elementMappings,
+        Func<string, string>? primaryKeyResolver = null)
     {
         var body = selectorLambda.Body;
         var param = selectorLambda.Parameters[0];
 
-        var access = body.ResolveAttributeAccess();
+        var access = body.ResolveAttributeAccess(primaryKeyResolver);
         if (access is null)
             return null;
 
@@ -1647,7 +1653,7 @@ internal static class FetchXmlQueryTranslator
         }
 
         var (outerLogicalName, outerEntityType) = call.Arguments[0].GetSourceInfoFromType();
-        var (outerKeyAttr, innerKeyAttr) = ExtractJoinKeys(call);
+        var (outerKeyAttr, innerKeyAttr) = ExtractJoinKeys(call, ctx.PrimaryKeyResolver);
 
         // Root entity
         ctx.Query.EntityLogicalName = outerLogicalName;
@@ -1702,13 +1708,13 @@ internal static class FetchXmlQueryTranslator
         var outerKeyLambda = call.Arguments[2].ExtractLambda();
         var innerKeyLambda = call.Arguments[3].ExtractLambda();
 
-        var innerKeyAttr = innerKeyLambda.Body.GetAttributeName()
+        var innerKeyAttr = innerKeyLambda.Body.GetAttributeName(ctx.PrimaryKeyResolver)
             ?? throw new NotSupportedException(
                 "Inner join key must be a property decorated with [AttributeLogicalName].");
 
         // Resolve the outer key through the transparent identifier to find which
         // entity (and therefore which link) the key belongs to.
-        var outerKeyResolved = ResolveChainedJoinKey(outerKeyLambda.Body, ctx.JoinMappings!)
+        var outerKeyResolved = ResolveChainedJoinKey(outerKeyLambda.Body, ctx.JoinMappings!, ctx.PrimaryKeyResolver)
             ?? throw new NotSupportedException(
                 "Could not resolve outer join key through transparent identifier.");
 
@@ -1764,9 +1770,10 @@ internal static class FetchXmlQueryTranslator
     /// E.g. <c>ti => ti.c.ContactId</c> resolves to attribute "contactid" on link alias "c".
     /// </summary>
     private static ResolvedAttribute? ResolveChainedJoinKey(
-        Expression expr, Dictionary<string, JoinEntityInfo> joinMappings)
+        Expression expr, Dictionary<string, JoinEntityInfo> joinMappings,
+        Func<string, string>? primaryKeyResolver = null)
     {
-        var access = expr.ResolveAttributeAccess();
+        var access = expr.ResolveAttributeAccess(primaryKeyResolver);
         if (access is null)
             return null;
 
@@ -1807,7 +1814,7 @@ internal static class FetchXmlQueryTranslator
         // Extract join keys from GroupJoin
         var (outerLogicalName, outerEntityType) = groupJoinCall.Arguments[0].GetSourceInfoFromType();
         var (innerLogicalName, _) = groupJoinCall.Arguments[1].GetSourceInfoFromType();
-        var (outerKeyAttr, innerKeyAttr) = ExtractJoinKeys(groupJoinCall);
+        var (outerKeyAttr, innerKeyAttr) = ExtractJoinKeys(groupJoinCall, ctx.PrimaryKeyResolver);
 
         // Root entity
         ctx.Query.EntityLogicalName = outerLogicalName;
@@ -1870,13 +1877,14 @@ internal static class FetchXmlQueryTranslator
     // Shared join helpers
     // -------------------------------------------------------------------------
 
-    private static (string OuterKey, string InnerKey) ExtractJoinKeys(MethodCallExpression joinCall)
+    private static (string OuterKey, string InnerKey) ExtractJoinKeys(
+        MethodCallExpression joinCall, Func<string, string>? primaryKeyResolver = null)
     {
-        var outerKey = joinCall.Arguments[2].ExtractLambda().Body.GetAttributeName()
+        var outerKey = joinCall.Arguments[2].ExtractLambda().Body.GetAttributeName(primaryKeyResolver)
             ?? throw new NotSupportedException(
                 "Outer join key must be a property decorated with [AttributeLogicalName].");
 
-        var innerKey = joinCall.Arguments[3].ExtractLambda().Body.GetAttributeName()
+        var innerKey = joinCall.Arguments[3].ExtractLambda().Body.GetAttributeName(primaryKeyResolver)
             ?? throw new NotSupportedException(
                 "Inner join key must be a property decorated with [AttributeLogicalName].");
 
@@ -2049,6 +2057,22 @@ internal static class FetchXmlQueryTranslator
     {
         public FetchXmlQuery Query { get; } = query;
         public Type RootEntityType { get; } = rootEntityType;
+
+        /// <summary>
+        /// Optional service reference for resolving metadata (e.g., primary key attribute names
+        /// when <see cref="Entity.Id"/> is used in expressions).
+        /// </summary>
+        public IOrganizationServiceAsync? Service { get; init; }
+
+        /// <summary>
+        /// Returns a resolver function that maps entity logical names to their primary key
+        /// attribute name via <see cref="EntityMetadataCache"/>. Returns null when no service
+        /// is available (e.g., unit test scenarios).
+        /// </summary>
+        public Func<string, string>? PrimaryKeyResolver =>
+            Service is not null
+                ? entityLogicalName => EntityMetadataCache.GetPrimaryIdAttribute(Service, entityLogicalName)
+                : null;
 
         /// <summary>
         /// After a left join: the CLR type of the outer (root) entity.

@@ -5,6 +5,8 @@ using FluentAssertions;
 using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Client;
+using Microsoft.Xrm.Sdk.Messages;
+using Microsoft.Xrm.Sdk.Metadata;
 using NSubstitute;
 using System.Reflection;
 
@@ -12,7 +14,33 @@ namespace Dataverse.Linq.Tests;
 
 public class FetchXmlGenerationTests
 {
-    private readonly IOrganizationServiceAsync _service = Substitute.For<IOrganizationServiceAsync>();
+    private readonly IOrganizationServiceAsync _service;
+
+    public FetchXmlGenerationTests()
+    {
+        _service = Substitute.For<IOrganizationServiceAsync>();
+
+        // Set up metadata responses for Entity.Id resolution
+        _service.Execute(Arg.Any<OrganizationRequest>()).Returns(callInfo =>
+        {
+            var request = callInfo.Arg<OrganizationRequest>();
+            if (request is RetrieveEntityRequest entityRequest)
+            {
+                var metadata = new EntityMetadata { LogicalName = entityRequest.LogicalName };
+                // Set PrimaryIdAttribute via reflection (it has no public setter)
+                typeof(EntityMetadata)
+                    .GetProperty(nameof(EntityMetadata.PrimaryIdAttribute))!
+                    .SetValue(metadata, entityRequest.LogicalName + "id");
+                var response = new RetrieveEntityResponse();
+                response.Results["EntityMetadata"] = metadata;
+                return response;
+            }
+            throw new NotSupportedException($"Unexpected request type: {request.GetType().Name}");
+        });
+
+        // Clear the metadata cache so tests don't interfere with each other
+        EntityMetadataCache.Clear();
+    }
 
     private static void AssertFetchXml(string actual, string expected) =>
         actual.ReplaceLineEndings("\n").Should().Be(expected.ReplaceLineEndings("\n"));
@@ -3502,6 +3530,74 @@ public class FetchXmlGenerationTests
                 <attribute name="new_name" />
                 <filter type="and">
                   <condition attribute="new_name" operator="not-null" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    // -------------------------------------------------------------------------
+    // Entity.Id resolution
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_WhereEntityId_ResolvesToPrimaryKeyAttribute()
+    {
+        var id = Guid.NewGuid();
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Where(a => a.Id == id)
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            $"""
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_customaccountid" operator="eq" value="{id}" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WhereEntityIdWithSelect_ResolvesToPrimaryKeyAttribute()
+    {
+        var id = Guid.NewGuid();
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Where(a => a.Id == id)
+            .Select(a => new { a.Name })
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            $"""
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+                <filter type="and">
+                  <condition attribute="new_customaccountid" operator="eq" value="{id}" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WhereEntityId_ContactEntity_ResolvesToCorrectPrimaryKey()
+    {
+        var id = Guid.NewGuid();
+        var fetchXml = _service.Queryable<CustomContact>()
+            .Where(c => c.Id == id)
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            $"""
+            <fetch mapping="logical">
+              <entity name="new_customcontact">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_customcontactid" operator="eq" value="{id}" />
                 </filter>
               </entity>
             </fetch>

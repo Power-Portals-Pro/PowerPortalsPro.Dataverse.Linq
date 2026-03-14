@@ -2931,4 +2931,52 @@ public class QueryableIntegrationTests(ServiceClientFixture fixture) : Integrati
         // Each of the 100 accounts should have 5 contacts
         results.Should().AllSatisfy(r => r.Count.Should().Be(5));
     }
+
+    // -------------------------------------------------------------------------
+    // Entity.Id — where clause using base Entity.Id property
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Where_EntityId_ReturnsMatchingRecord()
+    {
+        // First get a known account ID
+        var knownAccount = await Service.Queryable<CustomAccount>()
+            .FirstAsync(a => a.Name == "Custom Account 001");
+
+        // Query using Entity.Id instead of the typed CustomAccountId property
+        var result = await Service.Queryable<CustomAccount>()
+            .FirstOrDefaultAsync(a => a.Id == knownAccount.Id);
+
+        result.Should().NotBeNull();
+        result!.Name.Should().Be("Custom Account 001");
+        result.CustomAccountId.Should().Be(knownAccount.CustomAccountId);
+    }
+
+    [Fact]
+    public async Task Where_EntityId_WithSelect_ReturnsProjectedResult()
+    {
+        var knownAccount = await Service.Queryable<CustomAccount>()
+            .FirstAsync(a => a.Name == "Custom Account 001");
+
+        var result = await Service.Queryable<CustomAccount>()
+            .Where(a => a.Id == knownAccount.Id)
+            .Select(a => new { a.Name, a.Website })
+            .FirstOrDefaultAsync();
+
+        result.Should().NotBeNull();
+        result!.Name.Should().Be("Custom Account 001");
+    }
+
+    [Fact]
+    public async Task Where_EntityId_Contact_ReturnsMatchingRecord()
+    {
+        var knownContact = await Service.Queryable<CustomContact>()
+            .FirstAsync();
+
+        var result = await Service.Queryable<CustomContact>()
+            .FirstOrDefaultAsync(c => c.Id == knownContact.Id);
+
+        result.Should().NotBeNull();
+        result!.CustomContactId.Should().Be(knownContact.CustomContactId);
+    }
 }
