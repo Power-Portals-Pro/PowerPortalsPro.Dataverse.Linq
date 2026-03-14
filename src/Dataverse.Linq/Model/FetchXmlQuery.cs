@@ -36,6 +36,7 @@ internal sealed class FetchXmlQuery
     public int? AggregateLimit { get; set; }
     public FetchDatasource? Datasource { get; set; }
     public bool LateMaterialize { get; set; }
+    public bool NoLock { get; set; }
     public int? PageSize { get; set; }
     public int? Skip { get; set; }
     public bool Distinct { get; set; }

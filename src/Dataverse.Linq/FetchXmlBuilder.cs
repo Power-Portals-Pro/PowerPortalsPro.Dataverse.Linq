@@ -32,6 +32,8 @@ internal static class FetchXmlBuilder
             fetchElement.Add(new XAttribute("datasource", query.Datasource.Value.ToFetchXmlString()));
         if (query.LateMaterialize)
             fetchElement.Add(new XAttribute("latematerialize", "true"));
+        if (query.NoLock)
+            fetchElement.Add(new XAttribute("no-lock", "true"));
 
         fetchElement.Add(BuildEntity(query));
         return fetchElement.ToString();

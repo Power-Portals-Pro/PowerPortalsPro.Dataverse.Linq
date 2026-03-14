@@ -105,6 +105,22 @@ public static class ServiceClientExtensions
     }
 
     /// <summary>
+    /// Adds the FetchXml <c>no-lock</c> attribute to the query.
+    /// </summary>
+    [Obsolete("The no-lock attribute is deprecated by Dataverse and has no effect. All queries are now executed without locks.")]
+    public static IQueryable<TElement> WithNoLock<TElement>(
+        this IQueryable<TElement> queryable)
+    {
+        var expression = Expression.Call(
+            typeof(ServiceClientExtensions),
+            nameof(WithNoLock),
+            [typeof(TElement)],
+            queryable.Expression);
+
+        return queryable.Provider.CreateQuery<TElement>(expression);
+    }
+
+    /// <summary>
     /// Asynchronously executes the query and returns all results as a <see cref="List{T}"/>.
     /// Works on both root queryables and projected queryables (e.g. after a Select clause).
     /// Handles paging automatically.

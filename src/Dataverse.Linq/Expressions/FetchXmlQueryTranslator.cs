@@ -259,6 +259,13 @@ internal static class FetchXmlQueryTranslator
                 ctx.Query.LateMaterialize = true;
                 return;
 
+            case MethodCallExpression { Method: { Name: nameof(ServiceClientExtensions.WithNoLock),
+                    DeclaringType: var dtNL } } noLockCall
+                when dtNL == typeof(ServiceClientExtensions):
+                TranslateCore(noLockCall.Arguments[0], ctx);
+                ctx.Query.NoLock = true;
+                return;
+
             case MethodCallExpression { Method: { Name: nameof(ServiceClientExtensions.CountColumn),
                     DeclaringType: var dtCC } } countColumnCall
                 when dtCC == typeof(ServiceClientExtensions):

@@ -2411,6 +2411,52 @@ public class FetchXmlGenerationTests
     }
 
     // -------------------------------------------------------------------------
+    // WithNoLock
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_WithNoLock_GeneratesNoLockAttribute()
+    {
+#pragma warning disable CS0618 // Obsolete
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .WithNoLock()
+            .ToFetchXml();
+#pragma warning restore CS0618
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" no-lock="true">
+              <entity name="new_customaccount">
+                <all-attributes />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WithNoLockAndFilter_GeneratesNoLockWithFilter()
+    {
+#pragma warning disable CS0618 // Obsolete
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Where(a => a.Name == "Test")
+            .WithNoLock()
+            .ToFetchXml();
+#pragma warning restore CS0618
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" no-lock="true">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_name" operator="eq" value="Test" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    // -------------------------------------------------------------------------
     // Aggregate operators — Min / Max / Sum / Average / Count
     // -------------------------------------------------------------------------
 
