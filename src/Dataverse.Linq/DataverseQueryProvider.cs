@@ -339,6 +339,16 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
             ).ToList();
         }
 
+        // Multi-entity join (3+): single-param (Entity) projector that extracts aliased values
+        if (query.InnerEntityType is not null && query.Projector is not null
+            && query.Projector.Method.GetParameters().Length == 1
+            && query.Projector.Method.GetParameters()[0].ParameterType == typeof(Entity))
+        {
+            return entities.Select(e =>
+                (TElement)query.Projector.DynamicInvoke(e)!
+            ).ToList();
+        }
+
         // Inner join: 2-param result selector (outer, inner) → TElement
         if (query.InnerEntityType is not null && query.Projector is not null)
         {

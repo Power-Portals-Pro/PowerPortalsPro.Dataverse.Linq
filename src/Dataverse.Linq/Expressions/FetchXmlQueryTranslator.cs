@@ -366,20 +366,27 @@ internal static class FetchXmlQueryTranslator
 
     private static void HandleJoinSelect(LambdaExpression lambda, TranslationContext ctx)
     {
-        var link = ctx.Query.Links[^1];
-        var rootColumns = new List<string>();
-        var linkColumns = new List<string>();
+        // Collect columns keyed by entity alias ("" = root entity)
+        var columnsByAlias = new Dictionary<string, List<string>>();
 
         foreach (var arg in GetProjectionArguments(lambda.Body))
-            CollectJoinAttributes(arg, ctx, rootColumns, linkColumns);
+            CollectJoinAttributesByAlias(arg, ctx, columnsByAlias);
 
-        if (rootColumns.Count > 0)
-            ApplyColumns(ctx.Query, rootColumns);
-
-        if (linkColumns.Count > 0)
+        foreach (var (alias, columns) in columnsByAlias)
         {
-            foreach (var col in linkColumns)
-                link.Attributes.Add(new FetchAttribute { Name = col });
+            if (alias == "")
+            {
+                ApplyColumns(ctx.Query, columns);
+            }
+            else
+            {
+                var link = FindLinkByAlias(ctx.Query.Links, alias);
+                if (link is not null)
+                {
+                    foreach (var col in columns)
+                        link.Attributes.Add(new FetchAttribute { Name = col });
+                }
+            }
         }
 
         ctx.Query.Projector = RebuildJoinProjector(lambda, ctx);
@@ -388,20 +395,22 @@ internal static class FetchXmlQueryTranslator
 
     /// <summary>
     /// Recursively walks an expression to find all attribute references in a join
-    /// projection. Handles simple property access as well as complex expressions
-    /// like string interpolation (<c>string.Concat</c> / <c>string.Format</c>).
+    /// projection, keyed by entity alias (null for root entity).
     /// </summary>
-    private static void CollectJoinAttributes(
+    private static void CollectJoinAttributesByAlias(
         Expression expr, TranslationContext ctx,
-        List<string> rootColumns, List<string> linkColumns)
+        Dictionary<string, List<string>> columnsByAlias)
     {
         var resolved = ResolveAttribute(expr, ctx);
         if (resolved is not null)
         {
-            if (resolved.Value.EntityAlias is null)
-                rootColumns.Add(resolved.Value.Name);
-            else
-                linkColumns.Add(resolved.Value.Name);
+            var key = resolved.Value.EntityAlias ?? "";
+            if (!columnsByAlias.TryGetValue(key, out var list))
+            {
+                list = [];
+                columnsByAlias[key] = list;
+            }
+            list.Add(resolved.Value.Name);
             return;
         }
 
@@ -410,23 +419,23 @@ internal static class FetchXmlQueryTranslator
         {
             case MethodCallExpression mc:
                 if (mc.Object is not null)
-                    CollectJoinAttributes(mc.Object, ctx, rootColumns, linkColumns);
+                    CollectJoinAttributesByAlias(mc.Object, ctx, columnsByAlias);
                 foreach (var a in mc.Arguments)
-                    CollectJoinAttributes(a, ctx, rootColumns, linkColumns);
+                    CollectJoinAttributesByAlias(a, ctx, columnsByAlias);
                 break;
 
             case BinaryExpression binary:
-                CollectJoinAttributes(binary.Left, ctx, rootColumns, linkColumns);
-                CollectJoinAttributes(binary.Right, ctx, rootColumns, linkColumns);
+                CollectJoinAttributesByAlias(binary.Left, ctx, columnsByAlias);
+                CollectJoinAttributesByAlias(binary.Right, ctx, columnsByAlias);
                 break;
 
             case UnaryExpression unary:
-                CollectJoinAttributes(unary.Operand, ctx, rootColumns, linkColumns);
+                CollectJoinAttributesByAlias(unary.Operand, ctx, columnsByAlias);
                 break;
 
             case NewArrayExpression newArray:
                 foreach (var element in newArray.Expressions)
-                    CollectJoinAttributes(element, ctx, rootColumns, linkColumns);
+                    CollectJoinAttributesByAlias(element, ctx, columnsByAlias);
                 break;
         }
     }
@@ -1234,10 +1243,23 @@ internal static class FetchXmlQueryTranslator
         if (result is not { } access)
             return null;
 
-        if (access.EntityExpression is MemberExpression { Expression: ParameterExpression } entityAccess
-            && joinMappings.TryGetValue(entityAccess.Member.Name, out var mapping))
+        // Walk up the member chain to find an entity name in joinMappings.
+        // Simple join: ti.a.Name → entityExpression is ti.a
+        // Chained join: ti2.ti1.a.Name → entityExpression is ti2.ti1.a
+        // Direct parameter: o.Name → entityExpression is o (ParameterExpression)
+        var current = access.EntityExpression;
+        while (current is MemberExpression me)
         {
-            return new ResolvedAttribute(access.AttributeName, mapping.LinkAlias);
+            if (joinMappings.TryGetValue(me.Member.Name, out var mapping))
+                return new ResolvedAttribute(access.AttributeName, mapping.LinkAlias);
+            current = me.Expression;
+        }
+
+        // Direct parameter access (e.g., (ti, o) => ... o.Name where o is a parameter)
+        if (current is ParameterExpression param
+            && joinMappings.TryGetValue(param.Name!, out var directMapping))
+        {
+            return new ResolvedAttribute(access.AttributeName, directMapping.LinkAlias);
         }
 
         return null;
@@ -1592,11 +1614,22 @@ internal static class FetchXmlQueryTranslator
 
     private static void HandleInnerJoin(MethodCallExpression call, TranslationContext ctx)
     {
-        var (outerLogicalName, outerEntityType) = GetSourceInfoFromType(call.Arguments[0]);
-        var (innerLogicalName, innerEntityType) = GetSourceInfoFromType(call.Arguments[1]);
-        var (outerKeyAttr, innerKeyAttr) = ExtractJoinKeys(call);
+        // Recurse into the outer source first — for chained joins this processes
+        // the prior Join and populates JoinMappings before we handle this one.
+        TranslateCore(call.Arguments[0], ctx);
 
+        var (innerLogicalName, innerEntityType) = GetSourceInfoFromType(call.Arguments[1]);
         var resultLambda = ExtractLambda(call.Arguments[4]);
+
+        // Chained join — the outer source is a prior join's transparent identifier
+        if (ctx.JoinMappings is not null)
+        {
+            HandleChainedInnerJoin(call, innerLogicalName, innerEntityType, resultLambda, ctx);
+            return;
+        }
+
+        var (outerLogicalName, outerEntityType) = GetSourceInfoFromType(call.Arguments[0]);
+        var (outerKeyAttr, innerKeyAttr) = ExtractJoinKeys(call);
 
         // Root entity
         ctx.Query.EntityLogicalName = outerLogicalName;
@@ -1646,6 +1679,125 @@ internal static class FetchXmlQueryTranslator
         ctx.Query.Projector = resultLambda.Compile();
         ctx.Query.ProjectionType = resultLambda.ReturnType;
         ctx.Query.InnerEntityType = innerEntityType;
+    }
+
+    /// <summary>
+    /// Handles a join whose outer source is the result of a prior join (transparent identifier).
+    /// Resolves the outer key through the TI to determine which link entity to nest under,
+    /// then extends JoinMappings with the new entity.
+    /// </summary>
+    private static void HandleChainedInnerJoin(
+        MethodCallExpression call,
+        string innerLogicalName,
+        Type innerEntityType,
+        LambdaExpression resultLambda,
+        TranslationContext ctx)
+    {
+        var outerKeyLambda = ExtractLambda(call.Arguments[2]);
+        var innerKeyLambda = ExtractLambda(call.Arguments[3]);
+
+        var innerKeyAttr = GetAttributeName(innerKeyLambda.Body)
+            ?? throw new NotSupportedException(
+                "Inner join key must be a property decorated with [AttributeLogicalName].");
+
+        // Resolve the outer key through the transparent identifier to find which
+        // entity (and therefore which link) the key belongs to.
+        var outerKeyResolved = ResolveChainedJoinKey(outerKeyLambda.Body, ctx.JoinMappings!)
+            ?? throw new NotSupportedException(
+                "Could not resolve outer join key through transparent identifier.");
+
+        var link = new FetchLinkEntity
+        {
+            Name = innerLogicalName,
+            From = innerKeyAttr,
+            To = outerKeyResolved.Name,
+            Alias = resultLambda.Parameters[1].Name!,
+            LinkType = "inner"
+        };
+
+        // Nest under the parent link entity, or the root if the key belongs to the root entity
+        if (outerKeyResolved.EntityAlias is null)
+        {
+            ctx.Query.Links.Add(link);
+        }
+        else
+        {
+            var parentLink = FindLinkByAlias(ctx.Query.Links, outerKeyResolved.EntityAlias)
+                ?? throw new NotSupportedException(
+                    $"Could not find parent link entity with alias '{outerKeyResolved.EntityAlias}'.");
+            parentLink.Links.Add(link);
+        }
+
+        // Extend JoinMappings with the new entity.
+        var updatedMappings = new Dictionary<string, JoinEntityInfo>(ctx.JoinMappings!);
+        updatedMappings[resultLambda.Parameters[1].Name!] = new JoinEntityInfo
+        {
+            EntityType = innerEntityType,
+            LinkAlias = link.Alias
+        };
+
+        if (IsTransparentIdentifier(resultLambda))
+        {
+            // Transparent identifier — further operators (Where/Select) follow.
+            // Keep flattened mappings for downstream resolution.
+            ctx.JoinMappings = updatedMappings;
+            ctx.Query.InnerEntityType = innerEntityType;
+        }
+        else
+        {
+            // Final projection folded into the join result selector.
+            // Extract columns and build the multi-join projector.
+            ctx.JoinMappings = updatedMappings;
+            ctx.Query.InnerEntityType = innerEntityType;
+            HandleJoinSelect(resultLambda, ctx);
+        }
+    }
+
+    /// <summary>
+    /// Resolves an attribute access through a transparent identifier for chained join keys.
+    /// E.g. <c>ti => ti.c.ContactId</c> resolves to attribute "contactid" on link alias "c".
+    /// </summary>
+    private static ResolvedAttribute? ResolveChainedJoinKey(
+        Expression expr, Dictionary<string, JoinEntityInfo> joinMappings)
+    {
+        var access = ResolveAttributeAccess(expr);
+        if (access is null)
+            return null;
+
+        // Walk up: the entity expression should be ti.memberName (member access on the TI parameter)
+        var entityExpr = access.Value.EntityExpression;
+
+        // May be nested: ti.memberName or ti.innerTI.memberName — walk to find the mapping key
+        while (entityExpr is MemberExpression me)
+        {
+            if (me.Expression is ParameterExpression
+                && joinMappings.TryGetValue(me.Member.Name, out var mapping))
+            {
+                return new ResolvedAttribute(access.Value.AttributeName, mapping.LinkAlias);
+            }
+
+            entityExpr = me.Expression;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Recursively searches link entities to find one with the given alias.
+    /// </summary>
+    private static FetchLinkEntity? FindLinkByAlias(List<FetchLinkEntity> links, string alias)
+    {
+        foreach (var link in links)
+        {
+            if (link.Alias == alias)
+                return link;
+
+            var nested = FindLinkByAlias(link.Links, alias);
+            if (nested is not null)
+                return nested;
+        }
+
+        return null;
     }
 
     private static bool IsTransparentIdentifier(LambdaExpression lambda) =>
@@ -2045,6 +2197,11 @@ internal static class FetchXmlQueryTranslator
     {
         var tiParam = lambda.Parameters[0];
 
+        // Multi-entity join (3+): build a single-parameter (Entity) projector
+        // that extracts all values from the flat entity with aliased attributes.
+        if (ctx.JoinMappings!.Count > 2)
+            return RebuildMultiJoinProjector(lambda, ctx);
+
         Type outerType = null!, innerType = null!;
         string outerPropName = null!, innerPropName = null!;
 
@@ -2069,6 +2226,117 @@ internal static class FetchXmlQueryTranslator
         var newBody = rewriter.Visit(lambda.Body);
 
         return Expression.Lambda(newBody, outerParam, innerParam).Compile();
+    }
+
+    /// <summary>
+    /// Builds a single-parameter <c>(Entity e) => new { ... }</c> projector for multi-entity
+    /// joins (3+ entities). Reads root entity attributes directly and linked entity attributes
+    /// via <c>AliasedValue</c> extraction, similar to aggregate projections.
+    /// </summary>
+    private static Delegate RebuildMultiJoinProjector(LambdaExpression lambda, TranslationContext ctx)
+    {
+        var entityParam = Expression.Parameter(typeof(Entity), "e");
+
+        var rewriter = new MultiJoinProjectorRewriter(entityParam, ctx.JoinMappings!);
+        var newBody = rewriter.Visit(lambda.Body);
+
+        return Expression.Lambda(newBody, entityParam).Compile();
+    }
+
+    /// <summary>
+    /// Rewrites property accesses on joined entities to extract values from a flat Entity.
+    /// Root entity attributes: <c>e.GetAttributeValue&lt;T&gt;("attrName")</c>.
+    /// Linked entity attributes: extracts from <c>AliasedValue</c> at <c>"alias.attrName"</c>.
+    /// </summary>
+    private sealed class MultiJoinProjectorRewriter(
+        ParameterExpression entityParam,
+        Dictionary<string, JoinEntityInfo> joinMappings) : ExpressionVisitor
+    {
+        private static readonly MethodInfo GetAttributeValueMethod =
+            typeof(Entity).GetMethod(nameof(Entity.GetAttributeValue))!;
+
+        protected override Expression VisitMember(MemberExpression node)
+        {
+            // Match: ti.entityName.Property or ti2.ti1.entityName.Property (chained TI)
+            // Walk up the member chain to find an entity name in joinMappings.
+            if (FindJoinMapping(node.Expression, out var mapping))
+            {
+                var attrName = (node.Member as PropertyInfo)
+                    ?.GetCustomAttribute<AttributeLogicalNameAttribute>()?.LogicalName;
+
+                if (attrName is not null)
+                {
+                    var resultType = (node.Member as PropertyInfo)?.PropertyType ?? node.Type;
+
+                    if (mapping.LinkAlias is null)
+                    {
+                        return Expression.Call(entityParam,
+                            GetAttributeValueMethod.MakeGenericMethod(resultType),
+                            Expression.Constant(attrName));
+                    }
+
+                    var aliasedKey = $"{mapping.LinkAlias}.{attrName}";
+                    return Expression.Call(
+                        typeof(AggregateProjection).GetMethod(nameof(AggregateProjection.ExtractValue))!
+                            .MakeGenericMethod(resultType),
+                        entityParam,
+                        Expression.Constant(aliasedKey));
+                }
+            }
+
+            // Match: *.NavigationProperty.Id/.Value
+            if (node.Member.Name is "Id" or "Value"
+                && node.Expression is MemberExpression parentAccess
+                && FindJoinMapping(parentAccess.Expression, out var mapping2))
+            {
+                var parentProp = parentAccess.Member as PropertyInfo;
+                var attrName = parentProp?.GetCustomAttribute<AttributeLogicalNameAttribute>()?.LogicalName;
+
+                if (attrName is not null)
+                {
+                    var resultType = (node.Member as PropertyInfo)?.PropertyType ?? node.Type;
+
+                    if (mapping2.LinkAlias is null)
+                    {
+                        var parentType = parentProp!.PropertyType;
+                        var getParent = Expression.Call(entityParam,
+                            GetAttributeValueMethod.MakeGenericMethod(parentType),
+                            Expression.Constant(attrName));
+                        return Expression.MakeMemberAccess(getParent, node.Member);
+                    }
+
+                    var aliasedKey = $"{mapping2.LinkAlias}.{attrName}";
+                    return Expression.Call(
+                        typeof(AggregateProjection).GetMethod(nameof(AggregateProjection.ExtractValue))!
+                            .MakeGenericMethod(resultType),
+                        entityParam,
+                        Expression.Constant(aliasedKey));
+                }
+            }
+
+            return base.VisitMember(node);
+        }
+
+        private bool FindJoinMapping(Expression? expr, out JoinEntityInfo mapping)
+        {
+            mapping = default!;
+            var current = expr;
+            while (current is MemberExpression me)
+            {
+                if (joinMappings.TryGetValue(me.Member.Name, out mapping))
+                    return true;
+                current = me.Expression;
+            }
+
+            // Direct parameter access (e.g., o.Name where o is a join parameter)
+            if (current is ParameterExpression param
+                && joinMappings.TryGetValue(param.Name!, out mapping))
+            {
+                return true;
+            }
+
+            return false;
+        }
     }
 
     private sealed class JoinProjectorRewriter(

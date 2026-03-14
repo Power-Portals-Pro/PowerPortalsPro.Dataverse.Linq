@@ -182,6 +182,62 @@ public class FetchXmlGenerationTests
             """);
     }
 
+    [Fact]
+    public void ToFetchXml_WithChainedInnerJoin_GeneratesNestedLinkEntity()
+    {
+        var fetchXml = (from a in _service.Queryable<CustomAccount>()
+                        join c in _service.Queryable<CustomContact>()
+                            on a.CustomAccountId equals c.ParentAccount.Id
+                        join o in _service.Queryable<CustomOpportunity>()
+                            on c.CustomContactId equals o.Contact.Id
+                        select new { AccountName = a.Name, c.FirstName, OpportunityName = o.Name }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="inner">
+                  <attribute name="new_firstname" />
+                  <link-entity name="new_customopportunity" from="new_contact" to="new_customcontactid" alias="o" link-type="inner">
+                    <attribute name="new_name" />
+                  </link-entity>
+                </link-entity>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WithChainedInnerJoinAndWhere_GeneratesNestedLinkEntityWithFilter()
+    {
+        var fetchXml = (from a in _service.Queryable<CustomAccount>()
+                        join c in _service.Queryable<CustomContact>()
+                            on a.CustomAccountId equals c.ParentAccount.Id
+                        join o in _service.Queryable<CustomOpportunity>()
+                            on c.CustomContactId equals o.Contact.Id
+                        where a.Name.Contains("Custom")
+                        select new { AccountName = a.Name, c.FirstName, OpportunityName = o.Name }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+                <filter type="and">
+                  <condition attribute="new_name" operator="like" value="%Custom%" />
+                </filter>
+                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="inner">
+                  <attribute name="new_firstname" />
+                  <link-entity name="new_customopportunity" from="new_contact" to="new_customcontactid" alias="o" link-type="inner">
+                    <attribute name="new_name" />
+                  </link-entity>
+                </link-entity>
+              </entity>
+            </fetch>
+            """);
+    }
+
     // -------------------------------------------------------------------------
     // Left join
     // -------------------------------------------------------------------------
