@@ -30,6 +30,8 @@ internal static class FetchXmlBuilder
             fetchElement.Add(new XAttribute("aggregatelimit", query.AggregateLimit.Value));
         if (query.Datasource.HasValue)
             fetchElement.Add(new XAttribute("datasource", query.Datasource.Value.ToFetchXmlString()));
+        if (query.LateMaterialize)
+            fetchElement.Add(new XAttribute("latematerialize", "true"));
 
         fetchElement.Add(BuildEntity(query));
         return fetchElement.ToString();

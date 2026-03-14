@@ -90,6 +90,21 @@ public static class ServiceClientExtensions
     }
 
     /// <summary>
+    /// Enables late materialization for the query by adding the FetchXml <c>latematerialize</c> attribute.
+    /// </summary>
+    public static IQueryable<TElement> WithLateMaterialize<TElement>(
+        this IQueryable<TElement> queryable)
+    {
+        var expression = Expression.Call(
+            typeof(ServiceClientExtensions),
+            nameof(WithLateMaterialize),
+            [typeof(TElement)],
+            queryable.Expression);
+
+        return queryable.Provider.CreateQuery<TElement>(expression);
+    }
+
+    /// <summary>
     /// Asynchronously executes the query and returns all results as a <see cref="List{T}"/>.
     /// Works on both root queryables and projected queryables (e.g. after a Select clause).
     /// Handles paging automatically.

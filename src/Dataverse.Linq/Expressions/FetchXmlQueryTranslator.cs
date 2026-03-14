@@ -252,6 +252,13 @@ internal static class FetchXmlQueryTranslator
                 ctx.Query.Datasource = (FetchDatasource)((ConstantExpression)datasourceCall.Arguments[1]).Value!;
                 return;
 
+            case MethodCallExpression { Method: { Name: nameof(ServiceClientExtensions.WithLateMaterialize),
+                    DeclaringType: var dtLM } } lateMaterializeCall
+                when dtLM == typeof(ServiceClientExtensions):
+                TranslateCore(lateMaterializeCall.Arguments[0], ctx);
+                ctx.Query.LateMaterialize = true;
+                return;
+
             case MethodCallExpression { Method: { Name: nameof(ServiceClientExtensions.CountColumn),
                     DeclaringType: var dtCC } } countColumnCall
                 when dtCC == typeof(ServiceClientExtensions):

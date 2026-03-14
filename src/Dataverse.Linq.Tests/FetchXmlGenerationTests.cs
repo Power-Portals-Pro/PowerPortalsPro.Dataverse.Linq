@@ -2369,6 +2369,48 @@ public class FetchXmlGenerationTests
     }
 
     // -------------------------------------------------------------------------
+    // WithLateMaterialize
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_WithLateMaterialize_GeneratesLateMaterializeAttribute()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .WithLateMaterialize()
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" latematerialize="true">
+              <entity name="new_customaccount">
+                <all-attributes />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WithLateMaterializeAndFilter_GeneratesLateMaterializeWithFilter()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Where(a => a.Name == "Test")
+            .WithLateMaterialize()
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" latematerialize="true">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_name" operator="eq" value="Test" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    // -------------------------------------------------------------------------
     // Aggregate operators — Min / Max / Sum / Average / Count
     // -------------------------------------------------------------------------
 
