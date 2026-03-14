@@ -1125,67 +1125,47 @@ public class QueryableIntegrationTests : IntegrationTestBase
     }
 
     // -------------------------------------------------------------------------
-    // Where — ContainValues / DoesNotContainValues (multi-select option set)
+    // Where — ContainsValues (multi-select option set)
     // -------------------------------------------------------------------------
 
     [Fact]
-    public async Task ToListAsync_WhereContainValues_ReturnsMatchingRecords()
+    public async Task ToListAsync_WhereContainsValues_ReturnsMatchingRecords()
     {
-        var red = (int)CustomContact.Color.Red;
         var results = await Service.Queryable<CustomContact>()
-            .Where(c => c.FavoriteColors_OptionSetValues.ContainValues(red))
+            .Where(c => c.FavoriteColors.ContainsValues(CustomContact.Color.Red))
             .ToListAsync();
 
         results.Should().NotBeEmpty();
         results.Should().OnlyContain(r =>
-            r.FavoriteColors_OptionSetValues != null
-            && r.FavoriteColors_OptionSetValues.Any(o => o.Value == red));
+            r.FavoriteColors != null
+            && r.FavoriteColors.Contains(CustomContact.Color.Red));
     }
 
     [Fact]
-    public async Task ToListAsync_WhereContainValuesMultiple_ReturnsMatchingRecords()
+    public async Task ToListAsync_WhereContainsValuesMultiple_ReturnsMatchingRecords()
     {
-        var red = (int)CustomContact.Color.Red;
-        var blue = (int)CustomContact.Color.Blue;
         var results = await Service.Queryable<CustomContact>()
-            .Where(c => c.FavoriteColors_OptionSetValues.ContainValues(red, blue))
+            .Where(c => c.FavoriteColors.ContainsValues(CustomContact.Color.Red, CustomContact.Color.Blue))
             .ToListAsync();
 
         results.Should().NotBeEmpty();
         results.Should().OnlyContain(r =>
-            r.FavoriteColors_OptionSetValues != null
-            && r.FavoriteColors_OptionSetValues.Any(o => o.Value == red || o.Value == blue));
+            r.FavoriteColors != null
+            && (r.FavoriteColors.Contains(CustomContact.Color.Red)
+                || r.FavoriteColors.Contains(CustomContact.Color.Blue)));
     }
 
     [Fact]
-    public async Task ToListAsync_WhereDoesNotContainValues_ExcludesMatchingRecords()
+    public async Task ToListAsync_WhereNegatedContainsValues_ExcludesMatchingRecords()
     {
-        var red = (int)CustomContact.Color.Red;
         var results = await Service.Queryable<CustomContact>()
-            .Where(c => c.FavoriteColors_OptionSetValues.DoesNotContainValues(red))
+            .Where(c => !c.FavoriteColors.ContainsValues(CustomContact.Color.Red))
             .ToListAsync();
 
         results.Should().NotBeEmpty();
         results.Should().OnlyContain(r =>
-            r.FavoriteColors_OptionSetValues == null
-            || r.FavoriteColors_OptionSetValues.All(o => o.Value != red));
-    }
-
-    [Fact]
-    public async Task ToListAsync_WhereNegatedContainValues_ReturnsSameAsDoesNotContainValues()
-    {
-        var red = (int)CustomContact.Color.Red;
-
-        var doesNotContain = await Service.Queryable<CustomContact>()
-            .Where(c => c.FavoriteColors_OptionSetValues.DoesNotContainValues(red))
-            .ToListAsync();
-
-        var negatedContain = await Service.Queryable<CustomContact>()
-            .Where(c => !c.FavoriteColors_OptionSetValues.ContainValues(red))
-            .ToListAsync();
-
-        negatedContain.Should().HaveCount(doesNotContain.Count);
-        negatedContain.Select(r => r.CustomContactId).Should().BeEquivalentTo(doesNotContain.Select(r => r.CustomContactId));
+            r.FavoriteColors == null
+            || !r.FavoriteColors.Contains(CustomContact.Color.Red));
     }
 
     [Fact]
@@ -1212,6 +1192,48 @@ public class QueryableIntegrationTests : IntegrationTestBase
         results.Should().OnlyContain(r =>
             r.FavoriteColors == null
             || !r.FavoriteColors.Contains(CustomContact.Color.Red));
+    }
+
+    [Fact]
+    public async Task ToListAsync_WhereMultiSelectEqualsSingleValue_ReturnsMatchingRecords()
+    {
+        var results = await Service.Queryable<CustomContact>()
+            .Where(c => c.FavoriteColors.Equals(CustomContact.Color.Red))
+            .ToListAsync();
+
+        results.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public async Task ToListAsync_WhereNegatedMultiSelectEquals_ExcludesMatchingRecords()
+    {
+        var results = await Service.Queryable<CustomContact>()
+            .Where(c => !c.FavoriteColors.Equals(CustomContact.Color.Red))
+            .ToListAsync();
+
+        results.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public async Task ToListAsync_WhereMultiSelectEqualsMultipleValues_ReturnsMatchingRecords()
+    {
+        var colors = new[] { CustomContact.Color.Red, CustomContact.Color.Blue };
+        var results = await Service.Queryable<CustomContact>()
+            .Where(c => c.FavoriteColors.Equals(colors))
+            .ToListAsync();
+
+        results.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public async Task ToListAsync_WhereNegatedMultiSelectEqualsMultipleValues_ReturnsRecords()
+    {
+        var colors = new[] { CustomContact.Color.Red, CustomContact.Color.Blue };
+        var results = await Service.Queryable<CustomContact>()
+            .Where(c => !c.FavoriteColors.Equals(colors))
+            .ToListAsync();
+
+        results.Should().NotBeEmpty();
     }
 
     // -------------------------------------------------------------------------

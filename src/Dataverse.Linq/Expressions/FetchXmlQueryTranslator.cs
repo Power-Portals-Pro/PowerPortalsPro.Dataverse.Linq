@@ -86,8 +86,7 @@ internal static class FetchXmlQueryTranslator
 
     private static readonly Dictionary<string, ConditionOperator> MultiSelectOperatorMap = new()
     {
-        ["ContainValues"] = ConditionOperator.ContainValues,
-        ["DoesNotContainValues"] = ConditionOperator.DoesNotContainValues,
+        ["ContainsValues"] = ConditionOperator.ContainValues,
     };
 
     private static readonly Dictionary<string, string> AggregateFunctionMap = new()
@@ -499,6 +498,52 @@ internal static class FetchXmlQueryTranslator
                 return;
             }
 
+            // x.MultiSelectProp.Equals(value) or .Equals(collection) → eq/ne or in/not-in
+            // C# resolves this to object.Equals(object) since instance methods shadow extension methods.
+            // Also handles explicit MultiSelectExtensions.Equals(collection, values) calls.
+            case MethodCallExpression { Method: { Name: "Equals" } } equalsCall
+                when (equalsCall.Method.DeclaringType == typeof(Extensions.MultiSelectExtensions)
+                    || (equalsCall.Method.DeclaringType == typeof(object)
+                        && equalsCall.Object is { } eqObj
+                        && eqObj.Type.IsGenericType
+                        && eqObj.Type != typeof(string)
+                        && ResolveAttribute(eqObj, ctx) is not null)):
+            {
+                // Extension method: args[0] = collection, args[1] = value
+                // Instance method: Object = collection, args[0] = value
+                var isExtension = equalsCall.Method.DeclaringType == typeof(Extensions.MultiSelectExtensions);
+                var attrExpr = isExtension ? equalsCall.Arguments[0] : equalsCall.Object!;
+                var valueExpr = isExtension ? equalsCall.Arguments[1] : equalsCall.Arguments[0];
+
+                var resolved = ResolveAttribute(attrExpr, ctx)
+                    ?? throw new NotSupportedException("Equals target must resolve to an attribute.");
+                var value = EvaluateValue(valueExpr);
+
+                if (value is System.Collections.IEnumerable enumerable and not string)
+                {
+                    var condition = new FetchCondition
+                    {
+                        Attribute = resolved.Name,
+                        EntityAlias = resolved.EntityAlias,
+                        Operator = negated ? ConditionOperator.NotIn : ConditionOperator.In
+                    };
+                    foreach (var item in enumerable)
+                        condition.Values.Add(item!);
+                    filter.Conditions.Add(condition);
+                }
+                else
+                {
+                    filter.Conditions.Add(new FetchCondition
+                    {
+                        Attribute = resolved.Name,
+                        EntityAlias = resolved.EntityAlias,
+                        Operator = negated ? ConditionOperator.NotEqual : ConditionOperator.Equal,
+                        Value = value
+                    });
+                }
+                return;
+            }
+
             // Queryable.Any(source, predicate) → link-type="any" / negated → "not any"
             case MethodCallExpression { Method: { Name: "Any", DeclaringType: var anyDeclType } } anyCall
                 when anyDeclType == typeof(Queryable) && anyCall.Arguments.Count == 2:
@@ -890,6 +935,15 @@ internal static class FetchXmlQueryTranslator
         // Convert enum values to their underlying integer for FetchXml serialization.
         if (result is not null && result.GetType().IsEnum)
             return Convert.ChangeType(result, Enum.GetUnderlyingType(result.GetType()));
+        // Convert enum arrays to their underlying integer arrays for FetchXml serialization.
+        if (result is Array arr && arr.Length > 0 && arr.GetType().GetElementType() is { IsEnum: true } elemType)
+        {
+            var intArray = new object[arr.Length];
+            var underlying = Enum.GetUnderlyingType(elemType);
+            for (var i = 0; i < arr.Length; i++)
+                intArray[i] = Convert.ChangeType(arr.GetValue(i)!, underlying);
+            return intArray;
+        }
         return result;
     }
 
@@ -912,10 +966,11 @@ internal static class FetchXmlQueryTranslator
             };
         }
 
-        // new[] { ... } inline array
+        // new[] { ... } inline array — use EvaluateValueCore to preserve element types
+        // (enum conversion happens in EvaluateValue after the array is constructed)
         if (expr is NewArrayExpression newArray)
         {
-            var items = newArray.Expressions.Select(e => EvaluateValue(e)).ToArray();
+            var items = newArray.Expressions.Select(e => EvaluateValueCore(e)).ToArray();
             var array = Array.CreateInstance(newArray.Type.GetElementType()!, items.Length);
             for (var i = 0; i < items.Length; i++)
                 array.SetValue(items[i], i);

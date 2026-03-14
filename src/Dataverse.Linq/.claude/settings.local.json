@@ -135,7 +135,15 @@
       "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"ClassName~FetchXmlGenerationTests\" 2>&1 | tail -20)",
       "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"FullyQualifiedName~FetchXml\" --list-tests 2>&1 | tail -10)",
       "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"FullyQualifiedName~NegatedListContains\" 2>&1 | grep -A 20 \"Expected\")",
-      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet build src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj 2>&1 | grep -E \"^Build|Error\\\\\\(s\\\\\\)|Warning\\\\\\(s\\\\\\)\" | tail -5)"
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet build src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj 2>&1 | grep -E \"^Build|Error\\\\\\(s\\\\\\)|Warning\\\\\\(s\\\\\\)\" | tail -5)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"FullyQualifiedName~MultiSelect\" -v normal 2>&1 | grep -A 15 \"Failed\")",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"FullyQualifiedName~FetchXmlGenerationTests\" 2>&1 | grep \"Failed \" | head -5)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"FullyQualifiedName~ContainsValuesTyped\" 2>&1 | grep -A 5 \"Error Message\")",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet build src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj -q 2>&1 | grep -E \"Error|error\" | head -5)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet build src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj 2>&1 | grep -E \"^Build|Error\\\\\\(s\\\\\\)\" | tail -3)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"FullyQualifiedName~ContainsValuesSingle\" 2>&1 | grep -A 10 \"Error Message\")",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests --filter \"FullyQualifiedName~FetchXmlGenerationTests\" --no-build 2>&1 | tail -30)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests --filter \"FullyQualifiedName~FetchXmlGenerationTests\" 2>&1 | tail -10)"
     ]
   }
 }

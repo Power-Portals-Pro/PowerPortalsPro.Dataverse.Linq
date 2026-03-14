@@ -1625,14 +1625,15 @@ public class FetchXmlGenerationTests
     }
 
     // -------------------------------------------------------------------------
-    // Where — ContainValues / DoesNotContainValues (multi-select option set)
+    // Where — ContainsValues (multi-select option set)
     // -------------------------------------------------------------------------
 
     [Fact]
-    public void ToFetchXml_WhereContainValues_GeneratesContainValuesFilter()
+    public void ToFetchXml_WhereContainsValues_GeneratesContainValuesFilter()
     {
         var fetchXml = _service.Queryable<CustomContact>()
-            .Where(c => c.FavoriteColors_OptionSetValues.ContainValues(1, 2, 3))
+            .Where(c => c.FavoriteColors.ContainsValues(
+                CustomContact.Color.Red, CustomContact.Color.Orange, CustomContact.Color.Blue))
             .ToFetchXml();
 
         AssertFetchXml(fetchXml,
@@ -1642,9 +1643,9 @@ public class FetchXmlGenerationTests
                 <all-attributes />
                 <filter type="and">
                   <condition attribute="new_favoritecolors" operator="contain-values">
-                    <value>1</value>
-                    <value>2</value>
-                    <value>3</value>
+                    <value>100000000</value>
+                    <value>100000001</value>
+                    <value>100000002</value>
                   </condition>
                 </filter>
               </entity>
@@ -1653,10 +1654,11 @@ public class FetchXmlGenerationTests
     }
 
     [Fact]
-    public void ToFetchXml_WhereDoesNotContainValues_GeneratesNotContainValuesFilter()
+    public void ToFetchXml_WhereNegatedContainsValues_GeneratesNotContainValuesFilter()
     {
         var fetchXml = _service.Queryable<CustomContact>()
-            .Where(c => c.FavoriteColors_OptionSetValues.DoesNotContainValues(4, 5))
+            .Where(c => !c.FavoriteColors.ContainsValues(
+                CustomContact.Color.Red, CustomContact.Color.Blue))
             .ToFetchXml();
 
         AssertFetchXml(fetchXml,
@@ -1666,8 +1668,8 @@ public class FetchXmlGenerationTests
                 <all-attributes />
                 <filter type="and">
                   <condition attribute="new_favoritecolors" operator="not-contain-values">
-                    <value>4</value>
-                    <value>5</value>
+                    <value>100000000</value>
+                    <value>100000002</value>
                   </condition>
                 </filter>
               </entity>
@@ -1676,33 +1678,10 @@ public class FetchXmlGenerationTests
     }
 
     [Fact]
-    public void ToFetchXml_WhereNegatedContainValues_GeneratesNotContainValuesFilter()
+    public void ToFetchXml_WhereContainsValuesSingleValue_GeneratesContainValuesFilter()
     {
         var fetchXml = _service.Queryable<CustomContact>()
-            .Where(c => !c.FavoriteColors_OptionSetValues.ContainValues(1, 2))
-            .ToFetchXml();
-
-        AssertFetchXml(fetchXml,
-            """
-            <fetch mapping="logical">
-              <entity name="new_customcontact">
-                <all-attributes />
-                <filter type="and">
-                  <condition attribute="new_favoritecolors" operator="not-contain-values">
-                    <value>1</value>
-                    <value>2</value>
-                  </condition>
-                </filter>
-              </entity>
-            </fetch>
-            """);
-    }
-
-    [Fact]
-    public void ToFetchXml_WhereContainValuesSingleValue_GeneratesContainValuesFilter()
-    {
-        var fetchXml = _service.Queryable<CustomContact>()
-            .Where(c => c.FavoriteColors_OptionSetValues.ContainValues(42))
+            .Where(c => c.FavoriteColors.ContainsValues(CustomContact.Color.Green))
             .ToFetchXml();
 
         AssertFetchXml(fetchXml,
@@ -1712,7 +1691,7 @@ public class FetchXmlGenerationTests
                 <all-attributes />
                 <filter type="and">
                   <condition attribute="new_favoritecolors" operator="contain-values">
-                    <value>42</value>
+                    <value>100000008</value>
                   </condition>
                 </filter>
               </entity>
@@ -1756,6 +1735,98 @@ public class FetchXmlGenerationTests
                 <all-attributes />
                 <filter type="and">
                   <condition attribute="new_favoritecolors" operator="not-contain-values">
+                    <value>100000002</value>
+                  </condition>
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    // -------------------------------------------------------------------------
+    // Where — MultiSelect Equals (eq / in / not-in)
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_WhereMultiSelectEqualsSingleValue_GeneratesEqFilter()
+    {
+        var fetchXml = _service.Queryable<CustomContact>()
+            .Where(c => c.FavoriteColors.Equals(CustomContact.Color.Red))
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customcontact">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_favoritecolors" operator="eq" value="100000000" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WhereNegatedMultiSelectEqualsSingleValue_GeneratesNeFilter()
+    {
+        var fetchXml = _service.Queryable<CustomContact>()
+            .Where(c => !c.FavoriteColors.Equals(CustomContact.Color.Red))
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customcontact">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_favoritecolors" operator="ne" value="100000000" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WhereMultiSelectEqualsMultipleValues_GeneratesInFilter()
+    {
+        var colors = new[] { CustomContact.Color.Red, CustomContact.Color.Blue };
+        var fetchXml = _service.Queryable<CustomContact>()
+            .Where(c => c.FavoriteColors.Equals(colors))
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customcontact">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_favoritecolors" operator="in">
+                    <value>100000000</value>
+                    <value>100000002</value>
+                  </condition>
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WhereNegatedMultiSelectEqualsMultipleValues_GeneratesNotInFilter()
+    {
+        var colors = new[] { CustomContact.Color.Red, CustomContact.Color.Blue };
+        var fetchXml = _service.Queryable<CustomContact>()
+            .Where(c => !c.FavoriteColors.Equals(colors))
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customcontact">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_favoritecolors" operator="not-in">
+                    <value>100000000</value>
                     <value>100000002</value>
                   </condition>
                 </filter>
