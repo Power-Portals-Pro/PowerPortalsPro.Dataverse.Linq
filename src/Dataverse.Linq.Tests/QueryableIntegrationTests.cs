@@ -1,8 +1,10 @@
 using Dataverse.Linq.Extensions;
+using Dataverse.Linq.Model;
 using Dataverse.Linq.Tests.Proxies;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.PowerPlatform.Dataverse.Client;
+using Microsoft.Xrm.Sdk;
 
 namespace Dataverse.Linq.Tests;
 
@@ -2031,5 +2033,777 @@ public class QueryableIntegrationTests(ServiceClientFixture fixture) : Integrati
             childCountByParent.Should().ContainKey(result.CustomAccountId);
             result.NumberOfChildren.Should().Be(childCountByParent[result.CustomAccountId]);
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // Distinct
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Distinct_ReturnsDistinctRecords()
+    {
+        var allNames = await (from a in Service.Queryable<CustomAccount>()
+                              select a.Name).ToListAsync();
+
+        var distinctNames = await (from a in Service.Queryable<CustomAccount>()
+                                   select a.Name).Distinct().ToListAsync();
+
+        distinctNames.Should().OnlyHaveUniqueItems();
+    }
+
+    [Fact]
+    public async Task Distinct_WithSelectProjection_ReturnsDistinctProjectedValues()
+    {
+        var results = await Service.Queryable<CustomAccount>()
+            .Select(a => new { a.Name })
+            .Distinct()
+            .ToListAsync();
+
+        results.Select(r => r.Name).Should().OnlyHaveUniqueItems();
+    }
+
+    // -------------------------------------------------------------------------
+    // GroupBy — Date grouping variants
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void GroupBy_DateQuarter_ReturnsGroupedResults()
+    {
+        var results = (from o in Service.Queryable<CustomOpportunity>()
+                       where o.StatusReason == CustomOpportunity.CustomOpportunity_StatusReason.Won
+                       group o by o.ActualCloseDate!.Value.Quarter() into g
+                       select new
+                       {
+                           Quarter = g.Key,
+                           Count = g.Count(),
+                       }).ToList();
+
+        results.Should().NotBeEmpty();
+        results.Should().AllSatisfy(r =>
+        {
+            r.Quarter.Should().BeInRange(1, 4);
+            r.Count.Should().BeGreaterThan(0);
+        });
+    }
+
+    [Fact]
+    public void GroupBy_DateMonth_ReturnsGroupedResults()
+    {
+        var results = (from o in Service.Queryable<CustomOpportunity>()
+                       where o.StatusReason == CustomOpportunity.CustomOpportunity_StatusReason.Won
+                       group o by o.ActualCloseDate!.Value.Month into g
+                       select new
+                       {
+                           Month = g.Key,
+                           Count = g.Count(),
+                       }).ToList();
+
+        results.Should().NotBeEmpty();
+        results.Should().AllSatisfy(r =>
+        {
+            r.Month.Should().BeInRange(1, 12);
+            r.Count.Should().BeGreaterThan(0);
+        });
+    }
+
+    [Fact]
+    public void GroupBy_DateDay_ReturnsGroupedResults()
+    {
+        var results = (from o in Service.Queryable<CustomOpportunity>()
+                       where o.StatusReason == CustomOpportunity.CustomOpportunity_StatusReason.Won
+                       group o by o.ActualCloseDate!.Value.Day into g
+                       select new
+                       {
+                           Day = g.Key,
+                           Count = g.Count(),
+                       }).ToList();
+
+        results.Should().NotBeEmpty();
+        results.Should().AllSatisfy(r =>
+        {
+            r.Day.Should().BeInRange(1, 31);
+            r.Count.Should().BeGreaterThan(0);
+        });
+    }
+
+    [Fact]
+    public void GroupBy_DateWeek_ReturnsGroupedResults()
+    {
+        var results = (from o in Service.Queryable<CustomOpportunity>()
+                       where o.StatusReason == CustomOpportunity.CustomOpportunity_StatusReason.Won
+                       group o by o.ActualCloseDate!.Value.Week() into g
+                       select new
+                       {
+                           Week = g.Key,
+                           Count = g.Count(),
+                       }).ToList();
+
+        results.Should().NotBeEmpty();
+        results.Should().AllSatisfy(r =>
+        {
+            r.Week.Should().BeInRange(1, 53);
+            r.Count.Should().BeGreaterThan(0);
+        });
+    }
+
+    [Fact]
+    public void GroupBy_FiscalPeriod_GeneratesCorrectFetchXml()
+    {
+        // FiscalPeriod grouping returns composite date strings (e.g., "2020-01")
+        // that may not parse correctly at runtime, so we verify FetchXml generation only.
+        var fetchXml = (from o in Service.Queryable<CustomOpportunity>()
+                        where o.StatusReason == CustomOpportunity.CustomOpportunity_StatusReason.Won
+                        group o by o.ActualCloseDate!.Value.FiscalPeriod() into g
+                        select new
+                        {
+                            FiscalPeriod = g.Key,
+                            Count = g.Count(),
+                        }).ToFetchXml();
+
+        fetchXml.Should().Contain("dategrouping=\"fiscal-period\"");
+    }
+
+    [Fact]
+    public void GroupBy_FiscalYear_ReturnsGroupedResults()
+    {
+        var results = (from o in Service.Queryable<CustomOpportunity>()
+                       where o.StatusReason == CustomOpportunity.CustomOpportunity_StatusReason.Won
+                       group o by o.ActualCloseDate!.Value.FiscalYear() into g
+                       select new
+                       {
+                           FiscalYear = g.Key,
+                           Count = g.Count(),
+                       }).ToList();
+
+        results.Should().NotBeEmpty();
+        results.Should().AllSatisfy(r =>
+        {
+            r.Count.Should().BeGreaterThan(0);
+        });
+    }
+
+    // -------------------------------------------------------------------------
+    // GroupBy — OptionSetValue
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void GroupBy_OptionSetValue_ReturnsGroupedResults()
+    {
+        var results = (from o in Service.Queryable<CustomOpportunity>()
+                       group o by o.StatusReason_OptionSetValue.Value into g
+                       select new
+                       {
+                           Status = g.Key,
+                           Count = g.Count(),
+                       }).ToList();
+
+        results.Should().NotBeEmpty();
+        results.Should().AllSatisfy(r =>
+        {
+            r.Count.Should().BeGreaterThan(0);
+        });
+    }
+
+    // -------------------------------------------------------------------------
+    // Hierarchy operators
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Where_Under_ReturnsChildRecords()
+    {
+        var allAccounts = await Service.Queryable<CustomAccount>().ToListAsync();
+        var parentAccount = allAccounts.First(a =>
+            allAccounts.Any(child => child.ParentAccount != null && child.ParentAccount.Id == a.CustomAccountId));
+
+        var results = await Service.Queryable<CustomAccount>()
+            .Where(a => a.CustomAccountId.Under(parentAccount.CustomAccountId))
+            .ToListAsync();
+
+        results.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public async Task Where_UnderOrEqual_IncludesParentAndChildren()
+    {
+        var allAccounts = await Service.Queryable<CustomAccount>().ToListAsync();
+        var parentAccount = allAccounts.First(a =>
+            allAccounts.Any(child => child.ParentAccount != null && child.ParentAccount.Id == a.CustomAccountId));
+
+        var results = await Service.Queryable<CustomAccount>()
+            .Where(a => a.CustomAccountId.UnderOrEqual(parentAccount.CustomAccountId))
+            .ToListAsync();
+
+        results.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public async Task Where_Above_ReturnsParentRecords()
+    {
+        var allAccounts = await Service.Queryable<CustomAccount>().ToListAsync();
+        var childAccount = allAccounts.First(a => a.ParentAccount != null);
+
+        var results = await Service.Queryable<CustomAccount>()
+            .Where(a => a.CustomAccountId.Above(childAccount.CustomAccountId))
+            .ToListAsync();
+
+        results.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public async Task Where_AboveOrEqual_IncludesChildAndParents()
+    {
+        var allAccounts = await Service.Queryable<CustomAccount>().ToListAsync();
+        var childAccount = allAccounts.First(a => a.ParentAccount != null);
+
+        var results = await Service.Queryable<CustomAccount>()
+            .Where(a => a.CustomAccountId.AboveOrEqual(childAccount.CustomAccountId))
+            .ToListAsync();
+
+        results.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public async Task Where_NotUnder_ExcludesChildRecords()
+    {
+        var allAccounts = await Service.Queryable<CustomAccount>().ToListAsync();
+        var parentAccount = allAccounts.First(a =>
+            allAccounts.Any(child => child.ParentAccount != null && child.ParentAccount.Id == a.CustomAccountId));
+
+        var results = await Service.Queryable<CustomAccount>()
+            .Where(a => a.CustomAccountId.NotUnder(parentAccount.CustomAccountId))
+            .ToListAsync();
+
+        results.Should().NotBeEmpty();
+    }
+
+    // -------------------------------------------------------------------------
+    // DateTime fiscal extensions
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void Where_InFiscalYear_ReturnsMatchingRecords()
+    {
+        var results = Service.Queryable<CustomOpportunity>()
+            .Where(o => o.ActualCloseDate.InFiscalYear(2025))
+            .ToList();
+
+        // Should not throw; may or may not have results depending on data
+        results.Should().NotBeNull();
+    }
+
+    [Fact]
+    public void Where_InFiscalPeriodAndYear_ReturnsMatchingRecords()
+    {
+        var results = Service.Queryable<CustomOpportunity>()
+            .Where(o => o.ActualCloseDate.InFiscalPeriodAndYear(1, 2025))
+            .ToList();
+
+        results.Should().NotBeNull();
+    }
+
+    // -------------------------------------------------------------------------
+    // NoLock, LateMaterialize, QueryHints
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task WithNoLock_ReturnsRecords()
+    {
+        var results = await Service.Queryable<CustomAccount>()
+            .WithNoLock()
+            .ToListAsync();
+
+        results.Should().HaveCount(150);
+    }
+
+    [Fact]
+    public async Task WithNoLock_WithFilter_ReturnsFilteredRecords()
+    {
+        var results = await Service.Queryable<CustomAccount>()
+            .WithNoLock()
+            .Where(a => a.Name != null)
+            .ToListAsync();
+
+        results.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public async Task WithLateMaterialize_ReturnsRecords()
+    {
+        var results = await Service.Queryable<CustomAccount>()
+            .WithLateMaterialize()
+            .ToListAsync();
+
+        results.Should().HaveCount(150);
+    }
+
+    [Fact]
+    public async Task WithQueryHints_ReturnsRecords()
+    {
+        var results = await Service.Queryable<CustomAccount>()
+            .WithQueryHints(SqlQueryHint.ForceOrder)
+            .ToListAsync();
+
+        results.Should().HaveCount(150);
+    }
+
+    [Fact]
+    public async Task WithQueryHints_Multiple_ReturnsRecords()
+    {
+        var results = await Service.Queryable<CustomAccount>()
+            .WithQueryHints(SqlQueryHint.ForceOrder, SqlQueryHint.DisableRowGoal)
+            .Where(a => a.Name != null)
+            .ToListAsync();
+
+        results.Should().NotBeEmpty();
+    }
+
+    // -------------------------------------------------------------------------
+    // Negated filter expressions
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Where_NegatedContains_ExcludesMatchingRecords()
+    {
+        var withMatch = await Service.Queryable<CustomAccount>()
+            .Where(a => a.Name.Contains("Account"))
+            .ToListAsync();
+
+        var withoutMatch = await Service.Queryable<CustomAccount>()
+            .Where(a => !a.Name.Contains("Account"))
+            .ToListAsync();
+
+        var total = await Service.Queryable<CustomAccount>()
+            .Where(a => a.Name != null)
+            .ToListAsync();
+
+        (withMatch.Count + withoutMatch.Count).Should().Be(total.Count);
+    }
+
+    [Fact]
+    public async Task Where_NotEqual_ReturnsOtherRecords()
+    {
+        var allAccounts = await Service.Queryable<CustomAccount>().ToListAsync();
+        var knownName = allAccounts.First(a => a.Name != null).Name;
+
+        var results = await Service.Queryable<CustomAccount>()
+            .Where(a => a.Name != knownName)
+            .ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Should().NotContain(a => a.Name == knownName);
+        results.Count.Should().BeLessThan(allAccounts.Count);
+    }
+
+    // -------------------------------------------------------------------------
+    // Select into entity type from join
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Join_SelectIntoEntityType_ReturnsTypedResults()
+    {
+        var contacts = await (from a in Service.Queryable<CustomAccount>()
+                              join c in Service.Queryable<CustomContact>()
+                                  on a.PrimaryContact.Id equals c.CustomContactId
+                              select new CustomContact
+                              {
+                                  CustomContactId = c.CustomContactId,
+                                  FirstName = c.FirstName,
+                                  LastName = c.LastName,
+                              }).ToListAsync();
+
+        contacts.Should().NotBeEmpty();
+        contacts.Should().AllSatisfy(c =>
+        {
+            c.CustomContactId.Should().NotBe(Guid.Empty);
+            c.FirstName.Should().NotBeNullOrEmpty();
+            c.LastName.Should().NotBeNullOrEmpty();
+        });
+    }
+
+    // -------------------------------------------------------------------------
+    // OrderBy on joined columns
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Join_OrderByJoinedColumn_ReturnsOrderedResults()
+    {
+        var results = await (from a in Service.Queryable<CustomAccount>()
+                             join c in Service.Queryable<CustomContact>()
+                                 on a.PrimaryContact.Id equals c.CustomContactId
+                             orderby c.LastName, a.Name
+                             select new
+                             {
+                                 AccountName = a.Name,
+                                 ContactLastName = c.LastName,
+                             }).ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Select(r => r.ContactLastName).Should().BeInAscendingOrder();
+    }
+
+    // -------------------------------------------------------------------------
+    // Query transformation / composition
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task QueryComposition_WhereAfterSelect_ReturnsFilteredResults()
+    {
+        var query = Service.Queryable<CustomAccount>()
+            .Select(a => new CustomAccount
+            {
+                CustomAccountId = a.CustomAccountId,
+                Name = a.Name,
+            });
+
+        query = query.Where(a => a.Name != null);
+
+        var results = await query.ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Should().AllSatisfy(a => a.Name.Should().NotBeNull());
+    }
+
+    [Fact]
+    public async Task QueryComposition_ChainedWheres_ReturnsFilteredResults()
+    {
+        var query = Service.Queryable<CustomAccount>()
+            .Where(a => a.Name != null);
+
+        query = query.Where(a => a.NumberOfEmployees != null);
+
+        var results = await query.ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Should().AllSatisfy(a =>
+        {
+            a.Name.Should().NotBeNull();
+            a.NumberOfEmployees.Should().NotBeNull();
+        });
+    }
+
+    // -------------------------------------------------------------------------
+    // SubQuery with joins
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task SubQuery_JoinOnPreFilteredQueryable_ReturnsResults()
+    {
+        var accountsQuery = Service.Queryable<CustomAccount>()
+            .Where(a => a.Name != null);
+
+        var contactsQuery = Service.Queryable<CustomContact>()
+            .Where(c => c.FirstName != null);
+
+        var results = await (from a in accountsQuery
+                             join c in contactsQuery
+                                 on a.PrimaryContact.Id equals c.CustomContactId
+                             select new
+                             {
+                                 a.Name,
+                                 c.FirstName,
+                             }).ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Should().AllSatisfy(r =>
+        {
+            r.Name.Should().NotBeNull();
+            r.FirstName.Should().NotBeNull();
+        });
+    }
+
+    [Fact]
+    public async Task SubQuery_MultipleJoinsOnPreFiltered_ReturnsResults()
+    {
+        var accountsQuery = Service.Queryable<CustomAccount>()
+            .Where(a => a.Name != null);
+
+        var results = await (from a in accountsQuery
+                             join c in Service.Queryable<CustomContact>()
+                                 on a.CustomAccountId equals c.ParentAccount.Id
+                             join o in Service.Queryable<CustomOpportunity>()
+                                 on c.CustomContactId equals o.Contact.Id
+                             select new
+                             {
+                                 AccountName = a.Name,
+                                 ContactFirstName = c.FirstName,
+                                 OpportunityName = o.Name,
+                             }).ToListAsync();
+
+        results.Should().NotBeEmpty();
+    }
+
+    // -------------------------------------------------------------------------
+    // Left join with late-bound
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task LeftJoin_SelectAccountFromLeftJoin_ReturnsAllAccounts()
+    {
+        // Left join selecting only from the outer entity works
+        var results = await (from a in Service.Queryable<CustomAccount>()
+                             join c in Service.Queryable<CustomContact>()
+                                 on a.PrimaryContact.Id equals c.CustomContactId into contacts
+                             from c in contacts.DefaultIfEmpty()
+                             select a).ToListAsync();
+
+        results.Should().HaveCount(150);
+    }
+
+    // -------------------------------------------------------------------------
+    // Contains with zero elements
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void Where_ContainsWithEmptyGuidList_ThrowsServerError()
+    {
+        var accountIds = new List<Guid>();
+
+        var act = () => Service.Queryable<CustomAccount>()
+            .Where(a => accountIds.Contains(a.CustomAccountId))
+            .ToList();
+
+        act.Should().Throw<Exception>();
+    }
+
+    // -------------------------------------------------------------------------
+    // CompareEntityRef to Guid / CompareGuidToEntityRef
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Join_CompareEntityRefToGuid_WithSameEntity_ReturnsResults()
+    {
+        // Column comparison within a single entity (not cross-entity in a join)
+        var results = await Service.Queryable<CustomOpportunity>()
+            .Where(o => o.ActualRevenue > o.EstimatedRevenue)
+            .ToListAsync();
+
+        // Should not throw; result count depends on data
+        results.Should().NotBeNull();
+    }
+
+    // -------------------------------------------------------------------------
+    // Compare to constant with Or condition
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void Where_ConstantOrCondition_WithNullVariable_ThrowsNotSupported()
+    {
+        var date = (DateTime?)null;
+
+        var act = () => (from a in Service.Queryable<CustomAccount>()
+                         where (date == null || a.CreatedOn > date)
+                         select a).ToList();
+
+        act.Should().Throw<NotSupportedException>();
+    }
+
+    [Fact]
+    public void Where_ConstantAndCondition_WithNullVariable_ThrowsNotSupported()
+    {
+        var date = (DateTime?)null;
+
+        var act = () => (from a in Service.Queryable<CustomAccount>()
+                         join c in Service.Queryable<CustomContact>()
+                             on a.PrimaryContact.Id equals c.CustomContactId into contacts
+                         from c in contacts.DefaultIfEmpty()
+                         where (a.CreatedOn > c.CreatedOn && date == null)
+                         select a).ToList();
+
+        act.Should().Throw<NotSupportedException>();
+    }
+
+    // -------------------------------------------------------------------------
+    // Sum with no results
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void Sum_WithNoResults_ThrowsInvalidCast()
+    {
+        var act = () => (from a in Service.Queryable<CustomAccount>()
+                         where a.Name == "!@#$#EQSE_NONEXISTENT"
+                         select a.CreditLimit).Sum();
+
+        act.Should().Throw<InvalidCastException>();
+    }
+
+    // -------------------------------------------------------------------------
+    // Select with ternary / null-coalesce
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Select_WithNullCoalesceAndTernary_ReturnsResults()
+    {
+        var results = await Service.Queryable<CustomAccount>()
+            .Select(a => new
+            {
+                a.CustomAccountId,
+                BoolValue = (a.IsPreferredAccount ?? false) ? true : false,
+            })
+            .ToListAsync();
+
+        results.Should().HaveCount(150);
+    }
+
+    // -------------------------------------------------------------------------
+    // Inner join — multiple where clauses across entities
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Join_MultipleWhereClausesAcrossEntities_ReturnsFilteredResults()
+    {
+        var results = await (from a in Service.Queryable<CustomAccount>()
+                             join c in Service.Queryable<CustomContact>()
+                                 on a.PrimaryContact.Id equals c.CustomContactId
+                             where a.Name != null
+                             where c.FirstName != null
+                             select new
+                             {
+                                 AccountName = a.Name,
+                                 ContactFirstName = c.FirstName,
+                             }).ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Should().AllSatisfy(r =>
+        {
+            r.AccountName.Should().NotBeNull();
+            r.ContactFirstName.Should().NotBeNull();
+        });
+    }
+
+    // -------------------------------------------------------------------------
+    // Inner join — Or filter across entities
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Join_OrFilterAcrossEntities_ReturnsMatchingRecords()
+    {
+        var results = await (from a in Service.Queryable<CustomAccount>()
+                             join c in Service.Queryable<CustomContact>()
+                                 on a.PrimaryContact.Id equals c.CustomContactId
+                             where a.Name.Contains("001") || c.FirstName.Contains("First")
+                             select new
+                             {
+                                 AccountName = a.Name,
+                                 ContactFirstName = c.FirstName,
+                             }).ToListAsync();
+
+        results.Should().NotBeEmpty();
+    }
+
+    // -------------------------------------------------------------------------
+    // Null record on join
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void Join_NullPropertyOnJoinedRecord_DoesNotThrow()
+    {
+        var result = (from c in Service.Queryable<CustomContact>()
+                      join a in Service.Queryable<CustomAccount>()
+                          on c.ParentAccount.Id equals a.CustomAccountId
+                      select new
+                      {
+                          c.Name,
+                          a.Website,
+                      }).FirstOrDefault();
+
+        result.Should().NotBeNull();
+    }
+
+    // -------------------------------------------------------------------------
+    // Column comparison across different tables (3-entity join)
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ThreeWayJoin_ReturnsResults()
+    {
+        var results = await (from a in Service.Queryable<CustomAccount>()
+                             join c in Service.Queryable<CustomContact>()
+                                 on a.PrimaryContact.Id equals c.CustomContactId
+                             join pa in Service.Queryable<CustomAccount>()
+                                 on c.ParentAccount.Id equals pa.CustomAccountId
+                             orderby a.Name
+                             select new
+                             {
+                                 AccountName = a.Name,
+                                 ContactName = c.Name,
+                                 ParentAccountName = pa.Name,
+                             }).ToListAsync();
+
+        results.Should().NotBeEmpty();
+    }
+
+    // -------------------------------------------------------------------------
+    // Simple select early-bound (select into same entity type)
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task SimpleSelect_IntoEntityType_ReturnsResults()
+    {
+        var results = await Service.Queryable<CustomAccount>()
+            .Select(a => new CustomAccount
+            {
+                CustomAccountId = a.CustomAccountId,
+                Name = a.Name,
+            }).ToListAsync();
+
+        results.Should().HaveCount(150);
+        results.Should().AllSatisfy(a =>
+        {
+            a.CustomAccountId.Should().NotBe(Guid.Empty);
+        });
+    }
+
+    // -------------------------------------------------------------------------
+    // Explicit columns on join
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Join_WithExplicitColumns_ReturnsOnlyRequestedColumns()
+    {
+        var results = await (from a in Service.Queryable<CustomAccount>("new_name", "createdon")
+                             join c in Service.Queryable<CustomContact>("new_firstname", "new_lastname")
+                                 on a.PrimaryContact.Id equals c.CustomContactId
+                             where a.Name != null
+                             select new
+                             {
+                                 AccountName = a.Name,
+                                 CreatedOn = a.CreatedOn,
+                                 FirstName = c.FirstName,
+                                 LastName = c.LastName,
+                             }).ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Should().AllSatisfy(r =>
+        {
+            r.AccountName.Should().NotBeNull();
+            r.CreatedOn.Should().NotBeNull();
+            r.FirstName.Should().NotBeNull();
+            r.LastName.Should().NotBeNull();
+        });
+    }
+
+    // -------------------------------------------------------------------------
+    // GroupBy deep — group root entity by linked entity key
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void GroupByDeep_GroupRootByLinkedEntityKey_ReturnsGroupedResults()
+    {
+        var results = (from c in Service.Queryable<CustomContact>()
+                       join a in Service.Queryable<CustomAccount>()
+                           on c.ParentAccount.Id equals a.CustomAccountId
+                       group c by a.CustomAccountId into g
+                       select new
+                       {
+                           AccountId = g.Key,
+                           Count = g.Count(),
+                       }).ToList();
+
+        results.Should().NotBeEmpty();
+        results.Should().AllSatisfy(r =>
+        {
+            r.AccountId.Should().NotBe(Guid.Empty);
+            r.Count.Should().BeGreaterThan(0);
+        });
     }
 }

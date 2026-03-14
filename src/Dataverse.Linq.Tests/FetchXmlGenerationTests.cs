@@ -3170,4 +3170,341 @@ public class FetchXmlGenerationTests
             </fetch>
             """);
     }
+
+    // -------------------------------------------------------------------------
+    // GroupBy — Date grouping variants
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_GroupByDateQuarter_GeneratesQuarterGrouping()
+    {
+        var fetchXml = (from o in _service.Queryable<CustomOpportunity>()
+                        where o.StatusReason == CustomOpportunity.CustomOpportunity_StatusReason.Won
+                        group o by o.ActualCloseDate!.Value.Quarter() into g
+                        select new
+                        {
+                            Quarter = g.Key,
+                            Count = g.Count(),
+                        }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="new_customopportunity">
+                <attribute name="new_actualclosedate" alias="quarter" groupby="true" dategrouping="quarter" />
+                <attribute name="new_customopportunityid" alias="count" aggregate="count" />
+                <filter type="and">
+                  <condition attribute="statuscode" operator="eq" value="2" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_GroupByDateMonth_GeneratesMonthGrouping()
+    {
+        var fetchXml = (from o in _service.Queryable<CustomOpportunity>()
+                        where o.StatusReason == CustomOpportunity.CustomOpportunity_StatusReason.Won
+                        group o by o.ActualCloseDate!.Value.Month into g
+                        select new
+                        {
+                            Month = g.Key,
+                            Count = g.Count(),
+                        }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="new_customopportunity">
+                <attribute name="new_actualclosedate" alias="month" groupby="true" dategrouping="month" />
+                <attribute name="new_customopportunityid" alias="count" aggregate="count" />
+                <filter type="and">
+                  <condition attribute="statuscode" operator="eq" value="2" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_GroupByDateDay_GeneratesDayGrouping()
+    {
+        var fetchXml = (from o in _service.Queryable<CustomOpportunity>()
+                        where o.StatusReason == CustomOpportunity.CustomOpportunity_StatusReason.Won
+                        group o by o.ActualCloseDate!.Value.Day into g
+                        select new
+                        {
+                            Day = g.Key,
+                            Count = g.Count(),
+                        }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="new_customopportunity">
+                <attribute name="new_actualclosedate" alias="day" groupby="true" dategrouping="day" />
+                <attribute name="new_customopportunityid" alias="count" aggregate="count" />
+                <filter type="and">
+                  <condition attribute="statuscode" operator="eq" value="2" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_GroupByDateWeek_GeneratesWeekGrouping()
+    {
+        var fetchXml = (from o in _service.Queryable<CustomOpportunity>()
+                        where o.StatusReason == CustomOpportunity.CustomOpportunity_StatusReason.Won
+                        group o by o.ActualCloseDate!.Value.Week() into g
+                        select new
+                        {
+                            Week = g.Key,
+                            Count = g.Count(),
+                        }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="new_customopportunity">
+                <attribute name="new_actualclosedate" alias="week" groupby="true" dategrouping="week" />
+                <attribute name="new_customopportunityid" alias="count" aggregate="count" />
+                <filter type="and">
+                  <condition attribute="statuscode" operator="eq" value="2" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_GroupByFiscalPeriod_GeneratesFiscalPeriodGrouping()
+    {
+        var fetchXml = (from o in _service.Queryable<CustomOpportunity>()
+                        where o.StatusReason == CustomOpportunity.CustomOpportunity_StatusReason.Won
+                        group o by o.ActualCloseDate!.Value.FiscalPeriod() into g
+                        select new
+                        {
+                            FiscalPeriod = g.Key,
+                            Count = g.Count(),
+                        }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="new_customopportunity">
+                <attribute name="new_actualclosedate" alias="fiscalperiod" groupby="true" dategrouping="fiscal-period" />
+                <attribute name="new_customopportunityid" alias="count" aggregate="count" />
+                <filter type="and">
+                  <condition attribute="statuscode" operator="eq" value="2" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_GroupByFiscalYear_GeneratesFiscalYearGrouping()
+    {
+        var fetchXml = (from o in _service.Queryable<CustomOpportunity>()
+                        where o.StatusReason == CustomOpportunity.CustomOpportunity_StatusReason.Won
+                        group o by o.ActualCloseDate!.Value.FiscalYear() into g
+                        select new
+                        {
+                            FiscalYear = g.Key,
+                            Count = g.Count(),
+                        }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="new_customopportunity">
+                <attribute name="new_actualclosedate" alias="fiscalyear" groupby="true" dategrouping="fiscal-year" />
+                <attribute name="new_customopportunityid" alias="count" aggregate="count" />
+                <filter type="and">
+                  <condition attribute="statuscode" operator="eq" value="2" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    // -------------------------------------------------------------------------
+    // GroupBy — Deep (group root by linked entity key)
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_GroupByDeep_GroupRootByLinkedEntityKey_GeneratesCorrectFetchXml()
+    {
+        var fetchXml = (from c in _service.Queryable<CustomContact>()
+                        join a in _service.Queryable<CustomAccount>()
+                            on c.ParentAccount.Id equals a.CustomAccountId
+                        group c by a.CustomAccountId into g
+                        select new
+                        {
+                            AccountId = g.Key,
+                            Count = g.Count(),
+                        }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="new_customcontact">
+                <attribute name="new_customcontactid" alias="count" aggregate="count" />
+                <link-entity name="new_customaccount" from="new_customaccountid" to="new_parentaccount" alias="a" link-type="inner">
+                  <attribute name="new_customaccountid" alias="accountid" groupby="true" />
+                </link-entity>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    // -------------------------------------------------------------------------
+    // Distinct
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_DistinctWithSelectProjection_GeneratesDistinctFetchWithAttributes()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Select(a => new { a.Name, a.Website })
+            .Distinct()
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" distinct="true">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+                <attribute name="new_website" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    // -------------------------------------------------------------------------
+    // Negated filter
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_NegatedContains_GeneratesNotLikeFilter()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Where(a => !a.Name.Contains("Test"))
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_name" operator="not-like" value="%Test%" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    // -------------------------------------------------------------------------
+    // Select with ternary / null-coalesce
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_SelectWithTernary_ExtractsIdAttribute()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Select(a => new
+            {
+                a.CustomAccountId,
+                BoolValue = (a.IsPreferredAccount ?? false) ? true : false,
+            })
+            .ToFetchXml();
+
+        // The ternary expression evaluates client-side; only the attribute
+        // accesses that resolve to a simple member are emitted.
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_customaccountid" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    // -------------------------------------------------------------------------
+    // Contains with zero elements
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_ContainsWithEmptyList_GeneratesInWithNoValues()
+    {
+        var accountIds = new List<Guid>();
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Where(a => accountIds.Contains(a.CustomAccountId))
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_customaccountid" operator="in" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    // -------------------------------------------------------------------------
+    // Or condition with constant value
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_ConstantOrCondition_WithNullValue_ThrowsNotSupported()
+    {
+        var date = (DateTime?)null;
+
+        var act = () => (from a in _service.Queryable<CustomAccount>()
+                         where (date == null || a.CreatedOn > date)
+                         select a).ToFetchXml();
+
+        act.Should().Throw<NotSupportedException>();
+    }
+
+    // -------------------------------------------------------------------------
+    // Query composition — Where after Select
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_QueryComposition_WhereAfterSelect_GeneratesCorrectFetchXml()
+    {
+        var query = _service.Queryable<CustomAccount>()
+            .Select(a => new CustomAccount
+            {
+                CustomAccountId = a.CustomAccountId,
+                Name = a.Name,
+            });
+
+        query = query.Where(a => a.Name != null);
+
+        var fetchXml = query.ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_customaccountid" />
+                <attribute name="new_name" />
+                <filter type="and">
+                  <condition attribute="new_name" operator="not-null" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
 }
