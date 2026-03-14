@@ -288,6 +288,19 @@ public static class ServiceClientExtensions
     }
 
     /// <summary>
+    /// Counts non-null values of the selected column within a grouped aggregate query.
+    /// Translates to FetchXml <c>aggregate="countcolumn"</c>.
+    /// Usage: <c>g.CountColumn(x =&gt; x.SomeColumn)</c>
+    /// </summary>
+    public static int CountColumn<TKey, TElement>(
+        this IGrouping<TKey, TElement> grouping,
+        Func<TElement, object> selector)
+    {
+        throw new NotImplementedException(
+            "This method is a placeholder for the Dataverse LINQ query provider and cannot be invoked directly.");
+    }
+
+    /// <summary>
     /// Translates the LINQ query into its FetchXml representation without executing it.
     /// Useful for debugging, logging, or inspecting the generated query.
     /// </summary>

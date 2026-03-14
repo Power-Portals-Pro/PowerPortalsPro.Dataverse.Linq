@@ -2420,4 +2420,28 @@ public class FetchXmlGenerationTests
             </fetch>
             """);
     }
+
+    [Fact]
+    public void ToFetchXml_GroupByWithCountColumn_GeneratesCountColumnAggregate()
+    {
+        var fetchXml = (from a in _service.Queryable<CustomAccount>()
+                        group a by a.AccountRating_OptionSetValue.Value into g
+                        select new
+                        {
+                            Rating = g.Key,
+                            Count = g.Count(),
+                            DescriptionCount = g.CountColumn(x => x.Description),
+                        }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="new_customaccount">
+                <attribute name="new_accountrating" alias="rating" groupby="true" />
+                <attribute name="new_customaccountid" alias="count" aggregate="count" />
+                <attribute name="new_description" alias="descriptioncount" aggregate="countcolumn" />
+              </entity>
+            </fetch>
+            """);
+    }
 }

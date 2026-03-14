@@ -1595,4 +1595,34 @@ public class QueryableIntegrationTests : IntegrationTestBase
             r.Count.Should().BeGreaterThan(0);
         });
     }
+
+    [Fact]
+    public async Task GroupBy_CountColumn_CountsNonNullValuesPerGroup()
+    {
+        var results = (from a in Service.Queryable<CustomAccount>()
+                       where a.AccountRating_OptionSetValue != null
+                       group a by a.AccountRating_OptionSetValue.Value into g
+                       select new
+                       {
+                           Rating = g.Key,
+                           Count = g.Count(),
+                           DescriptionCount = g.CountColumn(x => x.Description),
+                       }).ToList();
+
+        var all = await Service.Queryable<CustomAccount>()
+            .Where(a => a.AccountRating_OptionSetValue != null)
+            .ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Should().AllSatisfy(r =>
+        {
+            r.Count.Should().BeGreaterThan(0);
+            r.DescriptionCount.Should().BeLessThanOrEqualTo(r.Count);
+        });
+
+        // Verify total DescriptionCount matches actual non-null descriptions
+        var totalDescriptionCount = results.Sum(r => r.DescriptionCount);
+        var expectedNonNull = all.Count(a => a.Description != null);
+        totalDescriptionCount.Should().Be(expectedNonNull);
+    }
 }
