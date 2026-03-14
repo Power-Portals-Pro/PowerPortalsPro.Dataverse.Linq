@@ -2096,6 +2096,151 @@ public class FetchXmlGenerationTests
     }
 
     // -------------------------------------------------------------------------
+    // String.Length
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_StringLengthEqual_GeneratesLikeWithUnderscores()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Where(a => a.Name.Length == 5)
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_name" operator="like" value="_____" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_StringLengthNotEqual_GeneratesNotLikeWithUnderscores()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Where(a => a.Name.Length != 3)
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_name" operator="not-like" value="___" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_StringLengthGreaterThan_GeneratesLikePattern()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Where(a => a.Name.Length > 5)
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_name" operator="like" value="______%" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_StringLengthGreaterThanOrEqual_GeneratesLikePattern()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Where(a => a.Name.Length >= 5)
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_name" operator="like" value="_____%" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_StringLengthLessThan_GeneratesNotLikePattern()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Where(a => a.Name.Length < 5)
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_name" operator="not-like" value="_____%" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_StringLengthLessThanOrEqual_GeneratesNotLikePattern()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Where(a => a.Name.Length <= 5)
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_name" operator="not-like" value="______%" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_StringLengthReversed_FlipsOperator()
+    {
+        // 10 <= x.Name.Length is equivalent to x.Name.Length >= 10
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Where(a => 10 <= a.Name.Length)
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_name" operator="like" value="__________%" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    // -------------------------------------------------------------------------
     // Take
     // -------------------------------------------------------------------------
 

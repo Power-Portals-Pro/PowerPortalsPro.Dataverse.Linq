@@ -703,6 +703,10 @@ internal static class FetchXmlQueryTranslator
                 $"Unsupported comparison operator in Where: {binary.NodeType}")
         };
 
+        // string.Length comparison → like / not-like with underscore patterns
+        if (TryTranslateStringLength(binary, op, filter, ctx))
+            return;
+
         // Determine which side is the attribute and which is the value
         var leftResolved = ResolveAttribute(binary.Left, ctx);
         var rightResolved = ResolveAttribute(binary.Right, ctx);
@@ -774,6 +778,105 @@ internal static class FetchXmlQueryTranslator
             Value = value
         });
     }
+
+    /// <summary>
+    /// Detects <c>x.StringProp.Length op value</c> patterns and translates them to
+    /// FetchXml <c>like</c> / <c>not-like</c> with underscore patterns, since FetchXml
+    /// has no native string length operator.
+    /// </summary>
+    private static bool TryTranslateStringLength(
+        BinaryExpression binary, ConditionOperator op, FetchFilter filter, TranslationContext ctx)
+    {
+        // Identify which side is string.Length and which is the constant value
+        Expression? lengthExpr = null;
+        Expression? valueExpr = null;
+        var reversed = false;
+
+        if (IsStringLength(binary.Left))
+        {
+            lengthExpr = binary.Left;
+            valueExpr = binary.Right;
+        }
+        else if (IsStringLength(binary.Right))
+        {
+            lengthExpr = binary.Right;
+            valueExpr = binary.Left;
+            reversed = true;
+        }
+
+        if (lengthExpr is null)
+            return false;
+
+        // Resolve the string attribute from the Length member's parent expression
+        var memberExpr = (MemberExpression)lengthExpr;
+        var resolved = ResolveAttribute(memberExpr.Expression!, ctx)
+            ?? throw new NotSupportedException("Could not resolve attribute for string.Length comparison.");
+
+        var lengthValue = Convert.ToInt32(EvaluateValue(valueExpr!));
+
+        // When the constant is on the left (e.g. 5 >= x.Name.Length), flip the operator
+        if (reversed)
+        {
+            op = op switch
+            {
+                ConditionOperator.GreaterThan => ConditionOperator.LessThan,
+                ConditionOperator.GreaterEqual => ConditionOperator.LessEqual,
+                ConditionOperator.LessThan => ConditionOperator.GreaterThan,
+                ConditionOperator.LessEqual => ConditionOperator.GreaterEqual,
+                _ => op
+            };
+        }
+
+        // Build the underscore pattern and determine the like/not-like operator
+        var pattern = new string('_', lengthValue);
+        ConditionOperator condOp;
+
+        if (op == ConditionOperator.Equal)
+        {
+            condOp = ConditionOperator.Like;
+        }
+        else if (op == ConditionOperator.NotEqual)
+        {
+            condOp = ConditionOperator.NotLike;
+        }
+        else if (op == ConditionOperator.GreaterThan)
+        {
+            pattern += "_%";
+            condOp = ConditionOperator.Like;
+        }
+        else if (op == ConditionOperator.GreaterEqual)
+        {
+            pattern += "%";
+            condOp = ConditionOperator.Like;
+        }
+        else if (op == ConditionOperator.LessThan)
+        {
+            pattern += "%";
+            condOp = ConditionOperator.NotLike;
+        }
+        else if (op == ConditionOperator.LessEqual)
+        {
+            pattern += "_%";
+            condOp = ConditionOperator.NotLike;
+        }
+        else
+        {
+            throw new NotSupportedException($"Unsupported operator for string.Length: {op}");
+        }
+
+        filter.Conditions.Add(new FetchCondition
+        {
+            Attribute = resolved.Name,
+            EntityAlias = resolved.EntityAlias,
+            Operator = condOp,
+            Value = pattern
+        });
+        return true;
+    }
+
+    private static bool IsStringLength(Expression expr) =>
+        expr is MemberExpression { Member: { Name: "Length", DeclaringType: var dt } }
+        && dt == typeof(string);
 
     /// <summary>
     /// Unwraps Convert nodes and Nullable&lt;T&gt; to get the underlying CLR type of an expression.

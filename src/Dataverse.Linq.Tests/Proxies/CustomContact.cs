@@ -834,6 +834,23 @@ namespace Dataverse.Linq.Tests.Proxies
         }
 
         /// <summary>
+        /// <para>Logical Name: new_variablelengthstring</para>
+        /// <para>Max Length: 100 characters</para>
+        /// </summary>
+        [AttributeLogicalName("new_variablelengthstring")]
+        public string VariableLengthString
+        {
+            get
+            {
+                return this.GetPropertyValue<string>("new_variablelengthstring");
+            }
+            set
+            {
+                this.SetPropertyValue("new_variablelengthstring", value, 100, nameof(VariableLengthString));
+            }
+        }
+
+        /// <summary>
         /// <para>Logical Name: versionnumber</para>
         /// </summary>
         [AttributeLogicalName("versionnumber")]
@@ -1352,6 +1369,12 @@ namespace Dataverse.Linq.Tests.Proxies
             /// <para>Logical Name = utcconversiontimezonecode</para>
             /// </summary>
             public const string UTCConversionTimeZoneCode = "utcconversiontimezonecode";
+
+            /// <summary>
+            /// <para>Variable Length String</para>
+            /// <para>Logical Name = new_variablelengthstring</para>
+            /// </summary>
+            public const string VariableLengthString = "new_variablelengthstring";
 
             /// <summary>
             /// <para>Version Number</para>

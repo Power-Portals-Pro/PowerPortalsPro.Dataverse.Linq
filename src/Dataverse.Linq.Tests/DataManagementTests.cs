@@ -194,6 +194,13 @@ public class DataManagementTests : IntegrationTestBase
                         colors.Select(clr => new OptionSetValue((int)clr)).ToList());
                 }
 
+                // Assign variable length string — null for every 7th, otherwise 1-100 chars
+                if (contactIndex % 7 != 0)
+                {
+                    var length = (contactIndex % 100) + 1; // 1 to 100
+                    contact["new_variablelengthstring"] = new string('x', length);
+                }
+
                 requests.Requests.Add(new CreateRequest { Target = contact });
             }
         }

@@ -1386,6 +1386,118 @@ public class QueryableIntegrationTests : IntegrationTestBase
     }
 
     // -------------------------------------------------------------------------
+    // String.Length
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Where_StringLengthEqual_MatchesLinq()
+    {
+        var all = await Service.Queryable<CustomContact>().ToListAsync();
+        var expected = all.Where(c => c.VariableLengthString != null && c.VariableLengthString.Length == 50).ToList();
+
+        var results = await Service.Queryable<CustomContact>()
+            .Where(c => c.VariableLengthString.Length == 50)
+            .ToListAsync();
+
+        results.Should().HaveCount(expected.Count);
+        results.Should().AllSatisfy(c => c.VariableLengthString.Should().HaveLength(50));
+    }
+
+    [Fact]
+    public async Task Where_StringLengthNotEqual_IncludesNullValues()
+    {
+        var all = await Service.Queryable<CustomContact>().ToListAsync();
+        // not-like includes nulls, so expected count includes both null and non-matching strings
+        var expected = all.Where(c => c.VariableLengthString == null || c.VariableLengthString.Length != 50).ToList();
+
+        var results = await Service.Queryable<CustomContact>()
+            .Where(c => c.VariableLengthString.Length != 50)
+            .ToListAsync();
+
+        results.Should().HaveCount(expected.Count);
+        results.Should().AllSatisfy(c =>
+            (c.VariableLengthString == null || c.VariableLengthString.Length != 50).Should().BeTrue());
+    }
+
+    [Fact]
+    public async Task Where_StringLengthGreaterThan_MatchesLinq()
+    {
+        var all = await Service.Queryable<CustomContact>().ToListAsync();
+        var expected = all.Where(c => c.VariableLengthString != null && c.VariableLengthString.Length > 75).ToList();
+
+        var results = await Service.Queryable<CustomContact>()
+            .Where(c => c.VariableLengthString.Length > 75)
+            .ToListAsync();
+
+        results.Should().HaveCount(expected.Count);
+        results.Should().AllSatisfy(c => c.VariableLengthString.Length.Should().BeGreaterThan(75));
+    }
+
+    [Fact]
+    public async Task Where_StringLengthGreaterThanOrEqual_MatchesLinq()
+    {
+        var all = await Service.Queryable<CustomContact>().ToListAsync();
+        var expected = all.Where(c => c.VariableLengthString != null && c.VariableLengthString.Length >= 75).ToList();
+
+        var results = await Service.Queryable<CustomContact>()
+            .Where(c => c.VariableLengthString.Length >= 75)
+            .ToListAsync();
+
+        results.Should().HaveCount(expected.Count);
+        results.Should().AllSatisfy(c => c.VariableLengthString.Length.Should().BeGreaterThanOrEqualTo(75));
+    }
+
+    [Fact]
+    public async Task Where_StringLengthLessThan_IncludesNullValues()
+    {
+        var all = await Service.Queryable<CustomContact>().ToListAsync();
+        // not-like includes nulls, so expected count includes both null and short strings
+        var expected = all.Where(c => c.VariableLengthString == null || c.VariableLengthString.Length < 25).ToList();
+
+        var results = await Service.Queryable<CustomContact>()
+            .Where(c => c.VariableLengthString.Length < 25)
+            .ToListAsync();
+
+        results.Should().HaveCount(expected.Count);
+        results.Should().AllSatisfy(c =>
+            (c.VariableLengthString == null || c.VariableLengthString.Length < 25).Should().BeTrue());
+    }
+
+    [Fact]
+    public async Task Where_StringLengthLessThanOrEqual_IncludesNullValues()
+    {
+        var all = await Service.Queryable<CustomContact>().ToListAsync();
+        // not-like includes nulls, so expected count includes both null and short strings
+        var expected = all.Where(c => c.VariableLengthString == null || c.VariableLengthString.Length <= 25).ToList();
+
+        var results = await Service.Queryable<CustomContact>()
+            .Where(c => c.VariableLengthString.Length <= 25)
+            .ToListAsync();
+
+        results.Should().HaveCount(expected.Count);
+        results.Should().AllSatisfy(c =>
+            (c.VariableLengthString == null || c.VariableLengthString.Length <= 25).Should().BeTrue());
+    }
+
+    [Fact]
+    public async Task Where_StringLengthLessThanAndNotNull_ExcludesNullValues()
+    {
+        var all = await Service.Queryable<CustomContact>().ToListAsync();
+        var expected = all.Where(c => c.VariableLengthString != null && c.VariableLengthString.Length < 25).ToList();
+
+        var results = await Service.Queryable<CustomContact>()
+            .Where(c => c.VariableLengthString != null && c.VariableLengthString.Length < 25)
+            .ToListAsync();
+
+        results.Should().HaveCount(expected.Count);
+        results.Should().AllSatisfy(c =>
+        {
+            c.VariableLengthString.Should().NotBeNull();
+            c.VariableLengthString.Length.Should().BeLessThan(25);
+        });
+    }
+
+    // -------------------------------------------------------------------------
     // Aggregate operators — Min / Max / Sum / Average / Count
     // -------------------------------------------------------------------------
 
