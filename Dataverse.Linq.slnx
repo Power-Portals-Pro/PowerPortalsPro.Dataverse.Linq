@@ -1,6 +1,0 @@
-<Solution>
-  <Folder Name="/src/">
-    <Project Path="src/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj" />
-    <Project Path="src/Dataverse.Linq/Dataverse.Linq.csproj" />
-  </Folder>
-</Solution>

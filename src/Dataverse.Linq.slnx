@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="Dataverse.Linq/Dataverse.Linq.csproj" />
+  <Project Path="Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj" />
+</Solution>
