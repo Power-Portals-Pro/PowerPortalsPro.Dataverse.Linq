@@ -1,4 +1,5 @@
 using Dataverse.Linq.Extensions;
+using Dataverse.Linq.Model;
 using Dataverse.Linq.Tests.Proxies;
 using FluentAssertions;
 using Microsoft.PowerPlatform.Dataverse.Client;
@@ -2320,6 +2321,48 @@ public class FetchXmlGenerationTests
               <entity name="new_customaccount">
                 <attribute name="new_accountrating" alias="rating" groupby="true" />
                 <attribute name="new_customaccountid" alias="count" aggregate="count" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    // -------------------------------------------------------------------------
+    // WithDatasource
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_WithDatasourceRetained_GeneratesDatasourceAttribute()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .WithDatasource(FetchDatasource.Retained)
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" datasource="retained">
+              <entity name="new_customaccount">
+                <all-attributes />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WithDatasourceRetainedAndFilter_GeneratesDatasourceWithFilter()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Where(a => a.Name == "Test")
+            .WithDatasource(FetchDatasource.Retained)
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" datasource="retained">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_name" operator="eq" value="Test" />
+                </filter>
               </entity>
             </fetch>
             """);

@@ -1,3 +1,4 @@
+using Dataverse.Linq.Model;
 using Microsoft.EntityFrameworkCore.Query;
 using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.Xrm.Sdk;
@@ -67,6 +68,23 @@ public static class ServiceClientExtensions
             [typeof(TElement)],
             queryable.Expression,
             Expression.Constant(aggregateLimit));
+
+        return queryable.Provider.CreateQuery<TElement>(expression);
+    }
+
+    /// <summary>
+    /// Sets the datasource for the query by adding the FetchXml <c>datasource</c> attribute.
+    /// </summary>
+    public static IQueryable<TElement> WithDatasource<TElement>(
+        this IQueryable<TElement> queryable,
+        FetchDatasource datasource)
+    {
+        var expression = Expression.Call(
+            typeof(ServiceClientExtensions),
+            nameof(WithDatasource),
+            [typeof(TElement)],
+            queryable.Expression,
+            Expression.Constant(datasource));
 
         return queryable.Provider.CreateQuery<TElement>(expression);
     }

@@ -245,6 +245,13 @@ internal static class FetchXmlQueryTranslator
                 ctx.Query.AggregateLimit = (int)((ConstantExpression)aggLimitCall.Arguments[1]).Value!;
                 return;
 
+            case MethodCallExpression { Method: { Name: nameof(ServiceClientExtensions.WithDatasource),
+                    DeclaringType: var dtDS } } datasourceCall
+                when dtDS == typeof(ServiceClientExtensions):
+                TranslateCore(datasourceCall.Arguments[0], ctx);
+                ctx.Query.Datasource = (FetchDatasource)((ConstantExpression)datasourceCall.Arguments[1]).Value!;
+                return;
+
             case MethodCallExpression { Method: { Name: nameof(ServiceClientExtensions.CountColumn),
                     DeclaringType: var dtCC } } countColumnCall
                 when dtCC == typeof(ServiceClientExtensions):
