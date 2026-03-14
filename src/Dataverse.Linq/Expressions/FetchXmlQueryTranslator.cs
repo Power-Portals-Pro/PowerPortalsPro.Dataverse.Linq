@@ -1659,26 +1659,14 @@ internal static class FetchXmlQueryTranslator
             return;
         }
 
-        // Final projection in the join result selector
-        var (outerColumns, innerColumns) = ExtractJoinColumns(
-            resultLambda, resultLambda.Parameters[0], resultLambda.Parameters[1]);
-
-        if (outerColumns is { Count: > 0 })
-            ApplyColumns(ctx.Query, outerColumns);
-
-        if (innerColumns is { Count: > 0 })
+        // Final projection in the join result selector — use the unified multi-join path.
+        ctx.JoinMappings = new Dictionary<string, JoinEntityInfo>
         {
-            foreach (var col in innerColumns)
-                link.Attributes.Add(new FetchAttribute { Name = col });
-        }
-        else
-        {
-            link.AllAttributes = true;
-        }
-
-        ctx.Query.Projector = resultLambda.Compile();
-        ctx.Query.ProjectionType = resultLambda.ReturnType;
+            [resultLambda.Parameters[0].Name!] = new() { EntityType = outerEntityType, LinkAlias = null },
+            [resultLambda.Parameters[1].Name!] = new() { EntityType = innerEntityType, LinkAlias = link.Alias }
+        };
         ctx.Query.InnerEntityType = innerEntityType;
+        HandleJoinSelect(resultLambda, ctx);
     }
 
     /// <summary>
@@ -2085,33 +2073,6 @@ internal static class FetchXmlQueryTranslator
         return columns.Count > 0 ? columns : null;
     }
 
-    /// <summary>
-    /// Extracts outer and inner column lists from an inner-join result selector lambda.
-    /// </summary>
-    private static (IReadOnlyList<string>? Outer, IReadOnlyList<string>? Inner) ExtractJoinColumns(
-        LambdaExpression lambda, ParameterExpression outerParam, ParameterExpression innerParam)
-    {
-        var outerColumns = new List<string>();
-        var innerColumns = new List<string>();
-
-        foreach (var arg in GetProjectionArguments(lambda.Body))
-        {
-            if (arg is not MemberExpression { Member: PropertyInfo prop, Expression: ParameterExpression paramExpr })
-                continue;
-
-            var attrName = prop.GetCustomAttribute<AttributeLogicalNameAttribute>()?.LogicalName;
-            if (attrName is null) continue;
-
-            if (paramExpr == outerParam)
-                outerColumns.Add(attrName);
-            else if (paramExpr == innerParam)
-                innerColumns.Add(attrName);
-        }
-
-        return (outerColumns.Count > 0 ? outerColumns : null,
-                innerColumns.Count > 0 ? innerColumns : null);
-    }
-
     // -------------------------------------------------------------------------
     // Transparent identifier helpers
     // -------------------------------------------------------------------------
@@ -2195,37 +2156,7 @@ internal static class FetchXmlQueryTranslator
     /// </summary>
     private static Delegate RebuildJoinProjector(LambdaExpression lambda, TranslationContext ctx)
     {
-        var tiParam = lambda.Parameters[0];
-
-        // Multi-entity join (3+): build a single-parameter (Entity) projector
-        // that extracts all values from the flat entity with aliased attributes.
-        if (ctx.JoinMappings!.Count > 2)
-            return RebuildMultiJoinProjector(lambda, ctx);
-
-        Type outerType = null!, innerType = null!;
-        string outerPropName = null!, innerPropName = null!;
-
-        foreach (var (name, info) in ctx.JoinMappings!)
-        {
-            if (info.LinkAlias is null)
-            {
-                outerType = info.EntityType;
-                outerPropName = name;
-            }
-            else
-            {
-                innerType = info.EntityType;
-                innerPropName = name;
-            }
-        }
-
-        var outerParam = Expression.Parameter(outerType, "outer");
-        var innerParam = Expression.Parameter(innerType, "inner");
-
-        var rewriter = new JoinProjectorRewriter(tiParam, outerParam, innerParam, outerPropName, innerPropName);
-        var newBody = rewriter.Visit(lambda.Body);
-
-        return Expression.Lambda(newBody, outerParam, innerParam).Compile();
+        return RebuildMultiJoinProjector(lambda, ctx);
     }
 
     /// <summary>
@@ -2252,6 +2183,12 @@ internal static class FetchXmlQueryTranslator
         ParameterExpression entityParam,
         Dictionary<string, JoinEntityInfo> joinMappings) : ExpressionVisitor
     {
+        private static readonly MethodInfo ExtractRootValueMethod =
+            typeof(AggregateProjection).GetMethod(nameof(AggregateProjection.ExtractRootValue))!;
+
+        private static readonly MethodInfo ExtractValueMethod =
+            typeof(AggregateProjection).GetMethod(nameof(AggregateProjection.ExtractValue))!;
+
         private static readonly MethodInfo GetAttributeValueMethod =
             typeof(Entity).GetMethod(nameof(Entity.GetAttributeValue))!;
 
@@ -2270,15 +2207,15 @@ internal static class FetchXmlQueryTranslator
 
                     if (mapping.LinkAlias is null)
                     {
-                        return Expression.Call(entityParam,
-                            GetAttributeValueMethod.MakeGenericMethod(resultType),
+                        return Expression.Call(
+                            ExtractRootValueMethod.MakeGenericMethod(resultType),
+                            entityParam,
                             Expression.Constant(attrName));
                     }
 
                     var aliasedKey = $"{mapping.LinkAlias}.{attrName}";
                     return Expression.Call(
-                        typeof(AggregateProjection).GetMethod(nameof(AggregateProjection.ExtractValue))!
-                            .MakeGenericMethod(resultType),
+                        ExtractValueMethod.MakeGenericMethod(resultType),
                         entityParam,
                         Expression.Constant(aliasedKey));
                 }
@@ -2307,8 +2244,7 @@ internal static class FetchXmlQueryTranslator
 
                     var aliasedKey = $"{mapping2.LinkAlias}.{attrName}";
                     return Expression.Call(
-                        typeof(AggregateProjection).GetMethod(nameof(AggregateProjection.ExtractValue))!
-                            .MakeGenericMethod(resultType),
+                        ExtractValueMethod.MakeGenericMethod(resultType),
                         entityParam,
                         Expression.Constant(aliasedKey));
                 }
@@ -2336,29 +2272,6 @@ internal static class FetchXmlQueryTranslator
             }
 
             return false;
-        }
-    }
-
-    private sealed class JoinProjectorRewriter(
-        ParameterExpression tiParam,
-        ParameterExpression outerParam,
-        ParameterExpression innerParam,
-        string outerPropName,
-        string innerPropName) : ExpressionVisitor
-    {
-        protected override Expression VisitMember(MemberExpression node)
-        {
-            // x.entity.Property → outerParam.Property or innerParam.Property
-            if (node.Expression is MemberExpression { Expression: ParameterExpression p } entityAccess
-                && p == tiParam)
-            {
-                if (entityAccess.Member.Name == outerPropName)
-                    return Expression.MakeMemberAccess(outerParam, node.Member);
-                if (entityAccess.Member.Name == innerPropName)
-                    return Expression.MakeMemberAccess(innerParam, node.Member);
-            }
-
-            return base.VisitMember(node);
         }
     }
 

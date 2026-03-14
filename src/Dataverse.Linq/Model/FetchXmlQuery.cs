@@ -64,10 +64,8 @@ internal sealed class FetchXmlQuery
     public Type? ProjectionType { get; set; }
 
     /// <summary>
-    /// For inner joins: the CLR type of the inner/linked entity.
-    /// The provider uses this to extract linked-entity attributes and convert
-    /// them via <c>Entity.ToEntity&lt;T&gt;()</c> before passing to the
-    /// two-parameter <see cref="Projector"/> delegate.
+    /// Set for join queries to signal the provider that the <see cref="Projector"/>
+    /// expects a raw <c>Entity</c> with aliased attributes (not a typed entity).
     /// </summary>
     public Type? InnerEntityType { get; set; }
 }

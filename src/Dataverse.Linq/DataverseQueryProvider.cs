@@ -339,26 +339,12 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
             ).ToList();
         }
 
-        // Multi-entity join (3+): single-param (Entity) projector that extracts aliased values
-        if (query.InnerEntityType is not null && query.Projector is not null
-            && query.Projector.Method.GetParameters().Length == 1
-            && query.Projector.Method.GetParameters()[0].ParameterType == typeof(Entity))
+        // Inner join: single-param (Entity) projector that extracts aliased values
+        if (query.InnerEntityType is not null && query.Projector is not null)
         {
             return entities.Select(e =>
                 (TElement)query.Projector.DynamicInvoke(e)!
             ).ToList();
-        }
-
-        // Inner join: 2-param result selector (outer, inner) → TElement
-        if (query.InnerEntityType is not null && query.Projector is not null)
-        {
-            var link = query.Links[0];
-            return entities.Select(e =>
-            {
-                var outer = e.ToEntity<T>();
-                var inner = ExtractLinkedEntity(e, link.Alias, link.Name, query.InnerEntityType);
-                return (TElement)query.Projector.DynamicInvoke(outer, inner)!;
-            }).ToList();
         }
 
         // Simple select / left join: 1-param projector (entity) → TElement
@@ -371,30 +357,6 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
 
         // No projection: return typed entities
         return entities.Select(e => (TElement)(object)e.ToEntity<T>()).ToList();
-    }
-
-    /// <summary>
-    /// Strips the alias prefix from linked-entity attributes, unwraps <see cref="AliasedValue"/>,
-    /// and converts the result to the correct proxy type via <see cref="Entity.ToEntity{T}"/>.
-    /// </summary>
-    private static object ExtractLinkedEntity(Entity source, string alias, string logicalName, Type innerType)
-    {
-        var inner = new Entity(logicalName);
-        var prefix = alias + ".";
-
-        foreach (var attr in source.Attributes)
-        {
-            if (!attr.Key.StartsWith(prefix)) continue;
-            var name = attr.Key[prefix.Length..];
-            inner[name] = attr.Value is AliasedValue av ? av.Value : attr.Value;
-        }
-
-        if (inner.Attributes.TryGetValue(logicalName + "id", out var idVal) && idVal is Guid id)
-            inner.Id = id;
-
-        return typeof(Entity).GetMethod(nameof(Entity.ToEntity))!
-            .MakeGenericMethod(innerType)
-            .Invoke(inner, null)!;
     }
 
     private static MethodInfo GetPrivateMethod(string name) =>

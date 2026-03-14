@@ -8,13 +8,29 @@ namespace Dataverse.Linq;
 /// </summary>
 internal static class AggregateProjection
 {
+    /// <summary>
+    /// Extracts a root-entity attribute value with proper type unwrapping.
+    /// Handles OptionSetValue → enum, Money → decimal, EntityReference → Guid.
+    /// Used by join projectors where the raw Entity isn't strongly-typed.
+    /// </summary>
+    public static T ExtractRootValue<T>(Entity entity, string attributeName)
+    {
+        var raw = entity.Attributes.TryGetValue(attributeName, out var val) ? val : null;
+        if (raw == null) return default!;
+
+        return ConvertRawValue<T>(raw);
+    }
+
     public static T ExtractValue<T>(Entity entity, string alias)
     {
         var av = entity.GetAttributeValue<AliasedValue>(alias);
         if (av?.Value == null) return default!;
 
-        var raw = av.Value;
+        return ConvertRawValue<T>(av.Value);
+    }
 
+    private static T ConvertRawValue<T>(object raw)
+    {
         // Unwrap Dataverse wrapper types to their underlying CLR values
         if (raw is Money m) raw = m.Value;
         else if (raw is OptionSetValue osv) raw = osv.Value;
