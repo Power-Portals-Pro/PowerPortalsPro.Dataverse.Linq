@@ -6,7 +6,7 @@ using Microsoft.PowerPlatform.Dataverse.Client;
 
 namespace Dataverse.Linq.Tests;
 
-public class QueryableIntegrationTests : IntegrationTestBase
+public class QueryableIntegrationTests(ServiceClientFixture fixture) : IntegrationTestBase(fixture)
 {
     private ServiceClient Service => ServiceProvider.GetRequiredService<ServiceClient>();
 

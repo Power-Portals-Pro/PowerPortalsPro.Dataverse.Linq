@@ -1,39 +1,31 @@
-﻿using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Identity.Client;
 using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.Xrm.Sdk;
-using System;
 using System.Net.Http.Headers;
-using IConfiguration = Microsoft.Extensions.Configuration.IConfiguration;
 
 namespace Dataverse.Linq.Tests;
 
+[Collection("Dataverse")]
 public class IntegrationTestBase : IDisposable
 {
-    private readonly IConfiguration _configuration;
     private readonly IServiceScope _serviceScope;
     private readonly IServiceProvider _serviceProvider;
 
-    public IntegrationTestBase()
+    public IntegrationTestBase(ServiceClientFixture fixture)
     {
-        var configurationBuilder = new ConfigurationBuilder();
-        var appSettingsFileLocation = $"{Path.GetDirectoryName(typeof(IntegrationTestBase).Assembly.Location)}\\appsettings.json";
-        configurationBuilder.AddJsonFile(appSettingsFileLocation);
-        this.BuildConfiguration(configurationBuilder);
-        configurationBuilder.AddUserSecrets(typeof(IntegrationTestBase).Assembly);
-        _configuration = configurationBuilder.Build();
+        Fixture = fixture;
 
         var serviceCollection = new ServiceCollection();
-        serviceCollection.AddSingleton<IConfiguration>(x => _configuration);
-        serviceCollection.AddSingleton<IOrganizationService>(x => this.CreateOrganizationService());
-        serviceCollection.AddSingleton<ServiceClient>(x => this.CreateOrganizationService());
-        serviceCollection.AddSingleton<ITracingService>(x => new ConsoleTracer());
+        serviceCollection.AddSingleton<IConfiguration>(_ => fixture.Configuration);
+        serviceCollection.AddSingleton<IOrganizationService>(_ => fixture.CreateClient());
+        serviceCollection.AddSingleton<ServiceClient>(_ => fixture.CreateClient());
+        serviceCollection.AddSingleton<ITracingService>(_ => new ConsoleTracer());
 
         serviceCollection.AddLogging(builder => builder.AddConsole());
 
-        // Allow inheritors to register any services they need for execution.
         this.RegisterServices(serviceCollection);
 
         var serviceProvider = serviceCollection.BuildServiceProvider();
@@ -41,16 +33,13 @@ public class IntegrationTestBase : IDisposable
         _serviceProvider = _serviceScope.ServiceProvider;
     }
 
+    protected ServiceClientFixture Fixture { get; }
+
     protected IServiceProvider ServiceProvider => _serviceProvider;
 
-    protected IConfiguration Configuration => _configuration;
+    protected IConfiguration Configuration => Fixture.Configuration;
 
     protected virtual void RegisterServices(IServiceCollection services)
-    {
-        // Nothing
-    }
-
-    protected virtual void BuildConfiguration(IConfigurationBuilder configurationBuilder)
     {
         // Nothing
     }
@@ -60,46 +49,13 @@ public class IntegrationTestBase : IDisposable
         _serviceScope?.Dispose();
     }
 
-    protected ServiceClient CreateOrganizationService(Guid? impersonatingUser = null)
-    {
-        var orgUrl = _configuration.GetValue<string>("D365:Url");
-        if (string.IsNullOrWhiteSpace(orgUrl))
-            throw new Exception("Please ensure all configurations are supplied for creating an Organization Service.");
-
-        return this.CreateOrganizationService(orgUrl, impersonatingUser);
-    }
-
-    protected ServiceClient CreateOrganizationService(string orgUrl, Guid? impersonatingUser = null)
-    {
-        var clientId = _configuration.GetValue<string>("D365:ClientId");
-        var secret = _configuration.GetValue<string>("D365:Secret");
-        var username = _configuration.GetValue<string>("D365:Username");
-        var password = _configuration.GetValue<string>("D365:Password");
-
-        if (string.IsNullOrWhiteSpace(orgUrl))
-            throw new Exception("Please ensure all configurations are supplied for creating an Organization Service.");
-
-        var orgUri = new Uri(orgUrl);
-        var rootOrgUrl = $"{orgUri.Scheme}://{orgUri.Authority}";
-        var connectionString = !string.IsNullOrWhiteSpace(username)
-            ? $"AuthType='OAuth';ServiceUri='{rootOrgUrl}';Username='{username}';Password='{password}'"
-            : $"AuthType='ClientSecret';ServiceUri='{rootOrgUrl}';ClientId='{clientId}';ClientSecret='{secret}'";
-
-        var client = new ServiceClient(connectionString);
-        var impersonatingUserFromConfig = _configuration.GetValue<Guid?>("D365:ImpersonatedUserId");
-        if (impersonatingUser.HasValue || impersonatingUserFromConfig.HasValue)
-            client.CallerId = impersonatingUser ?? impersonatingUserFromConfig ?? Guid.Empty;
-
-        client.EnableAffinityCookie = false;
-        return client;
-    }
-
     protected async Task<HttpClient> CreateWebApiHttpClientAsync()
     {
-        var tenantId = _configuration.GetValue<string>("Azure:TenantId");
-        var orgUrl = _configuration.GetValue<string>("D365:Url");
-        var clientId = _configuration.GetValue<string>("D365:ClientId");
-        var secret = _configuration.GetValue<string>("D365:Secret");
+        var config = Fixture.Configuration;
+        var tenantId = config.GetValue<string>("Azure:TenantId");
+        var orgUrl = config.GetValue<string>("D365:Url");
+        var clientId = config.GetValue<string>("D365:ClientId");
+        var secret = config.GetValue<string>("D365:Secret");
 
         if (string.IsNullOrWhiteSpace(orgUrl))
             throw new Exception("Please ensure all configurations are supplied for creating an Organization Service.");

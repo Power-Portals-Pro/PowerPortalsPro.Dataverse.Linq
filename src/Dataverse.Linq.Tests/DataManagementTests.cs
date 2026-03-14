@@ -7,7 +7,7 @@ using Microsoft.Xrm.Sdk.Query;
 
 namespace Dataverse.Linq.Tests;
 
-public class DataManagementTests : IntegrationTestBase
+public class DataManagementTests(ServiceClientFixture fixture) : IntegrationTestBase(fixture)
 {
     private ServiceClient Service => ServiceProvider.GetRequiredService<ServiceClient>();
 

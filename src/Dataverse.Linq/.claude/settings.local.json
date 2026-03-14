@@ -159,7 +159,9 @@
       "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests --filter \"FullyQualifiedName~QueryableIntegrationTests\" 2>&1 | tail -30)",
       "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests --filter \"FullyQualifiedName~CountChildren\" 2>&1 | tail -10)",
       "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests --filter \"TakeWithWhere\" --no-build 2>&1 | grep -A 10 \"Error Message\")",
-      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet build src/XrmToolkit/Dataverse.Linq 2>&1 | tail -5)"
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet build src/XrmToolkit/Dataverse.Linq 2>&1 | tail -5)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet build src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj 2>&1 | tail -20)",
+      "Bash(cd \"D:/Code/XrmToolkit - Dev\" && dotnet test src/XrmToolkit/Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj --filter \"FullyQualifiedName~FetchXmlGenerationTests\" --no-build 2>&1 | tail -15)"
     ]
   }
 }
