@@ -65,11 +65,12 @@ public class DataManagementTests : IntegrationTestBase
 
     private static readonly CustomContact.Color[][] ColorSets =
     [
-        [CustomContact.Color.Red, CustomContact.Color.Blue],
+        [CustomContact.Color.Red],
         [CustomContact.Color.Green, CustomContact.Color.Yellow, CustomContact.Color.Red],
-        [CustomContact.Color.Black, CustomContact.Color.White],
+        [CustomContact.Color.Blue],
         [CustomContact.Color.Purple, CustomContact.Color.Pink, CustomContact.Color.Orange],
         [CustomContact.Color.Blue, CustomContact.Color.Green],
+        [CustomContact.Color.Black, CustomContact.Color.White],
     ];
 
     private async Task<List<Guid>> SeedAccountsAsync(int count)

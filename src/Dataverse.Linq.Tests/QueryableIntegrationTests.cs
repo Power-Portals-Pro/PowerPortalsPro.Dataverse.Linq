@@ -1217,7 +1217,7 @@ public class QueryableIntegrationTests : IntegrationTestBase
     [Fact]
     public async Task ToListAsync_WhereMultiSelectEqualsMultipleValues_ReturnsMatchingRecords()
     {
-        var colors = new[] { CustomContact.Color.Red, CustomContact.Color.Blue };
+        var colors = new[] { CustomContact.Color.Green, CustomContact.Color.Blue };
         var results = await Service.Queryable<CustomContact>()
             .Where(c => c.FavoriteColors.Equals(colors))
             .ToListAsync();
