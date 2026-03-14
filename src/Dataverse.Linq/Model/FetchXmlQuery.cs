@@ -40,7 +40,7 @@ internal sealed class FetchXmlQuery
     public List<SqlQueryHint>? QueryHints { get; set; }
     public bool UseRawOrderBy { get; set; }
     public int? PageSize { get; set; }
-    public int? Skip { get; set; }
+    public int? Page { get; set; }
     public bool Distinct { get; set; }
     public bool Aggregate { get; set; }
 

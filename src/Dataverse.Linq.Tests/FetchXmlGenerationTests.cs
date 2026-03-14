@@ -2286,6 +2286,45 @@ public class FetchXmlGenerationTests
     }
 
     // -------------------------------------------------------------------------
+    // WithPage
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_WithPage_GeneratesPageAttribute()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .WithPage(3)
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" page="3">
+              <entity name="new_customaccount">
+                <all-attributes />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WithPageAndPageSize_GeneratesPageAndCountAttributes()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .WithPageSize(50)
+            .WithPage(2)
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" count="50" page="2">
+              <entity name="new_customaccount">
+                <all-attributes />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    // -------------------------------------------------------------------------
     // WithAggregateLimit
     // -------------------------------------------------------------------------
 

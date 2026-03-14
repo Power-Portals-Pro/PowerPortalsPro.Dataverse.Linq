@@ -1386,6 +1386,44 @@ public class QueryableIntegrationTests(ServiceClientFixture fixture) : Integrati
     }
 
     // -------------------------------------------------------------------------
+    // WithPage
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task WithPageAndPageSize_ReturnsCorrectPage()
+    {
+        const int pageSize = 10;
+
+        var all = await Service.Queryable<CustomAccount>()
+            .OrderBy(a => a.Name)
+            .ToListAsync();
+
+        var page1 = await Service.Queryable<CustomAccount>()
+            .OrderBy(a => a.Name)
+            .WithPageSize(pageSize)
+            .WithPage(1)
+            .ToListAsync();
+
+        var page2 = await Service.Queryable<CustomAccount>()
+            .OrderBy(a => a.Name)
+            .WithPageSize(pageSize)
+            .WithPage(2)
+            .ToListAsync();
+
+        page1.Should().HaveCount(pageSize);
+        page2.Should().HaveCount(pageSize);
+
+        // Pages should contain different records
+        page1.Select(a => a.Id).Should().NotIntersectWith(page2.Select(a => a.Id));
+
+        // Page 1 should match the first N records from the full list
+        page1.Select(a => a.Name).Should().Equal(all.Take(pageSize).Select(a => a.Name));
+
+        // Page 2 should match the next N records
+        page2.Select(a => a.Name).Should().Equal(all.Skip(pageSize).Take(pageSize).Select(a => a.Name));
+    }
+
+    // -------------------------------------------------------------------------
     // WithAggregateLimit
     // -------------------------------------------------------------------------
 

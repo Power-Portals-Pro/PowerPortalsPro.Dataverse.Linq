@@ -51,6 +51,29 @@ public static class ServiceClientExtensions
     }
 
     /// <summary>
+    /// Sets the page number (1-based) for the query by adding the FetchXml <c>page</c> attribute.
+    /// Page 1 returns the first set of results.
+    /// Use in combination with <see cref="WithPageSize{TElement}"/> to control paging.
+    /// </summary>
+    public static IQueryable<TElement> WithPage<TElement>(
+        this IQueryable<TElement> queryable,
+        int page)
+    {
+        if (page < 1)
+            throw new ArgumentOutOfRangeException(nameof(page), page,
+                "Page number must be 1 or greater. Paging is 1-based.");
+
+        var expression = Expression.Call(
+            typeof(ServiceClientExtensions),
+            nameof(WithPage),
+            [typeof(TElement)],
+            queryable.Expression,
+            Expression.Constant(page));
+
+        return queryable.Provider.CreateQuery<TElement>(expression);
+    }
+
+    /// <summary>
     /// Sets the aggregate limit for the query by adding the FetchXml <c>aggregatelimit</c> attribute.
     /// The value must be between 1 and 50,000.
     /// </summary>

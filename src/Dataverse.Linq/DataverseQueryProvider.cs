@@ -268,6 +268,7 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
     {
         var results = new List<Entity>();
         var fetchDocument = XDocument.Parse(baseFetchXml);
+        var explicitPage = fetchDocument.Root!.Attribute("page") != null;
         string? pagingCookie = null;
         var pageNumber = 1;
 
@@ -282,7 +283,7 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
             var response = Service.RetrieveMultiple(new FetchExpression(fetchDocument.ToString()));
             results.AddRange(response.Entities);
 
-            if (!response.MoreRecords) break;
+            if (explicitPage || !response.MoreRecords) break;
 
             pagingCookie = response.PagingCookie;
             pageNumber++;
@@ -295,6 +296,7 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
     {
         var results = new List<Entity>();
         var fetchDocument = XDocument.Parse(baseFetchXml);
+        var explicitPage = fetchDocument.Root!.Attribute("page") != null;
         string? pagingCookie = null;
         var pageNumber = 1;
 
@@ -309,7 +311,7 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
             var response = await Service.RetrieveMultipleAsync(new FetchExpression(fetchDocument.ToString()));
             results.AddRange(response.Entities);
 
-            if (!response.MoreRecords) break;
+            if (explicitPage || !response.MoreRecords) break;
 
             pagingCookie = response.PagingCookie;
             pageNumber++;
