@@ -506,7 +506,8 @@ public class QueryableIntegrationTests(ServiceClientFixture fixture) : Integrati
                                  ContactLastName = c.LastName
                              }).ToListAsync();
 
-        results.Should().NotBeEmpty();
+        // 100 accounts have a PrimaryContact, all have names
+        results.Should().HaveCount(100);
         results.Should().AllSatisfy(r =>
         {
             r.AccountName.Should().NotBeNull();
@@ -528,7 +529,8 @@ public class QueryableIntegrationTests(ServiceClientFixture fixture) : Integrati
                                  ContactLastName = c.LastName
                              }).ToListAsync();
 
-        results.Should().NotBeEmpty();
+        // All 100 accounts with PrimaryContact have "Account" in their name
+        results.Should().HaveCount(100);
         results.Should().AllSatisfy(r =>
             r.AccountName.Should().Contain("Account"));
     }
@@ -1439,6 +1441,8 @@ public class QueryableIntegrationTests(ServiceClientFixture fixture) : Integrati
             .ToListAsync();
 
         results.Should().NotBeEmpty();
+        results.Should().AllSatisfy(r => r.Count.Should().BeGreaterThan(0));
+        results.Sum(r => r.Count).Should().Be(150);
     }
 
     // -------------------------------------------------------------------------
@@ -1857,6 +1861,9 @@ public class QueryableIntegrationTests(ServiceClientFixture fixture) : Integrati
     [Fact]
     public void GroupBy_SimpleCount_ReturnsGroupedCounts()
     {
+        var totalWithRating = Service.Queryable<CustomAccount>()
+            .Count(a => a.AccountRating_OptionSetValue != null);
+
         var results = (from a in Service.Queryable<CustomAccount>()
                        where a.AccountRating_OptionSetValue != null
                        group a by a.AccountRating_OptionSetValue.Value into g
@@ -1871,6 +1878,7 @@ public class QueryableIntegrationTests(ServiceClientFixture fixture) : Integrati
         {
             r.Count.Should().BeGreaterThan(0);
         });
+        results.Sum(r => r.Count).Should().Be(totalWithRating);
     }
 
     [Fact]
@@ -1929,6 +1937,8 @@ public class QueryableIntegrationTests(ServiceClientFixture fixture) : Integrati
     [Fact]
     public void JoinGroupBy_AggregateOnLinkEntity_ReturnsGroupedResults()
     {
+        var totalOpportunities = Service.Queryable<CustomOpportunity>().Count();
+
         var results = (from c in Service.Queryable<CustomContact>()
                        join o in Service.Queryable<CustomOpportunity>()
                            on c.CustomContactId equals o.Contact.Id
@@ -1946,11 +1956,15 @@ public class QueryableIntegrationTests(ServiceClientFixture fixture) : Integrati
             r.ContactId.Should().NotBe(Guid.Empty);
             r.Count.Should().BeGreaterThan(0);
         });
+        // Sum of grouped counts should equal total opportunities
+        results.Sum(r => r.Count).Should().Be(totalOpportunities);
     }
 
     [Fact]
     public void MultiJoinGroupBy_AggregateOnNestedLinkEntity_ReturnsGroupedResults()
     {
+        var totalOpportunities = Service.Queryable<CustomOpportunity>().Count();
+
         var results = (from a in Service.Queryable<CustomAccount>()
                        join c in Service.Queryable<CustomContact>()
                            on a.CustomAccountId equals c.ParentAccount.Id
@@ -1970,11 +1984,14 @@ public class QueryableIntegrationTests(ServiceClientFixture fixture) : Integrati
             r.AccountId.Should().NotBe(Guid.Empty);
             r.Count.Should().BeGreaterThan(0);
         });
+        results.Sum(r => r.Count).Should().Be(totalOpportunities);
     }
 
     [Fact]
     public void JoinGroupBy_CompositeKey_ReturnsGroupedResults()
     {
+        var totalOpportunities = Service.Queryable<CustomOpportunity>().Count();
+
         var results = (from c in Service.Queryable<CustomContact>()
                        join o in Service.Queryable<CustomOpportunity>()
                            on c.CustomContactId equals o.Contact.Id
@@ -1993,6 +2010,7 @@ public class QueryableIntegrationTests(ServiceClientFixture fixture) : Integrati
             r.ContactId.Should().NotBe(Guid.Empty);
             r.Count.Should().BeGreaterThan(0);
         });
+        results.Sum(r => r.Count).Should().Be(totalOpportunities);
     }
 
     // -------------------------------------------------------------------------
@@ -2049,6 +2067,8 @@ public class QueryableIntegrationTests(ServiceClientFixture fixture) : Integrati
                                    select a.Name).Distinct().ToListAsync();
 
         distinctNames.Should().OnlyHaveUniqueItems();
+        // All account names are unique in seed data, so distinct count should equal total
+        distinctNames.Should().HaveCount(allNames.Count);
     }
 
     [Fact]
@@ -2060,6 +2080,7 @@ public class QueryableIntegrationTests(ServiceClientFixture fixture) : Integrati
             .ToListAsync();
 
         results.Select(r => r.Name).Should().OnlyHaveUniqueItems();
+        results.Should().HaveCount(150);
     }
 
     // -------------------------------------------------------------------------
@@ -2069,6 +2090,9 @@ public class QueryableIntegrationTests(ServiceClientFixture fixture) : Integrati
     [Fact]
     public void GroupBy_DateQuarter_ReturnsGroupedResults()
     {
+        var totalWon = Service.Queryable<CustomOpportunity>()
+            .Count(o => o.StatusReason == CustomOpportunity.CustomOpportunity_StatusReason.Won);
+
         var results = (from o in Service.Queryable<CustomOpportunity>()
                        where o.StatusReason == CustomOpportunity.CustomOpportunity_StatusReason.Won
                        group o by o.ActualCloseDate!.Value.Quarter() into g
@@ -2084,11 +2108,15 @@ public class QueryableIntegrationTests(ServiceClientFixture fixture) : Integrati
             r.Quarter.Should().BeInRange(1, 4);
             r.Count.Should().BeGreaterThan(0);
         });
+        results.Sum(r => r.Count).Should().Be(totalWon);
     }
 
     [Fact]
     public void GroupBy_DateMonth_ReturnsGroupedResults()
     {
+        var totalWon = Service.Queryable<CustomOpportunity>()
+            .Count(o => o.StatusReason == CustomOpportunity.CustomOpportunity_StatusReason.Won);
+
         var results = (from o in Service.Queryable<CustomOpportunity>()
                        where o.StatusReason == CustomOpportunity.CustomOpportunity_StatusReason.Won
                        group o by o.ActualCloseDate!.Value.Month into g
@@ -2104,11 +2132,15 @@ public class QueryableIntegrationTests(ServiceClientFixture fixture) : Integrati
             r.Month.Should().BeInRange(1, 12);
             r.Count.Should().BeGreaterThan(0);
         });
+        results.Sum(r => r.Count).Should().Be(totalWon);
     }
 
     [Fact]
     public void GroupBy_DateDay_ReturnsGroupedResults()
     {
+        var totalWon = Service.Queryable<CustomOpportunity>()
+            .Count(o => o.StatusReason == CustomOpportunity.CustomOpportunity_StatusReason.Won);
+
         var results = (from o in Service.Queryable<CustomOpportunity>()
                        where o.StatusReason == CustomOpportunity.CustomOpportunity_StatusReason.Won
                        group o by o.ActualCloseDate!.Value.Day into g
@@ -2124,11 +2156,15 @@ public class QueryableIntegrationTests(ServiceClientFixture fixture) : Integrati
             r.Day.Should().BeInRange(1, 31);
             r.Count.Should().BeGreaterThan(0);
         });
+        results.Sum(r => r.Count).Should().Be(totalWon);
     }
 
     [Fact]
     public void GroupBy_DateWeek_ReturnsGroupedResults()
     {
+        var totalWon = Service.Queryable<CustomOpportunity>()
+            .Count(o => o.StatusReason == CustomOpportunity.CustomOpportunity_StatusReason.Won);
+
         var results = (from o in Service.Queryable<CustomOpportunity>()
                        where o.StatusReason == CustomOpportunity.CustomOpportunity_StatusReason.Won
                        group o by o.ActualCloseDate!.Value.Week() into g
@@ -2144,6 +2180,7 @@ public class QueryableIntegrationTests(ServiceClientFixture fixture) : Integrati
             r.Week.Should().BeInRange(1, 53);
             r.Count.Should().BeGreaterThan(0);
         });
+        results.Sum(r => r.Count).Should().Be(totalWon);
     }
 
     [Fact]
@@ -2166,6 +2203,9 @@ public class QueryableIntegrationTests(ServiceClientFixture fixture) : Integrati
     [Fact]
     public void GroupBy_FiscalYear_ReturnsGroupedResults()
     {
+        var totalWon = Service.Queryable<CustomOpportunity>()
+            .Count(o => o.StatusReason == CustomOpportunity.CustomOpportunity_StatusReason.Won);
+
         var results = (from o in Service.Queryable<CustomOpportunity>()
                        where o.StatusReason == CustomOpportunity.CustomOpportunity_StatusReason.Won
                        group o by o.ActualCloseDate!.Value.FiscalYear() into g
@@ -2180,6 +2220,7 @@ public class QueryableIntegrationTests(ServiceClientFixture fixture) : Integrati
         {
             r.Count.Should().BeGreaterThan(0);
         });
+        results.Sum(r => r.Count).Should().Be(totalWon);
     }
 
     // -------------------------------------------------------------------------
@@ -2189,6 +2230,8 @@ public class QueryableIntegrationTests(ServiceClientFixture fixture) : Integrati
     [Fact]
     public void GroupBy_OptionSetValue_ReturnsGroupedResults()
     {
+        var totalOpportunities = Service.Queryable<CustomOpportunity>().Count();
+
         var results = (from o in Service.Queryable<CustomOpportunity>()
                        group o by o.StatusReason_OptionSetValue.Value into g
                        select new
@@ -2202,6 +2245,8 @@ public class QueryableIntegrationTests(ServiceClientFixture fixture) : Integrati
         {
             r.Count.Should().BeGreaterThan(0);
         });
+        // Sum of all group counts should equal total opportunities
+        results.Sum(r => r.Count).Should().Be(totalOpportunities);
     }
 
     // -------------------------------------------------------------------------
@@ -2215,11 +2260,19 @@ public class QueryableIntegrationTests(ServiceClientFixture fixture) : Integrati
         var parentAccount = allAccounts.First(a =>
             allAccounts.Any(child => child.ParentAccount != null && child.ParentAccount.Id == a.CustomAccountId));
 
+        var expectedChildren = allAccounts
+            .Where(a => a.ParentAccount != null && a.ParentAccount.Id == parentAccount.CustomAccountId)
+            .ToList();
+
         var results = await Service.Queryable<CustomAccount>()
             .Where(a => a.CustomAccountId.Under(parentAccount.CustomAccountId))
             .ToListAsync();
 
+        // Under returns descendants (not including the parent itself)
         results.Should().NotBeEmpty();
+        results.Select(r => r.CustomAccountId).Should().NotContain(parentAccount.CustomAccountId);
+        // At minimum, direct children should be present
+        results.Count.Should().BeGreaterThanOrEqualTo(expectedChildren.Count);
     }
 
     [Fact]
@@ -2229,11 +2282,17 @@ public class QueryableIntegrationTests(ServiceClientFixture fixture) : Integrati
         var parentAccount = allAccounts.First(a =>
             allAccounts.Any(child => child.ParentAccount != null && child.ParentAccount.Id == a.CustomAccountId));
 
+        var underResults = await Service.Queryable<CustomAccount>()
+            .Where(a => a.CustomAccountId.Under(parentAccount.CustomAccountId))
+            .ToListAsync();
+
         var results = await Service.Queryable<CustomAccount>()
             .Where(a => a.CustomAccountId.UnderOrEqual(parentAccount.CustomAccountId))
             .ToListAsync();
 
-        results.Should().NotBeEmpty();
+        // UnderOrEqual should include the parent itself plus all descendants
+        results.Select(r => r.CustomAccountId).Should().Contain(parentAccount.CustomAccountId);
+        results.Should().HaveCount(underResults.Count + 1);
     }
 
     [Fact]
@@ -2246,7 +2305,10 @@ public class QueryableIntegrationTests(ServiceClientFixture fixture) : Integrati
             .Where(a => a.CustomAccountId.Above(childAccount.CustomAccountId))
             .ToListAsync();
 
+        // Above returns ancestors (not including the child itself)
         results.Should().NotBeEmpty();
+        results.Select(r => r.CustomAccountId).Should().NotContain(childAccount.CustomAccountId);
+        results.Select(r => r.CustomAccountId).Should().Contain(childAccount.ParentAccount.Id);
     }
 
     [Fact]
@@ -2255,11 +2317,17 @@ public class QueryableIntegrationTests(ServiceClientFixture fixture) : Integrati
         var allAccounts = await Service.Queryable<CustomAccount>().ToListAsync();
         var childAccount = allAccounts.First(a => a.ParentAccount != null);
 
+        var aboveResults = await Service.Queryable<CustomAccount>()
+            .Where(a => a.CustomAccountId.Above(childAccount.CustomAccountId))
+            .ToListAsync();
+
         var results = await Service.Queryable<CustomAccount>()
             .Where(a => a.CustomAccountId.AboveOrEqual(childAccount.CustomAccountId))
             .ToListAsync();
 
-        results.Should().NotBeEmpty();
+        // AboveOrEqual should include the child itself plus all ancestors
+        results.Select(r => r.CustomAccountId).Should().Contain(childAccount.CustomAccountId);
+        results.Should().HaveCount(aboveResults.Count + 1);
     }
 
     [Fact]
@@ -2269,11 +2337,18 @@ public class QueryableIntegrationTests(ServiceClientFixture fixture) : Integrati
         var parentAccount = allAccounts.First(a =>
             allAccounts.Any(child => child.ParentAccount != null && child.ParentAccount.Id == a.CustomAccountId));
 
+        var underResults = await Service.Queryable<CustomAccount>()
+            .Where(a => a.CustomAccountId.Under(parentAccount.CustomAccountId))
+            .ToListAsync();
+
         var results = await Service.Queryable<CustomAccount>()
             .Where(a => a.CustomAccountId.NotUnder(parentAccount.CustomAccountId))
             .ToListAsync();
 
-        results.Should().NotBeEmpty();
+        // NotUnder + Under should cover all records
+        (results.Count + underResults.Count).Should().Be(allAccounts.Count);
+        results.Select(r => r.CustomAccountId).Should().NotIntersectWith(
+            underResults.Select(r => r.CustomAccountId));
     }
 
     // -------------------------------------------------------------------------
@@ -2283,22 +2358,39 @@ public class QueryableIntegrationTests(ServiceClientFixture fixture) : Integrati
     [Fact]
     public void Where_InFiscalYear_ReturnsMatchingRecords()
     {
+        // Use a year we know has Won opportunities from seed data
+        var knownYear = Service.Queryable<CustomOpportunity>()
+            .Where(o => o.StatusReason == CustomOpportunity.CustomOpportunity_StatusReason.Won)
+            .ToList()
+            .Where(o => o.ActualCloseDate.HasValue)
+            .Select(o => o.ActualCloseDate!.Value.Year)
+            .First();
+
         var results = Service.Queryable<CustomOpportunity>()
-            .Where(o => o.ActualCloseDate.InFiscalYear(2025))
+            .Where(o => o.ActualCloseDate.InFiscalYear(knownYear))
             .ToList();
 
-        // Should not throw; may or may not have results depending on data
-        results.Should().NotBeNull();
+        results.Should().NotBeEmpty();
     }
 
     [Fact]
     public void Where_InFiscalPeriodAndYear_ReturnsMatchingRecords()
     {
+        // Use a year/period we know has data
+        var knownDate = Service.Queryable<CustomOpportunity>()
+            .Where(o => o.StatusReason == CustomOpportunity.CustomOpportunity_StatusReason.Won)
+            .ToList()
+            .Where(o => o.ActualCloseDate.HasValue)
+            .Select(o => o.ActualCloseDate!.Value)
+            .First();
+
+        var quarter = (knownDate.Month - 1) / 3 + 1;
+
         var results = Service.Queryable<CustomOpportunity>()
-            .Where(o => o.ActualCloseDate.InFiscalPeriodAndYear(1, 2025))
+            .Where(o => o.ActualCloseDate.InFiscalPeriodAndYear(quarter, knownDate.Year))
             .ToList();
 
-        results.Should().NotBeNull();
+        results.Should().NotBeEmpty();
     }
 
     // -------------------------------------------------------------------------
@@ -2323,7 +2415,7 @@ public class QueryableIntegrationTests(ServiceClientFixture fixture) : Integrati
             .Where(a => a.Name != null)
             .ToListAsync();
 
-        results.Should().NotBeEmpty();
+        results.Should().HaveCount(150);
     }
 
     [Fact]
@@ -2354,7 +2446,7 @@ public class QueryableIntegrationTests(ServiceClientFixture fixture) : Integrati
             .Where(a => a.Name != null)
             .ToListAsync();
 
-        results.Should().NotBeEmpty();
+        results.Should().HaveCount(150);
     }
 
     // -------------------------------------------------------------------------
@@ -2411,7 +2503,8 @@ public class QueryableIntegrationTests(ServiceClientFixture fixture) : Integrati
                                   LastName = c.LastName,
                               }).ToListAsync();
 
-        contacts.Should().NotBeEmpty();
+        // 100 accounts have a PrimaryContact set
+        contacts.Should().HaveCount(100);
         contacts.Should().AllSatisfy(c =>
         {
             c.CustomContactId.Should().NotBe(Guid.Empty);
@@ -2437,7 +2530,8 @@ public class QueryableIntegrationTests(ServiceClientFixture fixture) : Integrati
                                  ContactLastName = c.LastName,
                              }).ToListAsync();
 
-        results.Should().NotBeEmpty();
+        // 100 accounts have a PrimaryContact set
+        results.Should().HaveCount(100);
         results.Select(r => r.ContactLastName).Should().BeInAscendingOrder();
     }
 
@@ -2459,13 +2553,16 @@ public class QueryableIntegrationTests(ServiceClientFixture fixture) : Integrati
 
         var results = await query.ToListAsync();
 
-        results.Should().NotBeEmpty();
+        results.Should().HaveCount(150);
         results.Should().AllSatisfy(a => a.Name.Should().NotBeNull());
     }
 
     [Fact]
     public async Task QueryComposition_ChainedWheres_ReturnsFilteredResults()
     {
+        var expectedCount = Service.Queryable<CustomAccount>()
+            .Count(a => a.NumberOfEmployees != null);
+
         var query = Service.Queryable<CustomAccount>()
             .Where(a => a.Name != null);
 
@@ -2473,7 +2570,8 @@ public class QueryableIntegrationTests(ServiceClientFixture fixture) : Integrati
 
         var results = await query.ToListAsync();
 
-        results.Should().NotBeEmpty();
+        // All accounts have names, so the count should equal accounts with non-null NumberOfEmployees
+        results.Should().HaveCount(expectedCount);
         results.Should().AllSatisfy(a =>
         {
             a.Name.Should().NotBeNull();
@@ -2503,7 +2601,8 @@ public class QueryableIntegrationTests(ServiceClientFixture fixture) : Integrati
                                  c.FirstName,
                              }).ToListAsync();
 
-        results.Should().NotBeEmpty();
+        // 100 accounts have a PrimaryContact set, and all accounts/contacts have names
+        results.Should().HaveCount(100);
         results.Should().AllSatisfy(r =>
         {
             r.Name.Should().NotBeNull();
@@ -2514,6 +2613,8 @@ public class QueryableIntegrationTests(ServiceClientFixture fixture) : Integrati
     [Fact]
     public async Task SubQuery_MultipleJoinsOnPreFiltered_ReturnsResults()
     {
+        var totalOpportunities = Service.Queryable<CustomOpportunity>().Count();
+
         var accountsQuery = Service.Queryable<CustomAccount>()
             .Where(a => a.Name != null);
 
@@ -2529,7 +2630,8 @@ public class QueryableIntegrationTests(ServiceClientFixture fixture) : Integrati
                                  OpportunityName = o.Name,
                              }).ToListAsync();
 
-        results.Should().NotBeEmpty();
+        // All opportunities have a contact which has a parent account, so count should match total
+        results.Should().HaveCount(totalOpportunities);
     }
 
     // -------------------------------------------------------------------------
@@ -2573,12 +2675,16 @@ public class QueryableIntegrationTests(ServiceClientFixture fixture) : Integrati
     public async Task Join_CompareEntityRefToGuid_WithSameEntity_ReturnsResults()
     {
         // Column comparison within a single entity (not cross-entity in a join)
+        var all = await Service.Queryable<CustomOpportunity>().ToListAsync();
+        var expected = all.Count(o =>
+            o.ActualRevenue.HasValue && o.EstimatedRevenue.HasValue
+            && o.ActualRevenue > o.EstimatedRevenue);
+
         var results = await Service.Queryable<CustomOpportunity>()
             .Where(o => o.ActualRevenue > o.EstimatedRevenue)
             .ToListAsync();
 
-        // Should not throw; result count depends on data
-        results.Should().NotBeNull();
+        results.Should().HaveCount(expected);
     }
 
     // -------------------------------------------------------------------------
@@ -2662,7 +2768,8 @@ public class QueryableIntegrationTests(ServiceClientFixture fixture) : Integrati
                                  ContactFirstName = c.FirstName,
                              }).ToListAsync();
 
-        results.Should().NotBeEmpty();
+        // 100 accounts have PrimaryContact, all have names and first names
+        results.Should().HaveCount(100);
         results.Should().AllSatisfy(r =>
         {
             r.AccountName.Should().NotBeNull();
@@ -2687,7 +2794,10 @@ public class QueryableIntegrationTests(ServiceClientFixture fixture) : Integrati
                                  ContactFirstName = c.FirstName,
                              }).ToListAsync();
 
-        results.Should().NotBeEmpty();
+        // All contacts have "First" in their FirstName, so the or-condition matches all 100 rows
+        results.Should().HaveCount(100);
+        results.Should().AllSatisfy(r =>
+            (r.AccountName.Contains("001") || r.ContactFirstName.Contains("First")).Should().BeTrue());
     }
 
     // -------------------------------------------------------------------------
@@ -2707,6 +2817,8 @@ public class QueryableIntegrationTests(ServiceClientFixture fixture) : Integrati
                       }).FirstOrDefault();
 
         result.Should().NotBeNull();
+        result!.Name.Should().NotBeNullOrEmpty();
+        // Website may be null for some accounts, but the query should not throw
     }
 
     // -------------------------------------------------------------------------
@@ -2729,7 +2841,15 @@ public class QueryableIntegrationTests(ServiceClientFixture fixture) : Integrati
                                  ParentAccountName = pa.Name,
                              }).ToListAsync();
 
-        results.Should().NotBeEmpty();
+        // 100 accounts with PrimaryContact, each contact has a ParentAccount
+        results.Should().HaveCount(100);
+        results.Select(r => r.AccountName).Should().BeInAscendingOrder();
+        results.Should().AllSatisfy(r =>
+        {
+            r.AccountName.Should().NotBeNullOrEmpty();
+            r.ContactName.Should().NotBeNullOrEmpty();
+            r.ParentAccountName.Should().NotBeNullOrEmpty();
+        });
     }
 
     // -------------------------------------------------------------------------
@@ -2772,7 +2892,8 @@ public class QueryableIntegrationTests(ServiceClientFixture fixture) : Integrati
                                  LastName = c.LastName,
                              }).ToListAsync();
 
-        results.Should().NotBeEmpty();
+        // 100 accounts with PrimaryContact
+        results.Should().HaveCount(100);
         results.Should().AllSatisfy(r =>
         {
             r.AccountName.Should().NotBeNull();
@@ -2805,5 +2926,9 @@ public class QueryableIntegrationTests(ServiceClientFixture fixture) : Integrati
             r.AccountId.Should().NotBe(Guid.Empty);
             r.Count.Should().BeGreaterThan(0);
         });
+        // 100 accounts × 5 contacts each = 500 total contacts
+        results.Sum(r => r.Count).Should().Be(500);
+        // Each of the 100 accounts should have 5 contacts
+        results.Should().AllSatisfy(r => r.Count.Should().Be(5));
     }
 }
