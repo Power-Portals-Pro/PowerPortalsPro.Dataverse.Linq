@@ -2516,6 +2516,46 @@ public class FetchXmlGenerationTests
     }
 
     // -------------------------------------------------------------------------
+    // WithUseRawOrderBy
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_WithUseRawOrderBy_GeneratesUseRawOrderByAttribute()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .WithUseRawOrderBy()
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" useraworderby="true">
+              <entity name="new_customaccount">
+                <all-attributes />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WithUseRawOrderByAndOrderBy_GeneratesUseRawOrderByWithOrder()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .OrderBy(a => a.Name)
+            .WithUseRawOrderBy()
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" useraworderby="true">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <order attribute="new_name" descending="false" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    // -------------------------------------------------------------------------
     // Aggregate operators — Min / Max / Sum / Average / Count
     // -------------------------------------------------------------------------
 

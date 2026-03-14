@@ -276,6 +276,13 @@ internal static class FetchXmlQueryTranslator
                     .ToList();
                 return;
 
+            case MethodCallExpression { Method: { Name: nameof(ServiceClientExtensions.WithUseRawOrderBy),
+                    DeclaringType: var dtRO } } rawOrderByCall
+                when dtRO == typeof(ServiceClientExtensions):
+                TranslateCore(rawOrderByCall.Arguments[0], ctx);
+                ctx.Query.UseRawOrderBy = true;
+                return;
+
             case MethodCallExpression { Method: { Name: nameof(ServiceClientExtensions.CountColumn),
                     DeclaringType: var dtCC } } countColumnCall
                 when dtCC == typeof(ServiceClientExtensions):

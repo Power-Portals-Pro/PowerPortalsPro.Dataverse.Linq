@@ -38,6 +38,7 @@ internal sealed class FetchXmlQuery
     public bool LateMaterialize { get; set; }
     public bool NoLock { get; set; }
     public List<SqlQueryHint>? QueryHints { get; set; }
+    public bool UseRawOrderBy { get; set; }
     public int? PageSize { get; set; }
     public int? Skip { get; set; }
     public bool Distinct { get; set; }

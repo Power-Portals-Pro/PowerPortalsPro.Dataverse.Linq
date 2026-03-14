@@ -139,6 +139,22 @@ public static class ServiceClientExtensions
     }
 
     /// <summary>
+    /// Specifies that choice column data sorting should use raw order by mode, sorting by the
+    /// integer value. Without this, the default is to sort choice columns using the choice label values.
+    /// </summary>
+    public static IQueryable<TElement> WithUseRawOrderBy<TElement>(
+        this IQueryable<TElement> queryable)
+    {
+        var expression = Expression.Call(
+            typeof(ServiceClientExtensions),
+            nameof(WithUseRawOrderBy),
+            [typeof(TElement)],
+            queryable.Expression);
+
+        return queryable.Provider.CreateQuery<TElement>(expression);
+    }
+
+    /// <summary>
     /// Asynchronously executes the query and returns all results as a <see cref="List{T}"/>.
     /// Works on both root queryables and projected queryables (e.g. after a Select clause).
     /// Handles paging automatically.
