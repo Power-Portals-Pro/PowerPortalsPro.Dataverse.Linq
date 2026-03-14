@@ -1924,6 +1924,75 @@ public class QueryableIntegrationTests(ServiceClientFixture fixture) : Integrati
         result.Sum.Should().Be(all.Where(a => a.NumberOfEmployees.HasValue).Sum(a => a.NumberOfEmployees));
     }
 
+    [Fact]
+    public void JoinGroupBy_AggregateOnLinkEntity_ReturnsGroupedResults()
+    {
+        var results = (from c in Service.Queryable<CustomContact>()
+                       join o in Service.Queryable<CustomOpportunity>()
+                           on c.CustomContactId equals o.Contact.Id
+                       group o by c.CustomContactId into g
+                       select new
+                       {
+                           ContactId = g.Key,
+                           Count = g.Count(),
+                           TotalRevenue = g.Sum(x => x.ActualRevenue),
+                       }).ToList();
+
+        results.Should().NotBeEmpty();
+        results.Should().AllSatisfy(r =>
+        {
+            r.ContactId.Should().NotBe(Guid.Empty);
+            r.Count.Should().BeGreaterThan(0);
+        });
+    }
+
+    [Fact]
+    public void MultiJoinGroupBy_AggregateOnNestedLinkEntity_ReturnsGroupedResults()
+    {
+        var results = (from a in Service.Queryable<CustomAccount>()
+                       join c in Service.Queryable<CustomContact>()
+                           on a.CustomAccountId equals c.ParentAccount.Id
+                       join o in Service.Queryable<CustomOpportunity>()
+                           on c.CustomContactId equals o.Contact.Id
+                       group o by a.CustomAccountId into g
+                       select new
+                       {
+                           AccountId = g.Key,
+                           Count = g.Count(),
+                           MaxRevenue = g.Max(x => x.ActualRevenue),
+                       }).ToList();
+
+        results.Should().NotBeEmpty();
+        results.Should().AllSatisfy(r =>
+        {
+            r.AccountId.Should().NotBe(Guid.Empty);
+            r.Count.Should().BeGreaterThan(0);
+        });
+    }
+
+    [Fact]
+    public void JoinGroupBy_CompositeKey_ReturnsGroupedResults()
+    {
+        var results = (from c in Service.Queryable<CustomContact>()
+                       join o in Service.Queryable<CustomOpportunity>()
+                           on c.CustomContactId equals o.Contact.Id
+                       group new { c, o }
+                           by new { c.CustomContactId } into g
+                       select new
+                       {
+                           ContactId = g.Key.CustomContactId,
+                           Count = g.Count(),
+                           TotalRevenue = g.Sum(x => x.o.ActualRevenue),
+                       }).ToList();
+
+        results.Should().NotBeEmpty();
+        results.Should().AllSatisfy(r =>
+        {
+            r.ContactId.Should().NotBe(Guid.Empty);
+            r.Count.Should().BeGreaterThan(0);
+        });
+    }
+
     // -------------------------------------------------------------------------
     // RowAggregate — CountChildren
     // -------------------------------------------------------------------------

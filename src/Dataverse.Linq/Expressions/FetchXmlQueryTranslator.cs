@@ -1265,15 +1265,99 @@ internal static class FetchXmlQueryTranslator
             ctx.GroupKeyAttributeName = null;
             ctx.GroupKeyDateGrouping = null;
         }
+        else if (keySelector.Body is NewExpression compositeKey
+                 && compositeKey.Members is not null
+                 && ctx.JoinMappings is not null)
+        {
+            // Composite key (e.g. group by new { a.AccountId })
+            ctx.GroupKeyProperties = [];
+            for (var i = 0; i < compositeKey.Arguments.Count; i++)
+            {
+                var member = compositeKey.Members[i];
+                var propName = member is MethodInfo { Name: ['g', 'e', 't', '_', ..] } getter
+                    ? getter.Name[4..] : member.Name;
+                var (attrName, dateGrouping) = ResolveGroupKey(compositeKey.Arguments[i], ctx);
+                var resolved = ResolveAttribute(compositeKey.Arguments[i], ctx);
+                ctx.GroupKeyProperties.Add(new GroupKeyProperty(propName, attrName, dateGrouping, resolved?.EntityAlias));
+            }
+        }
         else
         {
             var (attrName, dateGrouping) = ResolveGroupKey(keySelector.Body, ctx);
             ctx.GroupKeyAttributeName = attrName;
             ctx.GroupKeyDateGrouping = dateGrouping;
+
+            // Capture entity alias so the groupby attribute goes on the correct entity/link
+            if (ctx.JoinMappings is not null)
+            {
+                var keyResolved = ResolveAttribute(keySelector.Body, ctx);
+                ctx.GroupKeyEntityAlias = keyResolved?.EntityAlias;
+            }
+        }
+
+        // Analyze element selector for join + GroupBy
+        if (ctx.JoinMappings is not null && call.Arguments.Count > 2)
+        {
+            var elementSelector = call.Arguments[2].ExtractLambda();
+            ctx.GroupElementMappings = AnalyzeGroupElement(elementSelector, ctx.JoinMappings);
         }
 
         // Clear join mappings — subsequent Select/OrderBy operate on IGrouping, not TI
         ctx.JoinMappings = null;
+    }
+
+    /// <summary>
+    /// Analyzes a GroupBy element selector to build a mapping from element type
+    /// members to join entity info, preserving entity-routing for aggregate resolution.
+    /// </summary>
+    private static Dictionary<string, JoinEntityInfo> AnalyzeGroupElement(
+        LambdaExpression elementSelector, Dictionary<string, JoinEntityInfo> joinMappings)
+    {
+        var body = elementSelector.Body;
+        var result = new Dictionary<string, JoinEntityInfo>();
+
+        if (body is NewExpression ne && ne.Members is not null)
+        {
+            // Composite element: group new { account, contact, participant } by key
+            for (var i = 0; i < ne.Arguments.Count; i++)
+            {
+                var member = ne.Members[i];
+                var propName = member is MethodInfo { Name: ['g', 'e', 't', '_', ..] } getter
+                    ? getter.Name[4..] : member.Name;
+
+                var mapping = ResolveElementToJoinEntity(ne.Arguments[i], joinMappings);
+                if (mapping is not null)
+                    result[propName] = mapping;
+            }
+        }
+        else
+        {
+            // Simple element: group participant by key → element is a single entity
+            var mapping = ResolveElementToJoinEntity(body, joinMappings);
+            if (mapping is not null)
+                result[""] = mapping;
+        }
+
+        return result;
+    }
+
+    private static JoinEntityInfo? ResolveElementToJoinEntity(
+        Expression expr, Dictionary<string, JoinEntityInfo> joinMappings)
+    {
+        var current = expr;
+        while (current is MemberExpression me)
+        {
+            if (me.Expression is ParameterExpression
+                && joinMappings.TryGetValue(me.Member.Name, out var mapping))
+                return mapping;
+            current = me.Expression;
+        }
+
+        if (current is ParameterExpression param
+            && joinMappings.TryGetValue(param.Name!, out var directMapping))
+            return directMapping;
+
+        return null;
     }
 
     private static void HandleGroupedSelect(LambdaExpression lambda, TranslationContext ctx)
@@ -1304,31 +1388,50 @@ internal static class FetchXmlQueryTranslator
             {
                 // Constant group key (e.g. GroupBy(a => 1)) — no groupby attribute needed,
                 // inject the constant value directly into the projector
-                if (ctx.GroupKeyAttributeName is null)
+                if (ctx.GroupKeyAttributeName is null && ctx.GroupKeyProperties is null)
                 {
                     constructorArgs.Add(Expression.Default(memberType));
                     continue;
                 }
 
-                // Group key
+                // Scalar group key
                 groupKeyAlias = alias;
-                ctx.Query.Attributes.Add(new FetchAttribute
+                AddGroupAttribute(ctx, new FetchAttribute
                 {
-                    Name = ctx.GroupKeyAttributeName,
+                    Name = ctx.GroupKeyAttributeName!,
                     Alias = alias,
                     GroupBy = true,
                     DateGrouping = ctx.GroupKeyDateGrouping
-                });
+                }, ctx.GroupKeyEntityAlias);
+            }
+            else if (arg is MemberExpression keyPropAccess
+                     && keyPropAccess.Expression is MemberExpression { Member.Name: "Key" }
+                     && ctx.GroupKeyProperties is not null)
+            {
+                // Composite key property: g.Key.PropertyName
+                var keyPropName = keyPropAccess.Member.Name;
+                var keyProp = ctx.GroupKeyProperties.FirstOrDefault(p => p.MemberName == keyPropName)
+                    ?? throw new NotSupportedException(
+                        $"Group key property '{keyPropName}' not found in composite key.");
+
+                groupKeyAlias = alias;
+                AddGroupAttribute(ctx, new FetchAttribute
+                {
+                    Name = keyProp.AttributeName,
+                    Alias = alias,
+                    GroupBy = true,
+                    DateGrouping = keyProp.DateGrouping
+                }, keyProp.EntityAlias);
             }
             else if (arg is MethodCallExpression mc)
             {
-                var (attrName, aggregateFunc) = ResolveGroupAggregate(mc, ctx);
-                ctx.Query.Attributes.Add(new FetchAttribute
+                var (attrName, aggregateFunc, entityAlias) = ResolveGroupAggregate(mc, ctx);
+                AddGroupAttribute(ctx, new FetchAttribute
                 {
                     Name = attrName,
                     Alias = alias,
                     Aggregate = aggregateFunc
-                });
+                }, entityAlias);
             }
             else
             {
@@ -1361,6 +1464,24 @@ internal static class FetchXmlQueryTranslator
         var newExpr = Expression.New(ne.Constructor!, constructorArgs, ne.Members);
         ctx.Query.Projector = Expression.Lambda(newExpr, entityParam).Compile();
         ctx.Query.ProjectionType = ne.Type;
+    }
+
+    /// <summary>
+    /// Routes a FetchAttribute to the correct entity or link-entity based on alias.
+    /// </summary>
+    private static void AddGroupAttribute(TranslationContext ctx, FetchAttribute attr, string? entityAlias)
+    {
+        if (entityAlias is null)
+        {
+            ctx.Query.Attributes.Add(attr);
+        }
+        else
+        {
+            var link = ctx.Query.Links.FindLinkByAlias(entityAlias)
+                ?? throw new NotSupportedException(
+                    $"Link entity with alias '{entityAlias}' not found for grouped attribute.");
+            link.Attributes.Add(attr);
+        }
     }
 
     /// <summary>
@@ -1417,28 +1538,92 @@ internal static class FetchXmlQueryTranslator
 
     /// <summary>
     /// Resolves an aggregate method call within a grouped select (e.g. <c>g.Count()</c>,
-    /// <c>g.Sum(x =&gt; x.Revenue)</c>) to an attribute name and FetchXml aggregate function.
+    /// <c>g.Sum(x =&gt; x.Revenue)</c>) to an attribute name, FetchXml aggregate function,
+    /// and the entity alias where the attribute should be placed.
     /// </summary>
-    private static (string AttrName, string AggregateFunc) ResolveGroupAggregate(
+    private static (string AttrName, string AggregateFunc, string? EntityAlias) ResolveGroupAggregate(
         MethodCallExpression mc, TranslationContext ctx)
     {
         var methodName = mc.Method.Name;
         if (!AggregateFunctionMap.TryGetValue(methodName, out var aggregateFunc))
             throw new NotSupportedException($"Unsupported group aggregate '{methodName}'.");
 
-        // Count() / LongCount() with no selector — use entity primary key
+        // Count() / LongCount() with no selector — use element entity primary key
         if (methodName is "Count" or "LongCount" && mc.Arguments.Count == 1)
         {
-            return (ctx.Query.EntityLogicalName + "id", aggregateFunc);
+            var elementInfo = GetPrimaryGroupElement(ctx);
+            if (elementInfo is not null)
+            {
+                var entityName = elementInfo.EntityType.GetEntityLogicalName();
+                return (entityName + "id", aggregateFunc, elementInfo.LinkAlias);
+            }
+
+            return (ctx.Query.EntityLogicalName + "id", aggregateFunc, null);
         }
 
         // Aggregate with selector — extract attribute from the lambda
         var selectorLambda = mc.Arguments[1].ExtractLambda();
+
+        // Resolve through group element mappings for join + GroupBy
+        if (ctx.GroupElementMappings is not null)
+        {
+            var resolved = ResolveGroupElementAttribute(selectorLambda, ctx.GroupElementMappings);
+            if (resolved is not null)
+                return (resolved.Value.Name, aggregateFunc, resolved.Value.EntityAlias);
+        }
+
         var attrName = selectorLambda.Body.GetAttributeName()
             ?? throw new NotSupportedException(
                 $"Could not resolve attribute for grouped {methodName}.");
 
-        return (attrName, aggregateFunc);
+        return (attrName, aggregateFunc, null);
+    }
+
+    /// <summary>
+    /// Returns the primary group element entity info for Count() resolution.
+    /// For simple elements (key ""), returns that entity directly.
+    /// For composite elements, picks a link entity (or any entity).
+    /// </summary>
+    private static JoinEntityInfo? GetPrimaryGroupElement(TranslationContext ctx)
+    {
+        if (ctx.GroupElementMappings is null)
+            return null;
+
+        // Simple element (Form 1: group entity by key)
+        if (ctx.GroupElementMappings.TryGetValue("", out var direct))
+            return direct;
+
+        // Composite element: prefer link entities over root
+        return ctx.GroupElementMappings.Values.FirstOrDefault(m => m.LinkAlias is not null)
+            ?? ctx.GroupElementMappings.Values.FirstOrDefault();
+    }
+
+    /// <summary>
+    /// Resolves an aggregate selector lambda through group element mappings to find
+    /// the attribute name and entity alias.
+    /// </summary>
+    private static ResolvedAttribute? ResolveGroupElementAttribute(
+        LambdaExpression selectorLambda, Dictionary<string, JoinEntityInfo> elementMappings)
+    {
+        var body = selectorLambda.Body;
+        var param = selectorLambda.Parameters[0];
+
+        var access = body.ResolveAttributeAccess();
+        if (access is null)
+            return null;
+
+        var entityExpr = access.Value.EntityExpression;
+
+        // Simple element (Form 1): ip => ip.attr — entityExpr is the parameter itself
+        if (entityExpr == param && elementMappings.TryGetValue("", out var directEntity))
+            return new ResolvedAttribute(access.Value.AttributeName, directEntity.LinkAlias);
+
+        // Composite element (Form 2): x => x.participant.attr — entityExpr is param.propName
+        if (entityExpr is MemberExpression me && me.Expression == param
+            && elementMappings.TryGetValue(me.Member.Name, out var propEntity))
+            return new ResolvedAttribute(access.Value.AttributeName, propEntity.LinkAlias);
+
+        return null;
     }
 
     // -------------------------------------------------------------------------
@@ -1908,6 +2093,26 @@ internal static class FetchXmlQueryTranslator
         /// Each entry is the <c>descending</c> flag.
         /// </summary>
         public List<bool>? DeferredGroupOrders { get; set; }
+
+        /// <summary>
+        /// Entity alias for the group key attribute (null = root entity).
+        /// Set when GroupBy follows a join so the groupby attribute can be placed
+        /// on the correct entity/link-entity.
+        /// </summary>
+        public string? GroupKeyEntityAlias { get; set; }
+
+        /// <summary>
+        /// For composite group keys (<c>group by new { a.Id, b.Name }</c>):
+        /// resolved info for each key property. Null for scalar keys.
+        /// </summary>
+        public List<GroupKeyProperty>? GroupKeyProperties { get; set; }
+
+        /// <summary>
+        /// After a join + GroupBy: maps element type members to entity info.
+        /// Key <c>""</c> means the element is a single entity (Form 1).
+        /// Otherwise, keys are property names on the composite element type (Form 2).
+        /// </summary>
+        public Dictionary<string, JoinEntityInfo>? GroupElementMappings { get; set; }
     }
 
     private sealed class JoinEntityInfo
@@ -1915,4 +2120,6 @@ internal static class FetchXmlQueryTranslator
         public required Type EntityType { get; init; }
         public string? LinkAlias { get; init; }
     }
+
+    private record GroupKeyProperty(string MemberName, string AttributeName, string? DateGrouping, string? EntityAlias);
 }

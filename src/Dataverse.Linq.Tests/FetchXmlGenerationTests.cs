@@ -3030,6 +3030,95 @@ public class FetchXmlGenerationTests
             """);
     }
 
+    [Fact]
+    public void ToFetchXml_JoinGroupByWithAggregateOnLinkEntity_PlacesAttributesOnLink()
+    {
+        var fetchXml = (from c in _service.Queryable<CustomContact>()
+                        join o in _service.Queryable<CustomOpportunity>()
+                            on c.CustomContactId equals o.Contact.Id
+                        group o by c.CustomContactId into g
+                        select new
+                        {
+                            ContactId = g.Key,
+                            Count = g.Count(),
+                            TotalRevenue = g.Sum(x => x.ActualRevenue),
+                        }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="new_customcontact">
+                <attribute name="new_customcontactid" alias="contactid" groupby="true" />
+                <link-entity name="new_customopportunity" from="new_contact" to="new_customcontactid" alias="o" link-type="inner">
+                  <attribute name="new_customopportunityid" alias="count" aggregate="count" />
+                  <attribute name="new_actualrevenue" alias="totalrevenue" aggregate="sum" />
+                </link-entity>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_MultiJoinGroupByWithAggregateOnNestedLinkEntity_PlacesAttributesCorrectly()
+    {
+        var fetchXml = (from a in _service.Queryable<CustomAccount>()
+                        join c in _service.Queryable<CustomContact>()
+                            on a.CustomAccountId equals c.ParentAccount.Id
+                        join o in _service.Queryable<CustomOpportunity>()
+                            on c.CustomContactId equals o.Contact.Id
+                        group o by a.CustomAccountId into g
+                        select new
+                        {
+                            AccountId = g.Key,
+                            Count = g.Count(),
+                            MaxRevenue = g.Max(x => x.ActualRevenue),
+                        }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="new_customaccount">
+                <attribute name="new_customaccountid" alias="accountid" groupby="true" />
+                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="inner">
+                  <link-entity name="new_customopportunity" from="new_contact" to="new_customcontactid" alias="o" link-type="inner">
+                    <attribute name="new_customopportunityid" alias="count" aggregate="count" />
+                    <attribute name="new_actualrevenue" alias="maxrevenue" aggregate="max" />
+                  </link-entity>
+                </link-entity>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_JoinGroupByWithCompositeKey_PlacesAttributesCorrectly()
+    {
+        var fetchXml = (from c in _service.Queryable<CustomContact>()
+                        join o in _service.Queryable<CustomOpportunity>()
+                            on c.CustomContactId equals o.Contact.Id
+                        group new { c, o }
+                            by new { c.CustomContactId } into g
+                        select new
+                        {
+                            ContactId = g.Key.CustomContactId,
+                            Count = g.Count(),
+                            TotalRevenue = g.Sum(x => x.o.ActualRevenue),
+                        }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="new_customcontact">
+                <attribute name="new_customcontactid" alias="contactid" groupby="true" />
+                <link-entity name="new_customopportunity" from="new_contact" to="new_customcontactid" alias="o" link-type="inner">
+                  <attribute name="new_customopportunityid" alias="count" aggregate="count" />
+                  <attribute name="new_actualrevenue" alias="totalrevenue" aggregate="sum" />
+                </link-entity>
+              </entity>
+            </fetch>
+            """);
+    }
+
     // -------------------------------------------------------------------------
     // RowAggregate — CountChildren
     // -------------------------------------------------------------------------
