@@ -1863,6 +1863,29 @@ public class QueryableIntegrationTests(ServiceClientFixture fixture) : Integrati
         totalDescriptionCount.Should().Be(expectedNonNull);
     }
 
+    [Fact]
+    public async Task GroupByConstant_MultipleAggregates_ReturnsSingleRow()
+    {
+        var all = await Service.Queryable<CustomAccount>().ToListAsync();
+
+        var result = (from a in Service.Queryable<CustomAccount>()
+                      group a by 1 into g
+                      select new
+                      {
+                          Count = g.Count(),
+                          ColumnCount = g.CountColumn(x => x.NumberOfEmployees),
+                          Maximum = g.Max(x => x.NumberOfEmployees),
+                          Minimum = g.Min(x => x.NumberOfEmployees),
+                          Sum = g.Sum(x => x.NumberOfEmployees),
+                      }).First();
+
+        result.Count.Should().Be(all.Count);
+        result.ColumnCount.Should().Be(all.Count(a => a.NumberOfEmployees.HasValue));
+        result.Maximum.Should().Be(all.Where(a => a.NumberOfEmployees.HasValue).Max(a => a.NumberOfEmployees));
+        result.Minimum.Should().Be(all.Where(a => a.NumberOfEmployees.HasValue).Min(a => a.NumberOfEmployees));
+        result.Sum.Should().Be(all.Where(a => a.NumberOfEmployees.HasValue).Sum(a => a.NumberOfEmployees));
+    }
+
     // -------------------------------------------------------------------------
     // RowAggregate — CountChildren
     // -------------------------------------------------------------------------

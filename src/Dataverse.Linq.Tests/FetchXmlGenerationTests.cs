@@ -2905,6 +2905,36 @@ public class FetchXmlGenerationTests
             """);
     }
 
+    [Fact]
+    public void ToFetchXml_GroupByConstant_GeneratesAggregateWithoutGroupBy()
+    {
+        var fetchXml = (from a in _service.Queryable<CustomAccount>()
+                        group a by 1 into g
+                        select new
+                        {
+                            Average = g.Average(x => x.NumberOfEmployees),
+                            Count = g.Count(),
+                            ColumnCount = g.CountColumn(x => x.NumberOfEmployees),
+                            Maximum = g.Max(x => x.NumberOfEmployees),
+                            Minimum = g.Min(x => x.NumberOfEmployees),
+                            Sum = g.Sum(x => x.NumberOfEmployees),
+                        }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="new_customaccount">
+                <attribute name="new_numberofemployees" alias="average" aggregate="avg" />
+                <attribute name="new_customaccountid" alias="count" aggregate="count" />
+                <attribute name="new_numberofemployees" alias="columncount" aggregate="countcolumn" />
+                <attribute name="new_numberofemployees" alias="maximum" aggregate="max" />
+                <attribute name="new_numberofemployees" alias="minimum" aggregate="min" />
+                <attribute name="new_numberofemployees" alias="sum" aggregate="sum" />
+              </entity>
+            </fetch>
+            """);
+    }
+
     // -------------------------------------------------------------------------
     // RowAggregate — CountChildren
     // -------------------------------------------------------------------------

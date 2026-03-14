@@ -1391,14 +1391,24 @@ internal static class FetchXmlQueryTranslator
 
         // Extract key selector
         var keySelector = ExtractLambda(call.Arguments[1]);
-        var (attrName, dateGrouping) = ResolveGroupKey(keySelector.Body, ctx);
 
         ctx.IsGrouped = true;
-        ctx.GroupKeyAttributeName = attrName;
-        ctx.GroupKeyDateGrouping = dateGrouping;
         ctx.Query.Aggregate = true;
         ctx.Query.AllAttributes = false;
         ctx.Query.Attributes.Clear();
+
+        // Constant key (e.g. GroupBy(a => 1)) — aggregate-only query, no groupby attribute
+        if (keySelector.Body is ConstantExpression)
+        {
+            ctx.GroupKeyAttributeName = null;
+            ctx.GroupKeyDateGrouping = null;
+        }
+        else
+        {
+            var (attrName, dateGrouping) = ResolveGroupKey(keySelector.Body, ctx);
+            ctx.GroupKeyAttributeName = attrName;
+            ctx.GroupKeyDateGrouping = dateGrouping;
+        }
 
         // Clear join mappings — subsequent Select/OrderBy operate on IGrouping, not TI
         ctx.JoinMappings = null;
@@ -1430,11 +1440,19 @@ internal static class FetchXmlQueryTranslator
 
             if (arg is MemberExpression { Member.Name: "Key" })
             {
+                // Constant group key (e.g. GroupBy(a => 1)) — no groupby attribute needed,
+                // inject the constant value directly into the projector
+                if (ctx.GroupKeyAttributeName is null)
+                {
+                    constructorArgs.Add(Expression.Default(memberType));
+                    continue;
+                }
+
                 // Group key
                 groupKeyAlias = alias;
                 ctx.Query.Attributes.Add(new FetchAttribute
                 {
-                    Name = ctx.GroupKeyAttributeName!,
+                    Name = ctx.GroupKeyAttributeName,
                     Alias = alias,
                     GroupBy = true,
                     DateGrouping = ctx.GroupKeyDateGrouping
