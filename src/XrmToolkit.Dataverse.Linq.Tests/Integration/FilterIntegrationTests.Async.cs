@@ -729,6 +729,71 @@ public partial class FilterIntegrationTests
     }
 
     // -------------------------------------------------------------------------
+    // In() — link-type="in"
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ToListAsync_WhereIn_MatchesExistsResults()
+    {
+        // In() and Exists() should return the same results for the same predicate.
+        var existsResults = await Service.Queryable<CustomAccount>()
+            .Where(a => Service.Queryable<CustomContact>().Exists(
+                c => c.ParentAccount.Id == a.CustomAccountId
+                     && c.ContactRating_OptionSetValue != null))
+            .ToListAsync();
+
+        var inResults = await Service.Queryable<CustomAccount>()
+            .Where(a => Service.Queryable<CustomContact>().In(
+                c => c.ParentAccount.Id == a.CustomAccountId
+                     && c.ContactRating_OptionSetValue != null))
+            .ToListAsync();
+
+        inResults.Should().HaveCount(existsResults.Count);
+        inResults.Select(a => a.CustomAccountId).Should().BeEquivalentTo(
+            existsResults.Select(a => a.CustomAccountId));
+    }
+
+    [Fact]
+    public async Task ToListAsync_WhereNotIn_MatchesNotExistsResults()
+    {
+        // !In() falls back to not-any, same as !Exists().
+        var notExistsResults = await Service.Queryable<CustomAccount>()
+            .Where(a => !Service.Queryable<CustomContact>().Exists(
+                c => c.ParentAccount.Id == a.CustomAccountId))
+            .ToListAsync();
+
+        var notInResults = await Service.Queryable<CustomAccount>()
+            .Where(a => !Service.Queryable<CustomContact>().In(
+                c => c.ParentAccount.Id == a.CustomAccountId))
+            .ToListAsync();
+
+        notInResults.Should().HaveCount(notExistsResults.Count);
+        notInResults.Select(a => a.CustomAccountId).Should().BeEquivalentTo(
+            notExistsResults.Select(a => a.CustomAccountId));
+    }
+
+    [Fact]
+    public async Task ToListAsync_WhereIn_WithFilter_CrossValidatesWithJoin()
+    {
+        // Accounts where a contact with FirstName starting with "First001" is IN.
+        var expectedIds = (await (from a in Service.Queryable<CustomAccount>()
+                                  join c in Service.Queryable<CustomContact>()
+                                      on a.CustomAccountId equals c.ParentAccount.Id
+                                  where c.FirstName.StartsWith("First001")
+                                  select a.CustomAccountId).ToListAsync())
+            .Distinct().ToList();
+
+        var results = await Service.Queryable<CustomAccount>()
+            .Where(a => Service.Queryable<CustomContact>().In(
+                c => c.ParentAccount.Id == a.CustomAccountId
+                     && c.FirstName.StartsWith("First001")))
+            .ToListAsync();
+
+        results.Should().HaveCount(expectedIds.Count);
+        results.Select(a => a.CustomAccountId).Should().BeEquivalentTo(expectedIds);
+    }
+
+    // -------------------------------------------------------------------------
     // Entity.Id — where clause using base Entity.Id property
     // -------------------------------------------------------------------------
 

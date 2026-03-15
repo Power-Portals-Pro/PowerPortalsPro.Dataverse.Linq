@@ -157,28 +157,33 @@ await service.Queryable<Contact>()
 
 `All()` and `!All()` are complementary within the set of parents that have at least one related child.
 
-#### Exists — efficient semi-join
+#### Exists and In — semi-join operators
 
-`Exists()` translates to `link-type="exists"` placed as a direct child of the `<entity>` element (not inside a `<filter>`). This is a [semi-join](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/fetchxml/reference/link-entity) — it filters the parent rows without returning any columns from the related entity.
+`Exists()` and `In()` translate to [`link-type="exists"`](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/fetchxml/reference/link-entity) and `link-type="in"` respectively, placed as direct children of the `<entity>` element (not inside a `<filter>`). Both are [semi-joins](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/fetchxml/reference/link-entity) — they filter parent rows based on the existence of matching child rows without returning columns from the related entity.
 
-Use `Exists()` when you only need to check whether a matching related record exists, without needing the related data in the result. It is often more performant than `Any()` for simple existence checks.
+`Exists()` and `In()` are semantically equivalent but may have different performance characteristics depending on the Dataverse query optimizer. `Exists` uses a correlated subquery while `In` uses an `IN` subquery. Try both if you encounter performance issues with large datasets.
 
 ```csharp
-// Accounts that have at least one active contact
+// Accounts that have at least one active contact (EXISTS subquery)
 await service.Queryable<Account>()
     .Where(a => service.Queryable<Contact>().Exists(
         c => c.ParentCustomerId.Id == a.AccountId && c.StateCode == 0))
     .ToListAsync();
 
-// Accounts with NO contacts at all
-// (Dataverse doesn't support link-type="not exists", so !Exists()
-//  automatically falls back to link-type="not any")
+// Same query using IN subquery
+await service.Queryable<Account>()
+    .Where(a => service.Queryable<Contact>().In(
+        c => c.ParentCustomerId.Id == a.AccountId && c.StateCode == 0))
+    .ToListAsync();
+
+// Negate with ! — Dataverse doesn't support "not exists" or "not in" as
+// link-types, so negation automatically falls back to link-type="not any"
 await service.Queryable<Account>()
     .Where(a => !service.Queryable<Contact>().Exists(
         c => c.ParentCustomerId.Id == a.AccountId))
     .ToListAsync();
 
-// Exists with no filter — just check for any related record
+// Join-only (no filter) — check for any related record
 await service.Queryable<Account>()
     .Where(a => service.Queryable<Contact>().Exists(
         c => c.ParentCustomerId.Id == a.AccountId))
@@ -193,8 +198,10 @@ await service.Queryable<Account>()
 | `!.Any(predicate)` | `not any` | Inside `<filter>` | No children match |
 | `.All(predicate)` | `all` | Inside `<filter>` | All children match (conditions negated) |
 | `!.All(predicate)` | `not all` | Inside `<filter>` | At least one child fails (conditions negated) |
-| `.Exists(predicate)` | `exists` | Direct child of `<entity>` | Efficient semi-join existence check |
+| `.Exists(predicate)` | `exists` | Direct child of `<entity>` | Semi-join via correlated subquery |
+| `.In(predicate)` | `in` | Direct child of `<entity>` | Semi-join via IN subquery |
 | `!.Exists(predicate)` | `not any` (fallback) | Inside `<filter>` | No matching children |
+| `!.In(predicate)` | `not any` (fallback) | Inside `<filter>` | No matching children |
 
 ### DateTime Operators
 

@@ -250,6 +250,19 @@ public static partial class ServiceClientExtensions
     }
 
     /// <summary>
+    /// Filters to rows where a related record matches the predicate using an IN subquery.
+    /// Translates to FetchXml <c>link-type="in"</c>.
+    /// Semantically equivalent to <see cref="Exists{TSource}"/> but may have different
+    /// performance characteristics depending on the query optimizer.
+    /// This method is a placeholder for the Dataverse LINQ query provider and cannot be invoked directly.
+    /// </summary>
+    public static bool In<TSource>(this IQueryable<TSource> source, Expression<Func<TSource, bool>> predicate)
+    {
+        throw new NotImplementedException(
+            "This method is a placeholder for the Dataverse LINQ query provider and cannot be invoked directly.");
+    }
+
+    /// <summary>
     /// Returns the count of child records for the entity.
     /// Translates to FetchXml <c>rowaggregate="CountChildren"</c>.
     /// This method is a placeholder for the Dataverse LINQ query provider and cannot be invoked directly.

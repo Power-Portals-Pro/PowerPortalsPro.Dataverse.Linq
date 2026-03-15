@@ -718,7 +718,18 @@ internal static class FetchXmlQueryTranslator
                 if (negated)
                     HandleAnyPredicate(existsCall, filter, negated: true, ctx.PrimaryKeyResolver);
                 else
-                    HandleExistsPredicate(existsCall, ctx);
+                    HandleEntityLevelLinkPredicate(existsCall, ctx, "exists");
+                return;
+
+            // ServiceClientExtensions.In(source, predicate) → link-type="in"
+            // When negated, falls back to link-type="not any" (inside filter) since
+            // Dataverse does not support link-type="not in" for link-entities.
+            case MethodCallExpression { Method: { Name: "In", DeclaringType: var inDeclType } } inCall
+                when inDeclType == typeof(ServiceClientExtensions) && inCall.Arguments.Count == 2:
+                if (negated)
+                    HandleAnyPredicate(inCall, filter, negated: true, ctx.PrimaryKeyResolver);
+                else
+                    HandleEntityLevelLinkPredicate(inCall, ctx, "in");
                 return;
 
             // && → AND filter (flatten if parent is already AND)
@@ -1158,15 +1169,15 @@ internal static class FetchXmlQueryTranslator
     }
 
     /// <summary>
-    /// Translates a <c>ServiceClientExtensions.Exists(source, predicate)</c> call into a
-    /// <see cref="FetchLinkEntity"/> with <c>link-type="exists"</c> (or <c>"not exists"</c>
-    /// when negated) added as a direct child of the entity (not inside a filter).
+    /// Translates a subquery call (e.g. <c>Exists</c> or <c>In</c>) into a
+    /// <see cref="FetchLinkEntity"/> with the specified <paramref name="linkType"/>
+    /// added as a direct child of the entity (not inside a filter).
     /// </summary>
-    private static void HandleExistsPredicate(
-        MethodCallExpression existsCall, TranslationContext ctx)
+    private static void HandleEntityLevelLinkPredicate(
+        MethodCallExpression call, TranslationContext ctx, string linkType)
     {
-        var (innerLogicalName, _) = existsCall.Arguments[0].GetSourceInfoFromType();
-        var lambda = existsCall.Arguments[1].ExtractLambda();
+        var (innerLogicalName, _) = call.Arguments[0].GetSourceInfoFromType();
+        var lambda = call.Arguments[1].ExtractLambda();
         var innerParam = lambda.Parameters[0];
 
         // Flatten AndAlso chain and separate join vs filter conditions.
@@ -1189,7 +1200,7 @@ internal static class FetchXmlQueryTranslator
 
         if (from is null || to is null)
             throw new NotSupportedException(
-                "Exists() predicate must contain a join condition that compares an inner entity " +
+                $"{call.Method.Name}() predicate must contain a join condition that compares an inner entity " +
                 "attribute to an outer entity attribute (e.g. c.ParentCustomerId.Id == a.AccountId).");
 
         var linkEntity = new FetchLinkEntity
@@ -1198,7 +1209,7 @@ internal static class FetchXmlQueryTranslator
             From = from,
             To = to,
             Alias = innerParam.Name!,
-            LinkType = "exists"
+            LinkType = linkType
         };
 
         // Translate remaining conditions as filters on the link-entity.

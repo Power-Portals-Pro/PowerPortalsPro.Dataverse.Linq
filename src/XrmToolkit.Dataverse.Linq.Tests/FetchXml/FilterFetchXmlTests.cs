@@ -874,6 +874,82 @@ public class FilterFetchXmlTests : FetchXmlTestBase
     }
 
     // -------------------------------------------------------------------------
+    // Where — In() (link-type="in")
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_WhereIn_GeneratesLinkTypeIn()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Where(a => _service.Queryable<CustomContact>().In(
+                c => c.ParentAccount.Id == a.CustomAccountId
+                     && c.ContactRating_OptionSetValue != null))
+            .Select(a => new { a.Name })
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="in">
+                  <filter type="and">
+                    <condition attribute="new_contactrating" operator="not-null" />
+                  </filter>
+                </link-entity>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WhereNotIn_FallsBackToNotAny()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Where(a => !_service.Queryable<CustomContact>().In(
+                c => c.ParentAccount.Id == a.CustomAccountId
+                     && c.ContactRating_OptionSetValue != null))
+            .Select(a => new { a.Name })
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+                <filter type="and">
+                  <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="not any">
+                    <filter type="and">
+                      <condition attribute="new_contactrating" operator="not-null" />
+                    </filter>
+                  </link-entity>
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WhereIn_WithoutFilter_GeneratesLinkTypeInNoFilter()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Where(a => _service.Queryable<CustomContact>().In(
+                c => c.ParentAccount.Id == a.CustomAccountId))
+            .Select(a => new { a.Name })
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="in" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    // -------------------------------------------------------------------------
     // Entity.Id resolution
     // -------------------------------------------------------------------------
 
