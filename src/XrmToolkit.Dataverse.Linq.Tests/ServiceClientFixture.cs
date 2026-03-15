@@ -10,7 +10,7 @@ public class ServiceClientFixture : IDisposable
     public ServiceClientFixture()
     {
         var configurationBuilder = new ConfigurationBuilder();
-        var appSettingsFileLocation = $"{Path.GetDirectoryName(typeof(ServiceClientFixture).Assembly.Location)}\\appsettings.json";
+        var appSettingsFileLocation = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
         configurationBuilder.AddJsonFile(appSettingsFileLocation);
         configurationBuilder.AddUserSecrets(typeof(ServiceClientFixture).Assembly);
         Configuration = configurationBuilder.Build();

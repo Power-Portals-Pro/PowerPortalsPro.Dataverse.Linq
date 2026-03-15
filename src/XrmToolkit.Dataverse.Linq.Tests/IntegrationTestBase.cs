@@ -1,10 +1,12 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Microsoft.Identity.Client;
 using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.Xrm.Sdk;
+#if !NETFRAMEWORK
+using Microsoft.Identity.Client;
 using System.Net.Http.Headers;
+#endif
 
 namespace XrmToolkit.Dataverse.Linq.Tests;
 
@@ -49,6 +51,7 @@ public class IntegrationTestBase : IDisposable
         _serviceScope?.Dispose();
     }
 
+#if !NETFRAMEWORK
     protected async Task<HttpClient> CreateWebApiHttpClientAsync()
     {
         var config = Fixture.Configuration;
@@ -86,6 +89,7 @@ public class IntegrationTestBase : IDisposable
 
         return httpClient;
     }
+#endif
 
     protected class ConsoleTracer : ITracingService
     {
