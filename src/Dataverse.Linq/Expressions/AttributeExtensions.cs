@@ -50,7 +50,8 @@ internal static class AttributeExtensions
             {
                 "Id" => true,
                 "Value" when memberExpr.Member.DeclaringType == typeof(Money)
-                          || memberExpr.Member.DeclaringType == typeof(OptionSetValue) => true,
+                          || memberExpr.Member.DeclaringType == typeof(OptionSetValue)
+                          || Nullable.GetUnderlyingType(memberExpr.Member.DeclaringType!) is not null => true,
                 _ => false
             };
 
