@@ -1,8 +1,0 @@
-<Solution>
-  <Project Path="Dataverse.Linq/Dataverse.Linq.csproj" />
-  <Folder Name="/Solution Items/">
-    <File Path="../.gitignore" />
-    <File Path="../README.md" />
-  </Folder>
-  <Project Path="Dataverse.Linq.Tests/Dataverse.Linq.Tests.csproj" />
-</Solution>

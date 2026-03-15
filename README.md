@@ -1,17 +1,17 @@
-# Dataverse.Linq
+# XrmToolkit.Dataverse.Linq
 
 A LINQ query provider for Microsoft Dataverse that translates LINQ expressions into FetchXml queries.
 
 ## Installation
 
 ```
-dotnet add package Dataverse.Linq
+dotnet add package XrmToolkit.Dataverse.Linq
 ```
 
 ## Usage
 
 ```csharp
-using Dataverse.Linq;
+using XrmToolkit.Dataverse.Linq;
 using Microsoft.PowerPlatform.Dataverse.Client;
 
 var client = new ServiceClient("your-connection-string");

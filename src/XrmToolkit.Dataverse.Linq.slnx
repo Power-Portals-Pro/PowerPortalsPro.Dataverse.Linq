@@ -1,0 +1,8 @@
+<Solution>
+  <Project Path="XrmToolkit.Dataverse.Linq/XrmToolkit.Dataverse.Linq.csproj" />
+  <Folder Name="/Solution Items/">
+    <File Path="../.gitignore" />
+    <File Path="../README.md" />
+  </Folder>
+  <Project Path="XrmToolkit.Dataverse.Linq.Tests/XrmToolkit.Dataverse.Linq.Tests.csproj" />
+</Solution>

@@ -2,4 +2,4 @@
 
 ## Testing
 
-- When adding or modifying a feature to the Dataverse.Linq query provider, always create both FetchXml generation unit tests (in `FetchXmlGenerationTests.cs`) and integration tests (in `QueryableIntegrationTests.cs`).
+- When adding or modifying a feature to the XrmToolkit.Dataverse.Linq query provider, always create both FetchXml generation unit tests (in the `FetchXml/` folder) and integration tests (in the `Integration/` folder).
