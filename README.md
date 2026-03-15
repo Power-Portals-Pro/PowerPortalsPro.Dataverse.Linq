@@ -118,6 +118,40 @@ await service.Queryable<Contact>()
     a => a.PrimaryContactId.Id == c.ContactId))
 ```
 
+### Universal Filtering (All)
+
+The `All()` operator translates to FetchXml [`link-type="all"` / `"not all"`](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/fetchxml/reference/link-entity). It returns parent rows where **every** related child satisfies the condition. Parents with no related children are excluded.
+
+The LINQ predicate is automatically negated in the generated FetchXml (including DeMorgan's law for nested `&&`/`||` conditions), because FetchXml `link-type="all"` uses inverted filter semantics — the filter describes what would cause a child to *fail*.
+
+```csharp
+// Contacts where ALL linked accounts have a non-null rating
+await service.Queryable<Contact>()
+    .Where(c => service.Queryable<Account>().All(
+        a => a.PrimaryContactId.Id == c.ContactId
+             && a.AccountRating != null))
+    .ToListAsync();
+
+// Contacts where NOT ALL linked accounts have Name "Contoso"
+// (i.e., at least one linked account has a different name)
+await service.Queryable<Contact>()
+    .Where(c => !service.Queryable<Account>().All(
+        a => a.PrimaryContactId.Id == c.ContactId
+             && a.Name == "Contoso"))
+    .ToListAsync();
+
+// Complex predicate with OR — DeMorgan applied automatically
+// All(Name == "Contoso" || Rating != null) generates:
+//   link-type="all" with filter: Name != "Contoso" AND Rating == null
+await service.Queryable<Contact>()
+    .Where(c => service.Queryable<Account>().All(
+        a => a.PrimaryContactId.Id == c.ContactId
+             && (a.Name == "Contoso" || a.AccountRating != null)))
+    .ToListAsync();
+```
+
+`All()` and `!All()` are complementary within the set of parents that have at least one related child.
+
 ### DateTime Operators
 
 Extension methods in `XrmToolkit.Dataverse.Linq.Extensions` map to all [FetchXml datetime condition operators](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/fetchxml/reference/operators#datetime-data):

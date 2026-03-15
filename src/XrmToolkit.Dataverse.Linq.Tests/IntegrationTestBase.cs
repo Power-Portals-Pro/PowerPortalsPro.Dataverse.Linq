@@ -22,8 +22,13 @@ public class IntegrationTestBase : IDisposable
 
         var serviceCollection = new ServiceCollection();
         serviceCollection.AddSingleton<IConfiguration>(_ => fixture.Configuration);
-        serviceCollection.AddSingleton<IOrganizationService>(_ => fixture.CreateClient());
         serviceCollection.AddSingleton<ServiceClient>(_ => fixture.CreateClient());
+#if !NETFRAMEWORK
+        serviceCollection.AddSingleton<IOrganizationServiceAsync>(sp =>
+            new RetryOrganizationService(sp.GetRequiredService<ServiceClient>()));
+#endif
+        serviceCollection.AddSingleton<IOrganizationService>(sp =>
+            new RetryOrganizationService(sp.GetRequiredService<ServiceClient>()));
         serviceCollection.AddSingleton<ITracingService>(_ => new ConsoleTracer());
 
         serviceCollection.AddLogging(builder => builder.AddConsole());

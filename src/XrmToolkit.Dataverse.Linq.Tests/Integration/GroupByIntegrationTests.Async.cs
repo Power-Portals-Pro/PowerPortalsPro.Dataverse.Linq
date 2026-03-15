@@ -1,3 +1,5 @@
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.PowerPlatform.Dataverse.Client;
 using FluentAssertions;
 using XrmToolkit.Dataverse.Linq.Tests.Proxies;
 

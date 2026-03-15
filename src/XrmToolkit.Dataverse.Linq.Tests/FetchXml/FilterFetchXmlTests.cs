@@ -678,6 +678,124 @@ public class FilterFetchXmlTests : FetchXmlTestBase
     }
 
     // -------------------------------------------------------------------------
+    // Where — All() (link-type="all" / "not all")
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_WhereAll_GeneratesLinkTypeAll()
+    {
+        var fetchXml = _service.Queryable<CustomContact>()
+            .Where(contact => _service.Queryable<CustomAccount>().All(
+                a => a.PrimaryContact.Id == contact.CustomContactId
+                     && a.AccountRating_OptionSetValue != null))
+            .Select(contact => new { contact.Name })
+            .ToFetchXml();
+
+        // All() negates the filter: "!= null" becomes "null" in FetchXml
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customcontact">
+                <attribute name="new_name" />
+                <filter type="and">
+                  <link-entity name="new_customaccount" from="new_primarycontact" to="new_customcontactid" alias="a" link-type="all">
+                    <filter type="and">
+                      <condition attribute="new_accountrating" operator="null" />
+                    </filter>
+                  </link-entity>
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WhereNotAll_GeneratesLinkTypeNotAll()
+    {
+        var fetchXml = _service.Queryable<CustomContact>()
+            .Where(contact => !_service.Queryable<CustomAccount>().All(
+                a => a.PrimaryContact.Id == contact.CustomContactId
+                     && a.AccountRating_OptionSetValue != null))
+            .Select(contact => new { contact.Name })
+            .ToFetchXml();
+
+        // !All() also negates the filter, but uses "not all" link-type
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customcontact">
+                <attribute name="new_name" />
+                <filter type="and">
+                  <link-entity name="new_customaccount" from="new_primarycontact" to="new_customcontactid" alias="a" link-type="not all">
+                    <filter type="and">
+                      <condition attribute="new_accountrating" operator="null" />
+                    </filter>
+                  </link-entity>
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WhereAll_WithEqualityCondition_NegatesOperator()
+    {
+        // All accounts where Name == "Contoso" → FetchXml should have ne "Contoso"
+        var fetchXml = _service.Queryable<CustomContact>()
+            .Where(contact => _service.Queryable<CustomAccount>().All(
+                a => a.PrimaryContact.Id == contact.CustomContactId
+                     && a.Name == "Contoso"))
+            .Select(contact => new { contact.Name })
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customcontact">
+                <attribute name="new_name" />
+                <filter type="and">
+                  <link-entity name="new_customaccount" from="new_primarycontact" to="new_customcontactid" alias="a" link-type="all">
+                    <filter type="and">
+                      <condition attribute="new_name" operator="ne" value="Contoso" />
+                    </filter>
+                  </link-entity>
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WhereAll_WithOrCondition_NegatesWithDeMorgan()
+    {
+        // All(a => join && (name == "X" || rating != null))
+        // Negated: name != "X" AND rating == null (DeMorgan flips OR→AND, negates leaves)
+        var fetchXml = _service.Queryable<CustomContact>()
+            .Where(contact => _service.Queryable<CustomAccount>().All(
+                a => a.PrimaryContact.Id == contact.CustomContactId
+                     && (a.Name == "Contoso" || a.AccountRating_OptionSetValue != null)))
+            .Select(contact => new { contact.Name })
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customcontact">
+                <attribute name="new_name" />
+                <filter type="and">
+                  <link-entity name="new_customaccount" from="new_primarycontact" to="new_customcontactid" alias="a" link-type="all">
+                    <filter type="and">
+                      <condition attribute="new_name" operator="ne" value="Contoso" />
+                      <condition attribute="new_accountrating" operator="null" />
+                    </filter>
+                  </link-entity>
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    // -------------------------------------------------------------------------
     // Entity.Id resolution
     // -------------------------------------------------------------------------
 

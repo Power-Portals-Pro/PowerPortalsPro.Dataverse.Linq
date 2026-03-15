@@ -704,19 +704,27 @@ internal static class FetchXmlQueryTranslator
                 HandleAnyPredicate(anyCall, filter, negated, ctx.PrimaryKeyResolver);
                 return;
 
+            // Queryable.All(source, predicate) → link-type="all" / negated → "not all"
+            case MethodCallExpression { Method: { Name: "All", DeclaringType: var allDeclType } } allCall
+                when allDeclType == typeof(Queryable) && allCall.Arguments.Count == 2:
+                HandleAllPredicate(allCall, filter, negated, ctx.PrimaryKeyResolver);
+                return;
+
             // && → AND filter (flatten if parent is already AND)
+            // When negated, DeMorgan: ¬(a ∧ b) = ¬a ∨ ¬b
             case BinaryExpression { NodeType: ExpressionType.AndAlso } andExpr:
-                TranslateLogicalPredicate(andExpr, filter, FilterType.And, ctx);
+                TranslateLogicalPredicate(andExpr, filter, negated ? FilterType.Or : FilterType.And, ctx, negated);
                 return;
 
             // || → OR filter (flatten if parent is already OR)
+            // When negated, DeMorgan: ¬(a ∨ b) = ¬a ∧ ¬b
             case BinaryExpression { NodeType: ExpressionType.OrElse } orExpr:
-                TranslateLogicalPredicate(orExpr, filter, FilterType.Or, ctx);
+                TranslateLogicalPredicate(orExpr, filter, negated ? FilterType.And : FilterType.Or, ctx, negated);
                 return;
 
             // Comparison operators (==, !=, <, <=, >, >=)
             case BinaryExpression binary:
-                TranslateComparisonPredicate(binary, filter, ctx);
+                TranslateComparisonPredicate(binary, filter, ctx, negated);
                 return;
 
             default:
@@ -791,26 +799,26 @@ internal static class FetchXmlQueryTranslator
     }
 
     private static void TranslateLogicalPredicate(
-        BinaryExpression expr, FetchFilter filter, FilterType type, TranslationContext ctx)
+        BinaryExpression expr, FetchFilter filter, FilterType type, TranslationContext ctx, bool negated = false)
     {
         if (filter.Type == type)
         {
             // Same type as parent — flatten into parent
-            TranslatePredicate(expr.Left, filter, ctx);
-            TranslatePredicate(expr.Right, filter, ctx);
+            TranslatePredicate(expr.Left, filter, ctx, negated);
+            TranslatePredicate(expr.Right, filter, ctx, negated);
         }
         else
         {
             // Different type — create sub-filter
             var subFilter = new FetchFilter { Type = type };
-            TranslatePredicate(expr.Left, subFilter, ctx);
-            TranslatePredicate(expr.Right, subFilter, ctx);
+            TranslatePredicate(expr.Left, subFilter, ctx, negated);
+            TranslatePredicate(expr.Right, subFilter, ctx, negated);
             filter.Filters.Add(subFilter);
         }
     }
 
     private static void TranslateComparisonPredicate(
-        BinaryExpression binary, FetchFilter filter, TranslationContext ctx)
+        BinaryExpression binary, FetchFilter filter, TranslationContext ctx, bool negated = false)
     {
         var op = binary.NodeType switch
         {
@@ -823,6 +831,20 @@ internal static class FetchXmlQueryTranslator
             _ => throw new NotSupportedException(
                 $"Unsupported comparison operator in Where: {binary.NodeType}")
         };
+
+        if (negated)
+        {
+            op = op switch
+            {
+                ConditionOperator.Equal => ConditionOperator.NotEqual,
+                ConditionOperator.NotEqual => ConditionOperator.Equal,
+                ConditionOperator.LessThan => ConditionOperator.GreaterEqual,
+                ConditionOperator.LessEqual => ConditionOperator.GreaterThan,
+                ConditionOperator.GreaterThan => ConditionOperator.LessEqual,
+                ConditionOperator.GreaterEqual => ConditionOperator.LessThan,
+                _ => op
+            };
+        }
 
         // string.Length comparison → like / not-like with underscore patterns
         if (TryTranslateStringLength(binary, op, filter, ctx))
@@ -1054,6 +1076,71 @@ internal static class FetchXmlQueryTranslator
             var innerCtx = new TranslationContext(innerQuery, innerParam.Type);
             foreach (var fc in filterConditions)
                 TranslatePredicate(fc, linkEntity.Filter, innerCtx);
+        }
+
+        filter.Links.Add(linkEntity);
+    }
+
+    /// <summary>
+    /// Translates a <c>Queryable.All(source, predicate)</c> call into a
+    /// <see cref="FetchLinkEntity"/> with <c>link-type="all"</c> (or <c>"not all"</c>
+    /// when negated) nested inside the current filter.
+    /// <para>
+    /// FetchXml <c>link-type="all"</c> returns the parent row when NO child rows match
+    /// the filter. The conditions are therefore the logical inverse of the LINQ predicate:
+    /// <c>.All(t =&gt; t.StateCode == 0)</c> becomes <c>operator="ne" value="0"</c>.
+    /// </para>
+    /// </summary>
+    private static void HandleAllPredicate(
+        MethodCallExpression allCall, FetchFilter filter, bool negated,
+        Func<string, string>? primaryKeyResolver = null)
+    {
+        var (innerLogicalName, _) = allCall.Arguments[0].GetSourceInfoFromType();
+        var lambda = allCall.Arguments[1].ExtractLambda();
+        var innerParam = lambda.Parameters[0];
+
+        // Flatten AndAlso chain and separate join vs filter conditions.
+        var allConditions = lambda.Body.FlattenAndAlso();
+        string? from = null, to = null;
+        var filterConditions = new List<Expression>();
+
+        foreach (var condition in allConditions)
+        {
+            if (from is null && TryExtractJoinCondition(condition, innerParam, out var f, out var t, primaryKeyResolver))
+            {
+                from = f;
+                to = t;
+            }
+            else
+            {
+                filterConditions.Add(condition);
+            }
+        }
+
+        if (from is null || to is null)
+            throw new NotSupportedException(
+                "All() predicate must contain a join condition that compares an inner entity " +
+                "attribute to an outer entity attribute (e.g. a.PrimaryContactId.Id == contact.ContactId).");
+
+        var linkEntity = new FetchLinkEntity
+        {
+            Name = innerLogicalName,
+            From = from,
+            To = to,
+            Alias = innerParam.Name!,
+            LinkType = negated ? "not all" : "all"
+        };
+
+        // Translate remaining conditions as filters on the link-entity.
+        // Conditions are NEGATED because FetchXml "all" semantics are inverted:
+        // the filter describes the "failing" condition.
+        if (filterConditions.Count > 0)
+        {
+            linkEntity.Filter = new FetchFilter { Type = FilterType.And };
+            var innerQuery = new FetchXmlQuery { EntityLogicalName = innerLogicalName };
+            var innerCtx = new TranslationContext(innerQuery, innerParam.Type);
+            foreach (var fc in filterConditions)
+                TranslatePredicate(fc, linkEntity.Filter, innerCtx, negated: true);
         }
 
         filter.Links.Add(linkEntity);

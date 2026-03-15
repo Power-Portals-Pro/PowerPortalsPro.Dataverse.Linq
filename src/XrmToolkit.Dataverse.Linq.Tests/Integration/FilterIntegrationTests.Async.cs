@@ -1,3 +1,5 @@
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.PowerPlatform.Dataverse.Client;
 using FluentAssertions;
 using XrmToolkit.Dataverse.Linq.Tests.Proxies;
 
@@ -493,6 +495,118 @@ public partial class FilterIntegrationTests
 
         // Each of the 100 accounts has a primary contact (the first contact per account group).
         results.Should().HaveCount(100);
+    }
+
+    // -------------------------------------------------------------------------
+    // All() — link-type="all" / "not all"
+    //
+    // FetchXml link-type="all" only considers parent rows that have at least
+    // one related child. Parents with no children are excluded (no vacuous truth).
+    // All() and !All() are complementary within the set of parents that HAVE children.
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ToListAsync_WhereAll_ReturnsContactsWhereAllLinkedAccountsSatisfyCondition()
+    {
+        // Find contacts where ALL accounts referencing them as PrimaryContact
+        // have Name == "Custom Account 001". Only 1 contact is the primary contact
+        // of that specific account. Each contact is the primary contact of at most
+        // one account, so only that one contact satisfies the condition.
+        var results = await Service.Queryable<CustomContact>()
+            .Where(contact => Service.Queryable<CustomAccount>().All(
+                a => a.PrimaryContact.Id == contact.CustomContactId
+                     && a.Name == "Custom Account 001"))
+            .ToListAsync();
+
+        results.Should().HaveCount(1);
+        results[0].FirstName.Should().Be("First001");
+    }
+
+    [Fact]
+    public async Task ToListAsync_WhereNotAll_ReturnsContactsWhereAtLeastOneLinkedAccountFails()
+    {
+        // !All(Name == "Custom Account 001") means: at least one linked account
+        // has Name != "Custom Account 001". This returns the 99 contacts that are
+        // the primary contact of an account OTHER than "Custom Account 001".
+        var results = await Service.Queryable<CustomContact>()
+            .Where(contact => !Service.Queryable<CustomAccount>().All(
+                a => a.PrimaryContact.Id == contact.CustomContactId
+                     && a.Name == "Custom Account 001"))
+            .ToListAsync();
+
+        results.Should().HaveCount(99);
+    }
+
+    [Fact]
+    public async Task ToListAsync_WhereAll_PlusNotAll_CoversContactsWithLinkedAccounts()
+    {
+        // All(..) and !All(..) are complementary within the set of contacts that
+        // are someone's primary contact (100 contacts). Contacts without any linked
+        // accounts are excluded from both results.
+        var primaryContacts = await Service.Queryable<CustomContact>()
+            .Where(contact => Service.Queryable<CustomAccount>().Any(
+                a => a.PrimaryContact.Id == contact.CustomContactId))
+            .ToListAsync();
+
+        var allMatch = await Service.Queryable<CustomContact>()
+            .Where(contact => Service.Queryable<CustomAccount>().All(
+                a => a.PrimaryContact.Id == contact.CustomContactId
+                     && a.Name == "Custom Account 001"))
+            .ToListAsync();
+
+        var notAllMatch = await Service.Queryable<CustomContact>()
+            .Where(contact => !Service.Queryable<CustomAccount>().All(
+                a => a.PrimaryContact.Id == contact.CustomContactId
+                     && a.Name == "Custom Account 001"))
+            .ToListAsync();
+
+        (allMatch.Count + notAllMatch.Count).Should().Be(primaryContacts.Count);
+        allMatch.Select(c => c.CustomContactId).Should().NotIntersectWith(
+            notAllMatch.Select(c => c.CustomContactId));
+    }
+
+    [Fact]
+    public async Task ToListAsync_WhereAll_WithNotNullCondition_ReturnsExpectedResults()
+    {
+        // Find contacts where ALL accounts referencing them as PrimaryContact
+        // have a non-null AccountRating. Seed data: AccountRating is set when i % 5 != 0,
+        // so 20 accounts have null rating. Their primary contacts are excluded.
+        // The remaining 80 primary contacts should be returned.
+        var accountsWithRating = await Service.Queryable<CustomAccount>()
+            .Where(a => a.PrimaryContact != null && a.AccountRating_OptionSetValue != null)
+            .ToListAsync();
+
+        var results = await Service.Queryable<CustomContact>()
+            .Where(contact => Service.Queryable<CustomAccount>().All(
+                a => a.PrimaryContact.Id == contact.CustomContactId
+                     && a.AccountRating_OptionSetValue != null))
+            .ToListAsync();
+
+        results.Should().HaveCount(accountsWithRating.Count);
+    }
+
+    [Fact]
+    public async Task ToListAsync_WhereAll_WithOrCondition_DeMorganApplied()
+    {
+        // All(join && (Name == "Custom Account 001" || Rating != null))
+        // DeMorgan negation: Name != "Custom Account 001" AND Rating == null
+        // Returns contacts where NO linked account fails BOTH conditions.
+        // Cross-validate: the count of contacts with ALL passing should be
+        // (100 primary contacts) minus (contacts whose account fails both conditions).
+        var failingAccounts = await Service.Queryable<CustomAccount>()
+            .Where(a => a.PrimaryContact != null
+                        && a.Name != "Custom Account 001"
+                        && a.AccountRating_OptionSetValue == null)
+            .ToListAsync();
+
+        var results = await Service.Queryable<CustomContact>()
+            .Where(contact => Service.Queryable<CustomAccount>().All(
+                a => a.PrimaryContact.Id == contact.CustomContactId
+                     && (a.Name == "Custom Account 001" || a.AccountRating_OptionSetValue != null)))
+            .ToListAsync();
+
+        // 100 primary contacts minus those whose account fails both conditions
+        results.Should().HaveCount(100 - failingAccounts.Count);
     }
 
     // -------------------------------------------------------------------------
