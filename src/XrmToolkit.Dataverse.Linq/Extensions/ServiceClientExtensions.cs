@@ -239,6 +239,17 @@ public static partial class ServiceClientExtensions
     }
 
     /// <summary>
+    /// Filters to rows where a related record exists matching the predicate.
+    /// Translates to FetchXml <c>link-type="exists"</c>.
+    /// This method is a placeholder for the Dataverse LINQ query provider and cannot be invoked directly.
+    /// </summary>
+    public static bool Exists<TSource>(this IQueryable<TSource> source, Expression<Func<TSource, bool>> predicate)
+    {
+        throw new NotImplementedException(
+            "This method is a placeholder for the Dataverse LINQ query provider and cannot be invoked directly.");
+    }
+
+    /// <summary>
     /// Returns the count of child records for the entity.
     /// Translates to FetchXml <c>rowaggregate="CountChildren"</c>.
     /// This method is a placeholder for the Dataverse LINQ query provider and cannot be invoked directly.

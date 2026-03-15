@@ -796,6 +796,84 @@ public class FilterFetchXmlTests : FetchXmlTestBase
     }
 
     // -------------------------------------------------------------------------
+    // Where — Exists() (link-type="exists" / "not exists")
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_WhereExists_GeneratesLinkTypeExists()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Where(a => _service.Queryable<CustomContact>().Exists(
+                c => c.ParentAccount.Id == a.CustomAccountId
+                     && c.ContactRating_OptionSetValue != null))
+            .Select(a => new { a.Name })
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="exists">
+                  <filter type="and">
+                    <condition attribute="new_contactrating" operator="not-null" />
+                  </filter>
+                </link-entity>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WhereNotExists_FallsBackToNotAny()
+    {
+        // Dataverse doesn't support link-type="not exists", so !Exists()
+        // falls back to link-type="not any" inside a filter.
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Where(a => !_service.Queryable<CustomContact>().Exists(
+                c => c.ParentAccount.Id == a.CustomAccountId
+                     && c.ContactRating_OptionSetValue != null))
+            .Select(a => new { a.Name })
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+                <filter type="and">
+                  <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="not any">
+                    <filter type="and">
+                      <condition attribute="new_contactrating" operator="not-null" />
+                    </filter>
+                  </link-entity>
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WhereExists_WithoutFilter_GeneratesLinkTypeExistsNoFilter()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Where(a => _service.Queryable<CustomContact>().Exists(
+                c => c.ParentAccount.Id == a.CustomAccountId))
+            .Select(a => new { a.Name })
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="exists" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    // -------------------------------------------------------------------------
     // Entity.Id resolution
     // -------------------------------------------------------------------------
 

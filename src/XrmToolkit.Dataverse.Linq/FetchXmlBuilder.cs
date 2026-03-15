@@ -58,7 +58,7 @@ internal static class FetchXmlBuilder
         foreach (var order in query.Orders)
             element.Add(BuildOrder(order));
 
-        if (query.Filter is not null)
+        if (query.Filter is not null && !IsEmptyFilter(query.Filter))
             element.Add(BuildFilter(query.Filter));
 
         foreach (var link in query.Links)
@@ -171,6 +171,9 @@ internal static class FetchXmlBuilder
 
         return element;
     }
+
+    private static bool IsEmptyFilter(FetchFilter filter) =>
+        filter.Conditions.Count == 0 && filter.Filters.Count == 0 && filter.Links.Count == 0;
 
     private static void AddAttributes(XElement element, List<FetchAttribute> attributes, bool allAttributes)
     {

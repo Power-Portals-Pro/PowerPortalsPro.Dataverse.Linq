@@ -102,9 +102,13 @@ Prefix any boolean filter with `!` to negate it:
 .Where(a => !a.CreatedOn.LastXDays(30))
 ```
 
-### Subquery Filtering (Any)
+### Subquery Filtering (Any, All, Exists)
 
-The `Any()` operator translates to FetchXml [`link-type="any"` / `"not any"`](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/fetchxml/reference/link-entity):
+These operators filter rows based on the existence or properties of related records, translating to FetchXml [link-entity](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/fetchxml/reference/link-entity) elements with special `link-type` values. Each predicate must include a join condition relating the inner entity to the outer entity.
+
+#### Any — at least one match
+
+`Any()` translates to `link-type="any"` (nested inside a `<filter>`). Returns parent rows where **at least one** related child matches.
 
 ```csharp
 // Contacts that are the primary contact of an account named "Contoso"
@@ -113,16 +117,18 @@ await service.Queryable<Contact>()
         a => a.PrimaryContactId.Id == c.ContactId && a.Name == "Contoso"))
     .ToListAsync();
 
-// Negate with !
-.Where(c => !service.Queryable<Account>().Any(
-    a => a.PrimaryContactId.Id == c.ContactId))
+// Negate with ! → link-type="not any" (no matching children)
+await service.Queryable<Contact>()
+    .Where(c => !service.Queryable<Account>().Any(
+        a => a.PrimaryContactId.Id == c.ContactId))
+    .ToListAsync();
 ```
 
-### Universal Filtering (All)
+#### All — every child matches
 
-The `All()` operator translates to FetchXml [`link-type="all"` / `"not all"`](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/fetchxml/reference/link-entity). It returns parent rows where **every** related child satisfies the condition. Parents with no related children are excluded.
+`All()` translates to `link-type="all"`. Returns parent rows where **every** related child satisfies the condition. Parents with no children are excluded (no vacuous truth).
 
-The LINQ predicate is automatically negated in the generated FetchXml (including DeMorgan's law for nested `&&`/`||` conditions), because FetchXml `link-type="all"` uses inverted filter semantics — the filter describes what would cause a child to *fail*.
+The LINQ predicate is automatically negated in the generated FetchXml (including DeMorgan's law for nested `&&`/`||` conditions), because FetchXml `link-type="all"` uses [inverted filter semantics](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/fetchxml/reference/link-entity) — the filter describes what would cause a child to *fail*.
 
 ```csharp
 // Contacts where ALL linked accounts have a non-null rating
@@ -132,8 +138,7 @@ await service.Queryable<Contact>()
              && a.AccountRating != null))
     .ToListAsync();
 
-// Contacts where NOT ALL linked accounts have Name "Contoso"
-// (i.e., at least one linked account has a different name)
+// Negate with ! → link-type="not all" (at least one child fails)
 await service.Queryable<Contact>()
     .Where(c => !service.Queryable<Account>().All(
         a => a.PrimaryContactId.Id == c.ContactId
@@ -151,6 +156,45 @@ await service.Queryable<Contact>()
 ```
 
 `All()` and `!All()` are complementary within the set of parents that have at least one related child.
+
+#### Exists — efficient semi-join
+
+`Exists()` translates to `link-type="exists"` placed as a direct child of the `<entity>` element (not inside a `<filter>`). This is a [semi-join](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/fetchxml/reference/link-entity) — it filters the parent rows without returning any columns from the related entity.
+
+Use `Exists()` when you only need to check whether a matching related record exists, without needing the related data in the result. It is often more performant than `Any()` for simple existence checks.
+
+```csharp
+// Accounts that have at least one active contact
+await service.Queryable<Account>()
+    .Where(a => service.Queryable<Contact>().Exists(
+        c => c.ParentCustomerId.Id == a.AccountId && c.StateCode == 0))
+    .ToListAsync();
+
+// Accounts with NO contacts at all
+// (Dataverse doesn't support link-type="not exists", so !Exists()
+//  automatically falls back to link-type="not any")
+await service.Queryable<Account>()
+    .Where(a => !service.Queryable<Contact>().Exists(
+        c => c.ParentCustomerId.Id == a.AccountId))
+    .ToListAsync();
+
+// Exists with no filter — just check for any related record
+await service.Queryable<Account>()
+    .Where(a => service.Queryable<Contact>().Exists(
+        c => c.ParentCustomerId.Id == a.AccountId))
+    .ToListAsync();
+```
+
+#### Summary
+
+| LINQ Operator | FetchXml `link-type` | Placement | Behavior |
+|---|---|---|---|
+| `.Any(predicate)` | `any` | Inside `<filter>` | At least one child matches |
+| `!.Any(predicate)` | `not any` | Inside `<filter>` | No children match |
+| `.All(predicate)` | `all` | Inside `<filter>` | All children match (conditions negated) |
+| `!.All(predicate)` | `not all` | Inside `<filter>` | At least one child fails (conditions negated) |
+| `.Exists(predicate)` | `exists` | Direct child of `<entity>` | Efficient semi-join existence check |
+| `!.Exists(predicate)` | `not any` (fallback) | Inside `<filter>` | No matching children |
 
 ### DateTime Operators
 

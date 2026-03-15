@@ -509,40 +509,53 @@ public partial class FilterIntegrationTests
     public async Task ToListAsync_WhereAll_ReturnsContactsWhereAllLinkedAccountsSatisfyCondition()
     {
         // Find contacts where ALL accounts referencing them as PrimaryContact
-        // have Name == "Custom Account 001". Only 1 contact is the primary contact
-        // of that specific account. Each contact is the primary contact of at most
-        // one account, so only that one contact satisfies the condition.
+        // have Name == "Custom Account 001". Cross-validate: find the one account
+        // with that name, then find its primary contact.
+        var targetAccount = await Service.Queryable<CustomAccount>()
+            .FirstAsync(a => a.Name == "Custom Account 001");
+
         var results = await Service.Queryable<CustomContact>()
             .Where(contact => Service.Queryable<CustomAccount>().All(
                 a => a.PrimaryContact.Id == contact.CustomContactId
                      && a.Name == "Custom Account 001"))
             .ToListAsync();
 
+        // Only the primary contact of that one account should match
         results.Should().HaveCount(1);
-        results[0].FirstName.Should().Be("First001");
+        results[0].CustomContactId.Should().Be(targetAccount.PrimaryContact.Id);
     }
 
     [Fact]
     public async Task ToListAsync_WhereNotAll_ReturnsContactsWhereAtLeastOneLinkedAccountFails()
     {
         // !All(Name == "Custom Account 001") means: at least one linked account
-        // has Name != "Custom Account 001". This returns the 99 contacts that are
-        // the primary contact of an account OTHER than "Custom Account 001".
+        // has Name != "Custom Account 001". Cross-validate: all primary contacts
+        // except the one linked to "Custom Account 001".
+        var primaryContacts = await Service.Queryable<CustomContact>()
+            .Where(contact => Service.Queryable<CustomAccount>().Any(
+                a => a.PrimaryContact.Id == contact.CustomContactId))
+            .ToListAsync();
+
+        var allMatch = await Service.Queryable<CustomContact>()
+            .Where(contact => Service.Queryable<CustomAccount>().All(
+                a => a.PrimaryContact.Id == contact.CustomContactId
+                     && a.Name == "Custom Account 001"))
+            .ToListAsync();
+
         var results = await Service.Queryable<CustomContact>()
             .Where(contact => !Service.Queryable<CustomAccount>().All(
                 a => a.PrimaryContact.Id == contact.CustomContactId
                      && a.Name == "Custom Account 001"))
             .ToListAsync();
 
-        results.Should().HaveCount(99);
+        results.Should().HaveCount(primaryContacts.Count - allMatch.Count);
     }
 
     [Fact]
     public async Task ToListAsync_WhereAll_PlusNotAll_CoversContactsWithLinkedAccounts()
     {
         // All(..) and !All(..) are complementary within the set of contacts that
-        // are someone's primary contact (100 contacts). Contacts without any linked
-        // accounts are excluded from both results.
+        // have linked accounts. Use Any() to establish the baseline.
         var primaryContacts = await Service.Queryable<CustomContact>()
             .Where(contact => Service.Queryable<CustomAccount>().Any(
                 a => a.PrimaryContact.Id == contact.CustomContactId))
@@ -569,12 +582,13 @@ public partial class FilterIntegrationTests
     public async Task ToListAsync_WhereAll_WithNotNullCondition_ReturnsExpectedResults()
     {
         // Find contacts where ALL accounts referencing them as PrimaryContact
-        // have a non-null AccountRating. Seed data: AccountRating is set when i % 5 != 0,
-        // so 20 accounts have null rating. Their primary contacts are excluded.
-        // The remaining 80 primary contacts should be returned.
-        var accountsWithRating = await Service.Queryable<CustomAccount>()
-            .Where(a => a.PrimaryContact != null && a.AccountRating_OptionSetValue != null)
-            .ToListAsync();
+        // have a non-null AccountRating. Cross-validate: primary contacts of
+        // accounts that DO have a rating.
+        var expectedContactIds = (await (from a in Service.Queryable<CustomAccount>()
+                                         where a.PrimaryContact != null
+                                               && a.AccountRating_OptionSetValue != null
+                                         select a.PrimaryContact.Id).ToListAsync())
+            .Distinct().ToList();
 
         var results = await Service.Queryable<CustomContact>()
             .Where(contact => Service.Queryable<CustomAccount>().All(
@@ -582,7 +596,8 @@ public partial class FilterIntegrationTests
                      && a.AccountRating_OptionSetValue != null))
             .ToListAsync();
 
-        results.Should().HaveCount(accountsWithRating.Count);
+        results.Should().HaveCount(expectedContactIds.Count);
+        results.Select(c => c.CustomContactId).Should().BeEquivalentTo(expectedContactIds);
     }
 
     [Fact]
@@ -591,13 +606,18 @@ public partial class FilterIntegrationTests
         // All(join && (Name == "Custom Account 001" || Rating != null))
         // DeMorgan negation: Name != "Custom Account 001" AND Rating == null
         // Returns contacts where NO linked account fails BOTH conditions.
-        // Cross-validate: the count of contacts with ALL passing should be
-        // (100 primary contacts) minus (contacts whose account fails both conditions).
-        var failingAccounts = await Service.Queryable<CustomAccount>()
-            .Where(a => a.PrimaryContact != null
-                        && a.Name != "Custom Account 001"
-                        && a.AccountRating_OptionSetValue == null)
+        // Cross-validate: primary contacts minus those whose account fails.
+        var primaryContacts = await Service.Queryable<CustomContact>()
+            .Where(contact => Service.Queryable<CustomAccount>().Any(
+                a => a.PrimaryContact.Id == contact.CustomContactId))
             .ToListAsync();
+
+        var failingAccountContactIds = (await (from a in Service.Queryable<CustomAccount>()
+                                                where a.PrimaryContact != null
+                                                      && a.Name != "Custom Account 001"
+                                                      && a.AccountRating_OptionSetValue == null
+                                                select a.PrimaryContact.Id).ToListAsync())
+            .Distinct().ToHashSet();
 
         var results = await Service.Queryable<CustomContact>()
             .Where(contact => Service.Queryable<CustomAccount>().All(
@@ -605,8 +625,107 @@ public partial class FilterIntegrationTests
                      && (a.Name == "Custom Account 001" || a.AccountRating_OptionSetValue != null)))
             .ToListAsync();
 
-        // 100 primary contacts minus those whose account fails both conditions
-        results.Should().HaveCount(100 - failingAccounts.Count);
+        results.Should().HaveCount(primaryContacts.Count - failingAccountContactIds.Count);
+        results.Select(c => c.CustomContactId).Should().NotContain(
+            id => failingAccountContactIds.Contains(id));
+    }
+
+    // -------------------------------------------------------------------------
+    // Exists() — link-type="exists" / "not exists"
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ToListAsync_WhereExists_ReturnsAccountsWithMatchingContacts()
+    {
+        // Find accounts where there EXISTS a contact with a non-null rating.
+        // Cross-validate with a join: distinct account IDs from contacts that have ratings.
+        var expectedIds = (await (from a in Service.Queryable<CustomAccount>()
+                                  join c in Service.Queryable<CustomContact>()
+                                      on a.CustomAccountId equals c.ParentAccount.Id
+                                  where c.ContactRating_OptionSetValue != null
+                                  select a.CustomAccountId).ToListAsync())
+            .Distinct().ToList();
+
+        var results = await Service.Queryable<CustomAccount>()
+            .Where(a => Service.Queryable<CustomContact>().Exists(
+                c => c.ParentAccount.Id == a.CustomAccountId
+                     && c.ContactRating_OptionSetValue != null))
+            .ToListAsync();
+
+        results.Should().HaveCount(expectedIds.Count);
+        results.Select(a => a.CustomAccountId).Should().BeEquivalentTo(expectedIds);
+    }
+
+    [Fact]
+    public async Task ToListAsync_WhereNotExists_ReturnsAccountsWithNoMatchingContacts()
+    {
+        // !Exists(rated contact) should return accounts that have NO contacts with ratings.
+        // Cross-validate: all accounts minus those that have at least one rated contact.
+        var allAccounts = await Service.Queryable<CustomAccount>().ToListAsync();
+
+        var accountsWithRatedContact = (await (from a in Service.Queryable<CustomAccount>()
+                                               join c in Service.Queryable<CustomContact>()
+                                                   on a.CustomAccountId equals c.ParentAccount.Id
+                                               where c.ContactRating_OptionSetValue != null
+                                               select a.CustomAccountId).ToListAsync())
+            .Distinct().ToHashSet();
+
+        var expected = allAccounts
+            .Where(a => !accountsWithRatedContact.Contains(a.CustomAccountId))
+            .ToList();
+
+        var results = await Service.Queryable<CustomAccount>()
+            .Where(a => !Service.Queryable<CustomContact>().Exists(
+                c => c.ParentAccount.Id == a.CustomAccountId
+                     && c.ContactRating_OptionSetValue != null))
+            .ToListAsync();
+
+        results.Should().HaveCount(expected.Count);
+        results.Select(a => a.CustomAccountId).Should().BeEquivalentTo(
+            expected.Select(a => a.CustomAccountId));
+    }
+
+    [Fact]
+    public async Task ToListAsync_WhereExists_PlusNotExists_CoversAllAccounts()
+    {
+        // Exists + !Exists with the same predicate should cover all accounts.
+        var allAccounts = await Service.Queryable<CustomAccount>().ToListAsync();
+
+        var exists = await Service.Queryable<CustomAccount>()
+            .Where(a => Service.Queryable<CustomContact>().Exists(
+                c => c.ParentAccount.Id == a.CustomAccountId))
+            .ToListAsync();
+
+        var notExists = await Service.Queryable<CustomAccount>()
+            .Where(a => !Service.Queryable<CustomContact>().Exists(
+                c => c.ParentAccount.Id == a.CustomAccountId))
+            .ToListAsync();
+
+        (exists.Count + notExists.Count).Should().Be(allAccounts.Count);
+        exists.Select(a => a.CustomAccountId).Should().NotIntersectWith(
+            notExists.Select(a => a.CustomAccountId));
+    }
+
+    [Fact]
+    public async Task ToListAsync_WhereExists_WithNameFilter_MatchesJoinResults()
+    {
+        // Accounts where there EXISTS a contact whose FirstName starts with "First001".
+        // Cross-validate with a join query.
+        var expectedIds = (await (from a in Service.Queryable<CustomAccount>()
+                                  join c in Service.Queryable<CustomContact>()
+                                      on a.CustomAccountId equals c.ParentAccount.Id
+                                  where c.FirstName.StartsWith("First001")
+                                  select a.CustomAccountId).ToListAsync())
+            .Distinct().ToList();
+
+        var results = await Service.Queryable<CustomAccount>()
+            .Where(a => Service.Queryable<CustomContact>().Exists(
+                c => c.ParentAccount.Id == a.CustomAccountId
+                     && c.FirstName.StartsWith("First001")))
+            .ToListAsync();
+
+        results.Should().HaveCount(expectedIds.Count);
+        results.Select(a => a.CustomAccountId).Should().BeEquivalentTo(expectedIds);
     }
 
     // -------------------------------------------------------------------------
