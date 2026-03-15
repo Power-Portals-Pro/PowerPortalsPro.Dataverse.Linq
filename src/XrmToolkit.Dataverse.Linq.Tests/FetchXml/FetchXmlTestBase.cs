@@ -1,6 +1,8 @@
 using XrmToolkit.Dataverse.Linq.Tests.Proxies;
 using FluentAssertions;
+#if !NETFRAMEWORK
 using Microsoft.PowerPlatform.Dataverse.Client;
+#endif
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Client;
 using Microsoft.Xrm.Sdk.Messages;
@@ -12,11 +14,19 @@ namespace XrmToolkit.Dataverse.Linq.Tests.FetchXml;
 
 public abstract class FetchXmlTestBase
 {
+#if !NETFRAMEWORK
     protected readonly IOrganizationServiceAsync _service;
+#else
+    protected readonly IOrganizationService _service;
+#endif
 
     protected FetchXmlTestBase()
     {
+#if !NETFRAMEWORK
         _service = Substitute.For<IOrganizationServiceAsync>();
+#else
+        _service = Substitute.For<IOrganizationService>();
+#endif
 
         // Set up metadata responses for Entity.Id resolution
         _service.Execute(Arg.Any<OrganizationRequest>()).Returns(callInfo =>
@@ -41,7 +51,10 @@ public abstract class FetchXmlTestBase
     }
 
     protected static void AssertFetchXml(string actual, string expected) =>
-        actual.ReplaceLineEndings("\n").Should().Be(expected.ReplaceLineEndings("\n"));
+        NormalizeLineEndings(actual).Should().Be(NormalizeLineEndings(expected));
+
+    private static string NormalizeLineEndings(string value) =>
+        value.Replace("\r\n", "\n").Replace("\r", "\n");
 
     protected static string TranslateToFetchXml<TEntity>(
         System.Linq.Expressions.Expression expression) where TEntity : Entity

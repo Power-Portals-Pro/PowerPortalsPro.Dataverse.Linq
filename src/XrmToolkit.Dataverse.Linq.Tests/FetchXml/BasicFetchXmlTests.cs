@@ -1,8 +1,5 @@
-using XrmToolkit.Dataverse.Linq.Tests.Proxies;
 using FluentAssertions;
-using Microsoft.PowerPlatform.Dataverse.Client;
-using Microsoft.Xrm.Sdk;
-using NSubstitute;
+using XrmToolkit.Dataverse.Linq.Tests.Proxies;
 
 namespace XrmToolkit.Dataverse.Linq.Tests.FetchXml;
 
