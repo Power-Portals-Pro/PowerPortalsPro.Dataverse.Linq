@@ -1,7 +1,5 @@
 using XrmToolkit.Dataverse.Linq.Expressions;
 using XrmToolkit.Dataverse.Linq.Model;
-using Microsoft.EntityFrameworkCore.Query;
-using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using System.Linq.Expressions;
@@ -10,13 +8,13 @@ using System.Xml.Linq;
 
 namespace XrmToolkit.Dataverse.Linq;
 
-internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
+internal class DataverseQueryProvider<T> : IQueryProvider where T : Entity
 {
-    internal IOrganizationServiceAsync Service { get; }
+    internal IOrganizationService Service { get; }
     internal string EntityLogicalName { get; }
     internal IReadOnlyList<string>? Columns { get; }
 
-    internal DataverseQueryProvider(IOrganizationServiceAsync service, string entityLogicalName, IReadOnlyList<string>? columns = null)
+    internal DataverseQueryProvider(IOrganizationService service, string entityLogicalName, IReadOnlyList<string>? columns = null)
     {
         Service = service;
         EntityLogicalName = entityLogicalName;
@@ -74,43 +72,6 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
     }
 
     // -------------------------------------------------------------------------
-    // IAsyncQueryProvider (EF Core)
-    // Note: TResult is the Task itself (e.g. Task<List<TElement>>), not the
-    // unwrapped value — this matches EF Core's interface contract.
-    // -------------------------------------------------------------------------
-
-    public TResult ExecuteAsync<TResult>(Expression expression, CancellationToken cancellationToken = default)
-    {
-        var query = FetchXmlQueryTranslator.Translate<T>(expression, Columns, EntityLogicalName, Service);
-
-        // Aggregate terminal operator: TResult = Task<TElement>
-        if (query.TerminalOperator is QueryTerminalOperator.Min or QueryTerminalOperator.Max
-            or QueryTerminalOperator.Sum or QueryTerminalOperator.Average
-            or QueryTerminalOperator.Count or QueryTerminalOperator.LongCount
-            or QueryTerminalOperator.CountColumn)
-        {
-            var elementType = typeof(TResult).GetGenericArguments()[0];
-            var method = GetPrivateMethod(nameof(ExecuteAggregateAsync)).MakeGenericMethod(elementType);
-            return (TResult)method.Invoke(this, [query, cancellationToken])!;
-        }
-
-        // Scalar terminal operator: TResult = Task<TElement>
-        if (query.TerminalOperator is not QueryTerminalOperator.List)
-        {
-            var elementType = typeof(TResult).GetGenericArguments()[0];
-            var method = GetPrivateMethod(nameof(ExecuteScalarAsync)).MakeGenericMethod(elementType);
-            return (TResult)method.Invoke(this, [query, cancellationToken])!;
-        }
-
-        // List: TResult = Task<List<TElement>>
-        {
-            var elementType = typeof(TResult).GetGenericArguments()[0].GetGenericArguments()[0];
-            var method = GetPrivateMethod(nameof(ExecuteQueryAsync)).MakeGenericMethod(elementType);
-            return (TResult)method.Invoke(this, [query, cancellationToken])!;
-        }
-    }
-
-    // -------------------------------------------------------------------------
     // Internal — used by DataverseQueryable<T>.GetEnumerator()
     // -------------------------------------------------------------------------
 
@@ -119,38 +80,6 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
         var query = FetchXmlQueryTranslator.Translate<T>(expression, Columns, EntityLogicalName, Service);
         var fetchXml = FetchXmlBuilder.Build(query);
         return RetrieveAll(fetchXml).Select(e => e.ToEntity<T>()).ToList();
-    }
-
-    internal async Task ForEachPageAsync<TElement>(
-        Expression expression,
-        Func<List<TElement>, Task> onPage,
-        CancellationToken cancellationToken)
-    {
-        var query = FetchXmlQueryTranslator.Translate<T>(expression, Columns, EntityLogicalName, Service);
-        var fetchXml = FetchXmlBuilder.Build(query);
-        var fetchDocument = XDocument.Parse(fetchXml);
-        string? pagingCookie = null;
-        var pageNumber = 1;
-
-        while (true)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            if (pagingCookie != null)
-            {
-                fetchDocument.Root!.SetAttributeValue("paging-cookie", pagingCookie);
-                fetchDocument.Root!.SetAttributeValue("page", pageNumber);
-            }
-
-            var response = await Service.RetrieveMultipleAsync(new FetchExpression(fetchDocument.ToString()));
-            var page = ProjectEntities<TElement>(response.Entities.ToList(), query);
-            await onPage(page);
-
-            if (!response.MoreRecords) break;
-
-            pagingCookie = response.PagingCookie;
-            pageNumber++;
-        }
     }
 
     internal void ForEachPage<TElement>(
@@ -189,35 +118,42 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
     }
 
     // -------------------------------------------------------------------------
-    // Async execution
+    // Paged retrieval (synchronous)
     // -------------------------------------------------------------------------
 
-    private async Task<List<TElement>> ExecuteQueryAsync<TElement>(
-        FetchXmlQuery query, CancellationToken cancellationToken)
+    protected List<Entity> RetrieveAll(string baseFetchXml)
     {
-        var fetchXml = FetchXmlBuilder.Build(query);
-        var entities = await RetrieveAllAsync(fetchXml, cancellationToken);
-        return ProjectEntities<TElement>(entities, query);
+        var results = new List<Entity>();
+        var fetchDocument = XDocument.Parse(baseFetchXml);
+        var explicitPage = fetchDocument.Root!.Attribute("page") != null;
+        string? pagingCookie = null;
+        var pageNumber = 1;
+
+        while (true)
+        {
+            if (pagingCookie != null)
+            {
+                fetchDocument.Root!.SetAttributeValue("paging-cookie", pagingCookie);
+                fetchDocument.Root!.SetAttributeValue("page", pageNumber);
+            }
+
+            var response = Service.RetrieveMultiple(new FetchExpression(fetchDocument.ToString()));
+            results.AddRange(response.Entities);
+
+            if (explicitPage || !response.MoreRecords) break;
+
+            pagingCookie = response.PagingCookie;
+            pageNumber++;
+        }
+
+        return results;
     }
 
-    private async Task<TElement> ExecuteScalarAsync<TElement>(
-        FetchXmlQuery query, CancellationToken cancellationToken)
-    {
-        var fetchXml = FetchXmlBuilder.Build(query);
-        var entities = await RetrieveAllAsync(fetchXml, cancellationToken);
-        var projected = ProjectEntities<TElement>(entities, query);
-        return ApplyTerminalOperator(projected, query.TerminalOperator);
-    }
+    // -------------------------------------------------------------------------
+    // Helpers
+    // -------------------------------------------------------------------------
 
-    private async Task<TElement> ExecuteAggregateAsync<TElement>(
-        FetchXmlQuery query, CancellationToken cancellationToken)
-    {
-        var fetchXml = FetchXmlBuilder.Build(query);
-        var entities = await RetrieveAllAsync(fetchXml, cancellationToken);
-        return ExtractAggregateResult<TElement>(entities, query.TerminalOperator);
-    }
-
-    private static TResult ExtractAggregateResult<TResult>(List<Entity> entities, QueryTerminalOperator op)
+    protected static TResult ExtractAggregateResult<TResult>(List<Entity> entities, QueryTerminalOperator op)
     {
         if (entities.Count == 0)
             throw new InvalidOperationException("Aggregate query returned no results.");
@@ -248,7 +184,7 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
         return (TResult)Convert.ChangeType(rawValue, targetType);
     }
 
-    private static TElement ApplyTerminalOperator<TElement>(List<TElement> results, QueryTerminalOperator op)
+    protected static TElement ApplyTerminalOperator<TElement>(List<TElement> results, QueryTerminalOperator op)
     {
         return op switch
         {
@@ -260,76 +196,12 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
         };
     }
 
-    // -------------------------------------------------------------------------
-    // Paged retrieval
-    // -------------------------------------------------------------------------
-
-    private List<Entity> RetrieveAll(string baseFetchXml)
-    {
-        var results = new List<Entity>();
-        var fetchDocument = XDocument.Parse(baseFetchXml);
-        var explicitPage = fetchDocument.Root!.Attribute("page") != null;
-        string? pagingCookie = null;
-        var pageNumber = 1;
-
-        while (true)
-        {
-            if (pagingCookie != null)
-            {
-                fetchDocument.Root!.SetAttributeValue("paging-cookie", pagingCookie);
-                fetchDocument.Root!.SetAttributeValue("page", pageNumber);
-            }
-
-            var response = Service.RetrieveMultiple(new FetchExpression(fetchDocument.ToString()));
-            results.AddRange(response.Entities);
-
-            if (explicitPage || !response.MoreRecords) break;
-
-            pagingCookie = response.PagingCookie;
-            pageNumber++;
-        }
-
-        return results;
-    }
-
-    private async Task<List<Entity>> RetrieveAllAsync(string baseFetchXml, CancellationToken cancellationToken)
-    {
-        var results = new List<Entity>();
-        var fetchDocument = XDocument.Parse(baseFetchXml);
-        var explicitPage = fetchDocument.Root!.Attribute("page") != null;
-        string? pagingCookie = null;
-        var pageNumber = 1;
-
-        while (true)
-        {
-            if (pagingCookie != null)
-            {
-                fetchDocument.Root!.SetAttributeValue("paging-cookie", pagingCookie);
-                fetchDocument.Root!.SetAttributeValue("page", pageNumber);
-            }
-
-            var response = await Service.RetrieveMultipleAsync(new FetchExpression(fetchDocument.ToString()));
-            results.AddRange(response.Entities);
-
-            if (explicitPage || !response.MoreRecords) break;
-
-            pagingCookie = response.PagingCookie;
-            pageNumber++;
-        }
-
-        return results;
-    }
-
-    // -------------------------------------------------------------------------
-    // Projection
-    // -------------------------------------------------------------------------
-
     /// <summary>
     /// Projects raw Dataverse entity rows into <typeparamref name="TElement"/> based
     /// on the query model: inner join (2-param projector), simple/left join (1-param
     /// projector), or no projection (typed entity).
     /// </summary>
-    private List<TElement> ProjectEntities<TElement>(List<Entity> entities, FetchXmlQuery query)
+    protected List<TElement> ProjectEntities<TElement>(List<Entity> entities, FetchXmlQuery query)
     {
         // Grouped aggregate: projector takes raw Entity (not typed)
         if (query.Aggregate && query.Projector is not null)
@@ -359,7 +231,7 @@ internal class DataverseQueryProvider<T> : IAsyncQueryProvider where T : Entity
         return entities.Select(e => (TElement)(object)e.ToEntity<T>()).ToList();
     }
 
-    private static MethodInfo GetPrivateMethod(string name) =>
+    protected static MethodInfo GetPrivateMethod(string name) =>
         typeof(DataverseQueryProvider<T>)
             .GetMethod(name, BindingFlags.NonPublic | BindingFlags.Instance)!;
 }

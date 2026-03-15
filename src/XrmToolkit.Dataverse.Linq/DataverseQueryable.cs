@@ -1,4 +1,6 @@
+#if !NETFRAMEWORK
 using Microsoft.PowerPlatform.Dataverse.Client;
+#endif
 using Microsoft.Xrm.Sdk;
 using System.Collections;
 using System.Linq.Expressions;
@@ -13,7 +15,15 @@ public class DataverseQueryable<T> : IQueryable<T>, IOrderedQueryable<T> where T
 {
     private readonly DataverseQueryProvider<T> _provider;
 
+#if !NETFRAMEWORK
     internal DataverseQueryable(IOrganizationServiceAsync service, string entityLogicalName, IReadOnlyList<string>? columns = null)
+    {
+        _provider = new DataverseQueryProviderAsync<T>(service, entityLogicalName, columns);
+        Expression = Expression.Constant(this);
+    }
+#endif
+
+    internal DataverseQueryable(IOrganizationService service, string entityLogicalName, IReadOnlyList<string>? columns = null)
     {
         _provider = new DataverseQueryProvider<T>(service, entityLogicalName, columns);
         Expression = Expression.Constant(this);

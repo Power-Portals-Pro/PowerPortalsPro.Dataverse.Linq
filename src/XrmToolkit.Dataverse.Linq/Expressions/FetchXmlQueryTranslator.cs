@@ -1,6 +1,5 @@
 using XrmToolkit.Dataverse.Linq.Extensions;
 using XrmToolkit.Dataverse.Linq.Model;
-using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using System.Linq.Expressions;
@@ -141,7 +140,7 @@ internal static class FetchXmlQueryTranslator
         Expression expression,
         IReadOnlyList<string>? defaultColumns = null,
         string? entityLogicalName = null,
-        IOrganizationServiceAsync? service = null) where T : Entity
+        IOrganizationService? service = null) where T : Entity
     {
         var query = new FetchXmlQuery
         {
@@ -2121,7 +2120,7 @@ internal static class FetchXmlQueryTranslator
         /// Optional service reference for resolving metadata (e.g., primary key attribute names
         /// when <see cref="Entity.Id"/> is used in expressions).
         /// </summary>
-        public IOrganizationServiceAsync? Service { get; init; }
+        public IOrganizationService? Service { get; init; }
 
         /// <summary>
         /// Returns a resolver function that maps entity logical names to their primary key

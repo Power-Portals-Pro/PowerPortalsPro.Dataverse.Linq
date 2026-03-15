@@ -1,4 +1,3 @@
-using Microsoft.EntityFrameworkCore.Query;
 using System.Collections;
 using System.Linq.Expressions;
 
@@ -11,9 +10,9 @@ namespace XrmToolkit.Dataverse.Linq;
 /// </summary>
 internal class DataverseProjectedQueryable<TElement> : IQueryable<TElement>, IOrderedQueryable<TElement>
 {
-    private readonly IAsyncQueryProvider _provider;
+    private readonly IQueryProvider _provider;
 
-    internal DataverseProjectedQueryable(IAsyncQueryProvider provider, Expression expression)
+    internal DataverseProjectedQueryable(IQueryProvider provider, Expression expression)
     {
         _provider = provider;
         Expression = expression;

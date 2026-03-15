@@ -1,6 +1,8 @@
 using XrmToolkit.Dataverse.Linq.Model;
+#if !NETFRAMEWORK
 using Microsoft.EntityFrameworkCore.Query;
 using Microsoft.PowerPlatform.Dataverse.Client;
+#endif
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Client;
 using System.Linq.Expressions;
@@ -9,7 +11,7 @@ using System.Reflection;
 namespace XrmToolkit.Dataverse.Linq;
 
 /// <summary>
-/// Extension methods for <see cref="IOrganizationServiceAsync"/> that provide LINQ query
+/// Extension methods for <see cref="IOrganizationService"/> that provide LINQ query
 /// entry points, async execution, paging, FetchXml configuration, and aggregate operations.
 /// </summary>
 public static class ServiceClientExtensions
@@ -18,7 +20,11 @@ public static class ServiceClientExtensions
     /// Creates a <see cref="DataverseQueryable{T}"/> for the given entity type.
     /// The entity type must be decorated with <see cref="EntityLogicalNameAttribute"/>.
     /// </summary>
+#if NETFRAMEWORK
+    public static DataverseQueryable<T> Queryable<T>(this IOrganizationService service, params string[] columns)
+#else
     public static DataverseQueryable<T> Queryable<T>(this IOrganizationServiceAsync service, params string[] columns)
+#endif
         where T : Entity
     {
         var entityLogicalName = typeof(T).GetCustomAttribute<EntityLogicalNameAttribute>()?.LogicalName
@@ -32,7 +38,11 @@ public static class ServiceClientExtensions
     /// Creates a <see cref="DataverseQueryable{Entity}"/> for unbound queries using the
     /// <see cref="Entity"/> base class directly (no proxy class required).
     /// </summary>
+#if NETFRAMEWORK
+    public static DataverseQueryable<Entity> Queryable(this IOrganizationService service, string entityLogicalName, params string[] columns)
+#else
     public static DataverseQueryable<Entity> Queryable(this IOrganizationServiceAsync service, string entityLogicalName, params string[] columns)
+#endif
     {
         return new DataverseQueryable<Entity>(service, entityLogicalName, columns.Length > 0 ? columns : null);
     }
@@ -181,6 +191,7 @@ public static class ServiceClientExtensions
         return queryable.Provider.CreateQuery<TElement>(expression);
     }
 
+#if !NETFRAMEWORK
     /// <summary>
     /// Asynchronously executes the query and returns all results as a <see cref="List{T}"/>.
     /// Works on both root queryables and projected queryables (e.g. after a Select clause).
@@ -190,10 +201,8 @@ public static class ServiceClientExtensions
         this IQueryable<TElement> queryable,
         CancellationToken cancellationToken = default)
     {
-        if (queryable.Provider is IAsyncQueryProvider asyncProvider)
-            return asyncProvider.ExecuteAsync<Task<List<TElement>>>(queryable.Expression, cancellationToken);
-
-        return Task.FromResult(queryable.ToList());
+        var asyncProvider = (IAsyncQueryProvider)queryable.Provider;
+        return asyncProvider.ExecuteAsync<Task<List<TElement>>>(queryable.Expression, cancellationToken);
     }
 
     /// <summary>
@@ -205,36 +214,8 @@ public static class ServiceClientExtensions
         Func<List<TElement>, Task> onPage,
         CancellationToken cancellationToken = default)
     {
-        var providerType = queryable.Provider.GetType();
-        if (providerType.IsGenericType &&
-            providerType.GetGenericTypeDefinition() == typeof(DataverseQueryProvider<>))
-        {
-            return ((dynamic)queryable.Provider).ForEachPageAsync<TElement>(
-                queryable.Expression, onPage, cancellationToken);
-        }
-
-        throw new InvalidOperationException(
-            "ForEachPageAsync can only be used with Dataverse queryables created via Queryable<T>().");
-    }
-
-    /// <summary>
-    /// Synchronously executes the query page by page, invoking <paramref name="onPage"/>
-    /// with each page of results as they are retrieved from Dataverse.
-    /// </summary>
-    public static void ForEachPage<TElement>(
-        this IQueryable<TElement> queryable,
-        Action<List<TElement>> onPage)
-    {
-        var providerType = queryable.Provider.GetType();
-        if (providerType.IsGenericType &&
-            providerType.GetGenericTypeDefinition() == typeof(DataverseQueryProvider<>))
-        {
-            ((dynamic)queryable.Provider).ForEachPage<TElement>(queryable.Expression, onPage);
-            return;
-        }
-
-        throw new InvalidOperationException(
-            "ForEachPage can only be used with Dataverse queryables created via Queryable<T>().");
+        return ((dynamic)queryable.Provider).ForEachPageAsync<TElement>(
+            queryable.Expression, onPage, cancellationToken);
     }
 
     /// <summary>
@@ -249,10 +230,8 @@ public static class ServiceClientExtensions
             typeof(System.Linq.Queryable), nameof(System.Linq.Queryable.First),
             [typeof(TElement)], queryable.Expression);
 
-        if (queryable.Provider is IAsyncQueryProvider asyncProvider)
-            return asyncProvider.ExecuteAsync<Task<TElement>>(expression, cancellationToken);
-
-        return Task.FromResult(queryable.First());
+        var asyncProvider = (IAsyncQueryProvider)queryable.Provider;
+        return asyncProvider.ExecuteAsync<Task<TElement>>(expression, cancellationToken);
     }
 
     /// <summary>
@@ -268,10 +247,8 @@ public static class ServiceClientExtensions
             typeof(System.Linq.Queryable), nameof(System.Linq.Queryable.First),
             [typeof(TElement)], queryable.Expression, predicate);
 
-        if (queryable.Provider is IAsyncQueryProvider asyncProvider)
-            return asyncProvider.ExecuteAsync<Task<TElement>>(expression, cancellationToken);
-
-        return Task.FromResult(queryable.First(predicate));
+        var asyncProvider = (IAsyncQueryProvider)queryable.Provider;
+        return asyncProvider.ExecuteAsync<Task<TElement>>(expression, cancellationToken);
     }
 
     /// <summary>
@@ -285,10 +262,8 @@ public static class ServiceClientExtensions
             typeof(System.Linq.Queryable), nameof(System.Linq.Queryable.FirstOrDefault),
             [typeof(TElement)], queryable.Expression);
 
-        if (queryable.Provider is IAsyncQueryProvider asyncProvider)
-            return asyncProvider.ExecuteAsync<Task<TElement?>>(expression, cancellationToken);
-
-        return Task.FromResult(queryable.FirstOrDefault());
+        var asyncProvider = (IAsyncQueryProvider)queryable.Provider;
+        return asyncProvider.ExecuteAsync<Task<TElement?>>(expression, cancellationToken);
     }
 
     /// <summary>
@@ -303,10 +278,8 @@ public static class ServiceClientExtensions
             typeof(System.Linq.Queryable), nameof(System.Linq.Queryable.FirstOrDefault),
             [typeof(TElement)], queryable.Expression, predicate);
 
-        if (queryable.Provider is IAsyncQueryProvider asyncProvider)
-            return asyncProvider.ExecuteAsync<Task<TElement?>>(expression, cancellationToken);
-
-        return Task.FromResult(queryable.FirstOrDefault(predicate));
+        var asyncProvider = (IAsyncQueryProvider)queryable.Provider;
+        return asyncProvider.ExecuteAsync<Task<TElement?>>(expression, cancellationToken);
     }
 
     /// <summary>
@@ -321,10 +294,8 @@ public static class ServiceClientExtensions
             typeof(System.Linq.Queryable), nameof(System.Linq.Queryable.Single),
             [typeof(TElement)], queryable.Expression);
 
-        if (queryable.Provider is IAsyncQueryProvider asyncProvider)
-            return asyncProvider.ExecuteAsync<Task<TElement>>(expression, cancellationToken);
-
-        return Task.FromResult(queryable.Single());
+        var asyncProvider = (IAsyncQueryProvider)queryable.Provider;
+        return asyncProvider.ExecuteAsync<Task<TElement>>(expression, cancellationToken);
     }
 
     /// <summary>
@@ -340,10 +311,8 @@ public static class ServiceClientExtensions
             typeof(System.Linq.Queryable), nameof(System.Linq.Queryable.Single),
             [typeof(TElement)], queryable.Expression, predicate);
 
-        if (queryable.Provider is IAsyncQueryProvider asyncProvider)
-            return asyncProvider.ExecuteAsync<Task<TElement>>(expression, cancellationToken);
-
-        return Task.FromResult(queryable.Single(predicate));
+        var asyncProvider = (IAsyncQueryProvider)queryable.Provider;
+        return asyncProvider.ExecuteAsync<Task<TElement>>(expression, cancellationToken);
     }
 
     /// <summary>
@@ -358,10 +327,8 @@ public static class ServiceClientExtensions
             typeof(System.Linq.Queryable), nameof(System.Linq.Queryable.SingleOrDefault),
             [typeof(TElement)], queryable.Expression);
 
-        if (queryable.Provider is IAsyncQueryProvider asyncProvider)
-            return asyncProvider.ExecuteAsync<Task<TElement?>>(expression, cancellationToken);
-
-        return Task.FromResult(queryable.SingleOrDefault());
+        var asyncProvider = (IAsyncQueryProvider)queryable.Provider;
+        return asyncProvider.ExecuteAsync<Task<TElement?>>(expression, cancellationToken);
     }
 
     /// <summary>
@@ -377,10 +344,8 @@ public static class ServiceClientExtensions
             typeof(System.Linq.Queryable), nameof(System.Linq.Queryable.SingleOrDefault),
             [typeof(TElement)], queryable.Expression, predicate);
 
-        if (queryable.Provider is IAsyncQueryProvider asyncProvider)
-            return asyncProvider.ExecuteAsync<Task<TElement?>>(expression, cancellationToken);
-
-        return Task.FromResult(queryable.SingleOrDefault(predicate));
+        var asyncProvider = (IAsyncQueryProvider)queryable.Provider;
+        return asyncProvider.ExecuteAsync<Task<TElement?>>(expression, cancellationToken);
     }
 
     // -------------------------------------------------------------------------
@@ -398,10 +363,8 @@ public static class ServiceClientExtensions
             typeof(System.Linq.Queryable), nameof(System.Linq.Queryable.Count),
             [typeof(TElement)], queryable.Expression);
 
-        if (queryable.Provider is IAsyncQueryProvider asyncProvider)
-            return asyncProvider.ExecuteAsync<Task<int>>(expression, cancellationToken);
-
-        return Task.FromResult(queryable.Count());
+        var asyncProvider = (IAsyncQueryProvider)queryable.Provider;
+        return asyncProvider.ExecuteAsync<Task<int>>(expression, cancellationToken);
     }
 
     /// <summary>
@@ -416,10 +379,8 @@ public static class ServiceClientExtensions
             typeof(System.Linq.Queryable), nameof(System.Linq.Queryable.Count),
             [typeof(TElement)], queryable.Expression, predicate);
 
-        if (queryable.Provider is IAsyncQueryProvider asyncProvider)
-            return asyncProvider.ExecuteAsync<Task<int>>(expression, cancellationToken);
-
-        return Task.FromResult(queryable.Count(predicate));
+        var asyncProvider = (IAsyncQueryProvider)queryable.Provider;
+        return asyncProvider.ExecuteAsync<Task<int>>(expression, cancellationToken);
     }
 
     /// <summary>
@@ -433,10 +394,8 @@ public static class ServiceClientExtensions
             typeof(System.Linq.Queryable), nameof(System.Linq.Queryable.LongCount),
             [typeof(TElement)], queryable.Expression);
 
-        if (queryable.Provider is IAsyncQueryProvider asyncProvider)
-            return asyncProvider.ExecuteAsync<Task<long>>(expression, cancellationToken);
-
-        return Task.FromResult(queryable.LongCount());
+        var asyncProvider = (IAsyncQueryProvider)queryable.Provider;
+        return asyncProvider.ExecuteAsync<Task<long>>(expression, cancellationToken);
     }
 
     /// <summary>
@@ -452,10 +411,8 @@ public static class ServiceClientExtensions
             [typeof(TElement), typeof(TResult)],
             queryable.Expression, selector);
 
-        if (queryable.Provider is IAsyncQueryProvider asyncProvider)
-            return asyncProvider.ExecuteAsync<Task<TResult>>(expression, cancellationToken);
-
-        return Task.FromResult(queryable.Min(selector))!;
+        var asyncProvider = (IAsyncQueryProvider)queryable.Provider;
+        return asyncProvider.ExecuteAsync<Task<TResult>>(expression, cancellationToken);
     }
 
     /// <summary>
@@ -471,10 +428,8 @@ public static class ServiceClientExtensions
             [typeof(TElement), typeof(TResult)],
             queryable.Expression, selector);
 
-        if (queryable.Provider is IAsyncQueryProvider asyncProvider)
-            return asyncProvider.ExecuteAsync<Task<TResult>>(expression, cancellationToken);
-
-        return Task.FromResult(queryable.Max(selector))!;
+        var asyncProvider = (IAsyncQueryProvider)queryable.Provider;
+        return asyncProvider.ExecuteAsync<Task<TResult>>(expression, cancellationToken);
     }
 
     /// <summary>
@@ -488,10 +443,8 @@ public static class ServiceClientExtensions
             typeof(System.Linq.Queryable), nameof(System.Linq.Queryable.Sum),
             [], queryable.Expression);
 
-        if (queryable.Provider is IAsyncQueryProvider asyncProvider)
-            return asyncProvider.ExecuteAsync<Task<int>>(expression, cancellationToken);
-
-        return Task.FromResult(queryable.Sum());
+        var asyncProvider = (IAsyncQueryProvider)queryable.Provider;
+        return asyncProvider.ExecuteAsync<Task<int>>(expression, cancellationToken);
     }
 
     /// <summary>
@@ -505,10 +458,8 @@ public static class ServiceClientExtensions
             typeof(System.Linq.Queryable), nameof(System.Linq.Queryable.Sum),
             [], queryable.Expression);
 
-        if (queryable.Provider is IAsyncQueryProvider asyncProvider)
-            return asyncProvider.ExecuteAsync<Task<int?>>(expression, cancellationToken);
-
-        return Task.FromResult(queryable.Sum());
+        var asyncProvider = (IAsyncQueryProvider)queryable.Provider;
+        return asyncProvider.ExecuteAsync<Task<int?>>(expression, cancellationToken);
     }
 
     /// <summary>
@@ -522,10 +473,8 @@ public static class ServiceClientExtensions
             typeof(System.Linq.Queryable), nameof(System.Linq.Queryable.Sum),
             [], queryable.Expression);
 
-        if (queryable.Provider is IAsyncQueryProvider asyncProvider)
-            return asyncProvider.ExecuteAsync<Task<decimal>>(expression, cancellationToken);
-
-        return Task.FromResult(queryable.Sum());
+        var asyncProvider = (IAsyncQueryProvider)queryable.Provider;
+        return asyncProvider.ExecuteAsync<Task<decimal>>(expression, cancellationToken);
     }
 
     /// <summary>
@@ -539,10 +488,8 @@ public static class ServiceClientExtensions
             typeof(System.Linq.Queryable), nameof(System.Linq.Queryable.Sum),
             [], queryable.Expression);
 
-        if (queryable.Provider is IAsyncQueryProvider asyncProvider)
-            return asyncProvider.ExecuteAsync<Task<decimal?>>(expression, cancellationToken);
-
-        return Task.FromResult(queryable.Sum());
+        var asyncProvider = (IAsyncQueryProvider)queryable.Provider;
+        return asyncProvider.ExecuteAsync<Task<decimal?>>(expression, cancellationToken);
     }
 
     /// <summary>
@@ -556,10 +503,8 @@ public static class ServiceClientExtensions
             typeof(System.Linq.Queryable), nameof(System.Linq.Queryable.Average),
             [], queryable.Expression);
 
-        if (queryable.Provider is IAsyncQueryProvider asyncProvider)
-            return asyncProvider.ExecuteAsync<Task<double>>(expression, cancellationToken);
-
-        return Task.FromResult(queryable.Average());
+        var asyncProvider = (IAsyncQueryProvider)queryable.Provider;
+        return asyncProvider.ExecuteAsync<Task<double>>(expression, cancellationToken);
     }
 
     /// <summary>
@@ -573,10 +518,8 @@ public static class ServiceClientExtensions
             typeof(System.Linq.Queryable), nameof(System.Linq.Queryable.Average),
             [], queryable.Expression);
 
-        if (queryable.Provider is IAsyncQueryProvider asyncProvider)
-            return asyncProvider.ExecuteAsync<Task<double?>>(expression, cancellationToken);
-
-        return Task.FromResult(queryable.Average());
+        var asyncProvider = (IAsyncQueryProvider)queryable.Provider;
+        return asyncProvider.ExecuteAsync<Task<double?>>(expression, cancellationToken);
     }
 
     /// <summary>
@@ -590,10 +533,8 @@ public static class ServiceClientExtensions
             typeof(System.Linq.Queryable), nameof(System.Linq.Queryable.Average),
             [], queryable.Expression);
 
-        if (queryable.Provider is IAsyncQueryProvider asyncProvider)
-            return asyncProvider.ExecuteAsync<Task<decimal>>(expression, cancellationToken);
-
-        return Task.FromResult(queryable.Average());
+        var asyncProvider = (IAsyncQueryProvider)queryable.Provider;
+        return asyncProvider.ExecuteAsync<Task<decimal>>(expression, cancellationToken);
     }
 
     /// <summary>
@@ -607,26 +548,8 @@ public static class ServiceClientExtensions
             typeof(System.Linq.Queryable), nameof(System.Linq.Queryable.Average),
             [], queryable.Expression);
 
-        if (queryable.Provider is IAsyncQueryProvider asyncProvider)
-            return asyncProvider.ExecuteAsync<Task<decimal?>>(expression, cancellationToken);
-
-        return Task.FromResult(queryable.Average());
-    }
-
-    /// <summary>
-    /// Counts non-null values of the column projected by a preceding <c>Select</c>.
-    /// Translates to FetchXml <c>aggregate="countcolumn"</c>.
-    /// Usage: <c>query.Select(x => x.SomeColumn).CountColumn()</c>
-    /// </summary>
-    public static int CountColumn<TSource>(this IQueryable<TSource> queryable)
-    {
-        var expression = Expression.Call(
-            typeof(ServiceClientExtensions),
-            nameof(CountColumn),
-            [typeof(TSource)],
-            queryable.Expression);
-
-        return queryable.Provider.Execute<int>(expression);
+        var asyncProvider = (IAsyncQueryProvider)queryable.Provider;
+        return asyncProvider.ExecuteAsync<Task<decimal?>>(expression, cancellationToken);
     }
 
     /// <summary>
@@ -643,10 +566,44 @@ public static class ServiceClientExtensions
             [typeof(TSource)],
             queryable.Expression);
 
-        if (queryable.Provider is IAsyncQueryProvider asyncProvider)
-            return asyncProvider.ExecuteAsync<Task<int>>(expression, cancellationToken);
+        var asyncProvider = (IAsyncQueryProvider)queryable.Provider;
+        return asyncProvider.ExecuteAsync<Task<int>>(expression, cancellationToken);
+    }
+#endif
 
-        return Task.FromResult(queryable.Provider.Execute<int>(expression));
+    /// <summary>
+    /// Synchronously executes the query page by page, invoking <paramref name="onPage"/>
+    /// with each page of results as they are retrieved from Dataverse.
+    /// </summary>
+    public static void ForEachPage<TElement>(
+        this IQueryable<TElement> queryable,
+        Action<List<TElement>> onPage)
+    {
+        var providerType = queryable.Provider.GetType();
+        if (IsDataverseProvider(providerType))
+        {
+            ((dynamic)queryable.Provider).ForEachPage<TElement>(queryable.Expression, onPage);
+            return;
+        }
+
+        throw new InvalidOperationException(
+            "ForEachPage can only be used with Dataverse queryables created via Queryable<T>().");
+    }
+
+    /// <summary>
+    /// Counts non-null values of the column projected by a preceding <c>Select</c>.
+    /// Translates to FetchXml <c>aggregate="countcolumn"</c>.
+    /// Usage: <c>query.Select(x => x.SomeColumn).CountColumn()</c>
+    /// </summary>
+    public static int CountColumn<TSource>(this IQueryable<TSource> queryable)
+    {
+        var expression = Expression.Call(
+            typeof(ServiceClientExtensions),
+            nameof(CountColumn),
+            [typeof(TSource)],
+            queryable.Expression);
+
+        return queryable.Provider.Execute<int>(expression);
     }
 
     /// <summary>
@@ -682,13 +639,24 @@ public static class ServiceClientExtensions
     {
         var providerType = queryable.Provider.GetType();
 
-        if (providerType.IsGenericType &&
-            providerType.GetGenericTypeDefinition() == typeof(DataverseQueryProvider<>))
+        if (IsDataverseProvider(providerType))
         {
             return ((dynamic)queryable.Provider).GenerateFetchXml(queryable.Expression);
         }
 
         throw new InvalidOperationException(
             "ToFetchXml can only be used with Dataverse queryables created via Queryable<T>().");
+    }
+
+    private static bool IsDataverseProvider(Type providerType)
+    {
+        var type = providerType;
+        while (type != null)
+        {
+            if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(DataverseQueryProvider<>))
+                return true;
+            type = type.BaseType;
+        }
+        return false;
     }
 }
