@@ -356,6 +356,20 @@ internal static class FetchXmlQueryTranslator
                 HandleAggregateOperator(countColumnCall, ctx);
                 return;
 
+            case MethodCallExpression
+            {
+                Method:
+                {
+                    Name: nameof(ServiceClientExtensions.WithFirstRow),
+                    DeclaringType: var dtFR
+                }
+            } firstRowCall
+                when dtFR == typeof(ServiceClientExtensions):
+                // Marker only — the join handler reads this via HasWithFirstRow().
+                // Just recurse into the source.
+                TranslateCore(firstRowCall.Arguments[0], ctx);
+                return;
+
             default:
                 throw new NotSupportedException(
                     $"Unsupported expression type: {expression.NodeType}");
@@ -1861,6 +1875,22 @@ internal static class FetchXmlQueryTranslator
     // Inner join — Queryable.Join(outer, inner, outerKey, innerKey, resultSelector)
     // -------------------------------------------------------------------------
 
+    /// <summary>
+    /// Walks the inner source expression looking for a <c>WithFirstRow()</c> marker call.
+    /// </summary>
+    private static bool HasWithFirstRow(Expression innerSource)
+    {
+        var current = innerSource;
+        while (current is MethodCallExpression mc)
+        {
+            if (mc.Method.Name == nameof(ServiceClientExtensions.WithFirstRow)
+                && mc.Method.DeclaringType == typeof(ServiceClientExtensions))
+                return true;
+            current = mc.Arguments[0];
+        }
+        return false;
+    }
+
     private static void HandleInnerJoin(MethodCallExpression call, TranslationContext ctx)
     {
         // Recurse into the outer source first — for chained joins this processes
@@ -1880,6 +1910,11 @@ internal static class FetchXmlQueryTranslator
         var (outerLogicalName, outerEntityType) = call.Arguments[0].GetSourceInfoFromType();
         var (outerKeyAttr, innerKeyAttr) = ExtractJoinKeys(call, ctx.PrimaryKeyResolver);
 
+        // Detect WithFirstRow() marker on the inner source
+        var linkType = HasWithFirstRow(call.Arguments[1])
+            ? "matchfirstrowusingcrossapply"
+            : "inner";
+
         // Root entity
         ctx.Query.EntityLogicalName = outerLogicalName;
 
@@ -1890,7 +1925,7 @@ internal static class FetchXmlQueryTranslator
             From = innerKeyAttr,
             To = outerKeyAttr,
             Alias = resultLambda.Parameters[1].Name!,
-            LinkType = "inner"
+            LinkType = linkType
         };
         ctx.Query.Links.Add(link);
 

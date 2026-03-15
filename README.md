@@ -396,6 +396,14 @@ var results = await (from a in activeAccounts
                          on a.PrimaryContactId.Id equals c.ContactId
                      select new { a.Name, c.FullName })
                     .ToListAsync();
+
+// First-row join — returns only the first matching child per parent
+// Translates to link-type="matchfirstrowusingcrossapply"
+var results = await (from c in service.Queryable<Contact>()
+                     join t in service.Queryable<Task>().WithFirstRow()
+                         on c.ContactId equals t.RegardingObjectId.Id
+                     select new { c.FullName, t.Subject })
+                    .ToListAsync();
 ```
 
 ## Ordering
@@ -617,6 +625,7 @@ Configure [FetchXml attributes](https://learn.microsoft.com/en-us/power-apps/dev
 | `.WithLateMaterialize()` | `latematerialize` | [Late materialization](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/fetchxml/optimize-performance#late-materialize-query) optimization |
 | `.WithQueryHints(...)` | `options` | [SQL query hints](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/fetchxml/reference/fetch) (ForceOrder, HashJoin, etc.) |
 | `.WithUseRawOrderBy()` | `useraworderby` | Sort choice columns by integer value |
+| `.WithFirstRow()` | `matchfirstrowusingcrossapply` | On join inner source: return only the first matching child row |
 | `.WithNoLock()` | `no-lock` | Deprecated, no effect |
 
 ```csharp

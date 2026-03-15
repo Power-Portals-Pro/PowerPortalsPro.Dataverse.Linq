@@ -495,4 +495,46 @@ public partial class JoinIntegrationTests
         results.Should().AllSatisfy(r =>
             (r.AccountName.Contains("001") || r.ContactFirstName.Contains("First")).Should().BeTrue());
     }
+
+    // -------------------------------------------------------------------------
+    // WithFirstRow — matchfirstrowusingcrossapply
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Join_WithFirstRow_ReturnsOneContactPerAccount()
+    {
+        // A regular inner join returns ALL matching contacts per account (5 each).
+        // WithFirstRow should return only ONE contact per account.
+        var innerJoinResults = await (from a in Service.Queryable<CustomAccount>()
+                                      join c in Service.Queryable<CustomContact>()
+                                          on a.CustomAccountId equals c.ParentAccount.Id
+                                      select new { a.Name, c.FirstName }).ToListAsync();
+
+        var firstRowResults = await (from a in Service.Queryable<CustomAccount>()
+                                     join c in Service.Queryable<CustomContact>().WithFirstRow()
+                                         on a.CustomAccountId equals c.ParentAccount.Id
+                                     select new { a.Name, c.FirstName }).ToListAsync();
+
+        // Inner join: 100 accounts × 5 contacts = 500
+        innerJoinResults.Should().HaveCount(500);
+        // WithFirstRow: 100 accounts × 1 contact = 100
+        firstRowResults.Should().HaveCount(innerJoinResults.Select(r => r.Name).Distinct().Count());
+        // Each account should appear exactly once
+        firstRowResults.Select(r => r.Name).Should().OnlyHaveUniqueItems();
+    }
+
+    [Fact]
+    public async Task Join_WithFirstRowAndWhere_ReturnsFilteredFirstRow()
+    {
+        // WithFirstRow + Where clause on the joined entity
+        var results = await (from a in Service.Queryable<CustomAccount>()
+                             join c in Service.Queryable<CustomContact>().WithFirstRow()
+                                 on a.CustomAccountId equals c.ParentAccount.Id
+                             where a.Name != null
+                             select new { a.Name, c.FirstName }).ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Select(r => r.Name).Should().OnlyHaveUniqueItems();
+        results.Should().AllSatisfy(r => r.Name.Should().NotBeNull());
+    }
 }

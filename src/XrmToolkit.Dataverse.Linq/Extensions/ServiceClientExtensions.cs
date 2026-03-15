@@ -191,6 +191,23 @@ public static partial class ServiceClientExtensions
     }
 
     /// <summary>
+    /// When used on the inner source of a <c>join</c>, limits the join to return only the
+    /// first matching row from the related entity. Translates to FetchXml
+    /// <c>link-type="matchfirstrowusingcrossapply"</c>.
+    /// </summary>
+    public static IQueryable<TElement> WithFirstRow<TElement>(
+        this IQueryable<TElement> queryable)
+    {
+        var expression = Expression.Call(
+            typeof(ServiceClientExtensions),
+            nameof(WithFirstRow),
+            [typeof(TElement)],
+            queryable.Expression);
+
+        return queryable.Provider.CreateQuery<TElement>(expression);
+    }
+
+    /// <summary>
     /// Synchronously executes the query page by page, invoking <paramref name="onPage"/>
     /// with each page of results as they are retrieved from Dataverse.
     /// </summary>

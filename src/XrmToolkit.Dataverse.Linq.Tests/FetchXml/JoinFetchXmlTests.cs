@@ -294,4 +294,56 @@ public class JoinFetchXmlTests : FetchXmlTestBase
             </fetch>
             """);
     }
+
+    // -------------------------------------------------------------------------
+    // WithFirstRow — matchfirstrowusingcrossapply
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_WithFirstRow_GeneratesMatchFirstRowLinkType()
+    {
+        var fetchXml = (from a in _service.Queryable<CustomAccount>()
+                        join c in _service.Queryable<CustomContact>().WithFirstRow()
+                            on a.CustomAccountId equals c.ParentAccount.Id
+                        select new { a.Name, c.FirstName }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="matchfirstrowusingcrossapply">
+                  <attribute name="new_firstname" />
+                </link-entity>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WithFirstRowAndWhere_GeneratesMatchFirstRowWithFilter()
+    {
+        // Where clause after the join places the filter on the root entity
+        // with entityname pointing to the link alias.
+        var fetchXml = (from a in _service.Queryable<CustomAccount>()
+                        join c in _service.Queryable<CustomContact>().WithFirstRow()
+                            on a.CustomAccountId equals c.ParentAccount.Id
+                        where c.ContactRating_OptionSetValue != null
+                        select new { a.Name, c.FirstName }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+                <filter type="and">
+                  <condition entityname="c" attribute="new_contactrating" operator="not-null" />
+                </filter>
+                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="matchfirstrowusingcrossapply">
+                  <attribute name="new_firstname" />
+                </link-entity>
+              </entity>
+            </fetch>
+            """);
+    }
 }
