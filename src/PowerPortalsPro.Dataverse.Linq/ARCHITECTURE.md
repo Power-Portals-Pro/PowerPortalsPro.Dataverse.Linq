@@ -20,8 +20,7 @@ scenarios covered so far, but it cannot scale to a full query provider because:
 
 ## Target Architecture
 
-The goal is a proper, composable query provider modelled after the design used
-by EF Core's InMemory and relational providers: a single **visitor** traverses
+The goal is a proper, composable query provider: a single **visitor** traverses
 the entire LINQ expression tree and builds an **internal query model**, which is
 then **serialised** to FetchXml by a dedicated builder.
 
@@ -274,14 +273,5 @@ Each step should keep all integration tests passing.
 
 ## Reference
 
-- **EF Core InMemory provider** (`dotnet/efcore` →
-  `src/EFCore.InMemory`) — closest analogue; uses
-  `InMemoryQueryableMethodTranslatingExpressionVisitor` to translate LINQ
-  methods to in-memory operations and `ShapedQueryCompilingExpressionVisitor`
-  to compile the result shaper.
-- **EF Core relational provider** (`dotnet/efcore` →
-  `src/EFCore.Relational`) — uses `RelationalQueryableMethodTranslatingExpressionVisitor`
-  and `SelectExpression` as the internal SQL model; the `SelectExpression` →
-  `FetchXmlQuery` analogy is direct.
 - **FetchXml reference** — Microsoft docs:
   https://learn.microsoft.com/en-us/power-apps/developer/data-platform/fetchxml/overview

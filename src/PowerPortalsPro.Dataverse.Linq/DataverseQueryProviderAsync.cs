@@ -1,7 +1,6 @@
 #if !NETFRAMEWORK
 using PowerPortalsPro.Dataverse.Linq.Expressions;
 using PowerPortalsPro.Dataverse.Linq.Model;
-using Microsoft.EntityFrameworkCore.Query;
 using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
@@ -22,9 +21,9 @@ internal class DataverseQueryProviderAsync<T> : DataverseQueryProvider<T>, IAsyn
     }
 
     // -------------------------------------------------------------------------
-    // IAsyncQueryProvider (EF Core)
+    // IAsyncQueryProvider
     // Note: TResult is the Task itself (e.g. Task<List<TElement>>), not the
-    // unwrapped value — this matches EF Core's interface contract.
+    // unwrapped value.
     // -------------------------------------------------------------------------
 
     public TResult ExecuteAsync<TResult>(Expression expression, CancellationToken cancellationToken = default)
