@@ -709,4 +709,4 @@ For more information about FetchXml, see the official Microsoft documentation:
 
 ## License
 
-This project is licensed under the MIT License.
+See the EULA for the license terms.

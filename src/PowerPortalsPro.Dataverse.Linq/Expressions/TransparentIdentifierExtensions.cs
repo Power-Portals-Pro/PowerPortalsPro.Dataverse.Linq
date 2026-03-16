@@ -55,6 +55,33 @@ internal static class TransparentIdentifierExtensions
     }
 
     /// <summary>
+    /// Returns <c>true</c> when <paramref name="expr"/> accesses the outer entity through
+    /// the transparent-identifier <paramref name="path"/>, regardless of which parameter
+    /// instance is at the root. Used in Where/OrderBy resolution after a left join.
+    /// </summary>
+    internal static bool IsOuterEntityAccess(this Expression expr, string[] path)
+    {
+        for (var i = path.Length - 1; i >= 0; i--)
+        {
+            if (expr is not MemberExpression me || me.Member.Name != path[i])
+                return false;
+            expr = me.Expression!;
+        }
+
+        return expr is ParameterExpression;
+    }
+
+    /// <summary>
+    /// Returns <c>true</c> when <paramref name="expr"/> accesses the inner (joined) entity
+    /// via the transparent-identifier property named <paramref name="innerPropertyName"/>.
+    /// </summary>
+    internal static bool IsInnerEntityAccess(this Expression expr, string innerPropertyName)
+    {
+        return expr is MemberExpression { Member.Name: var name, Expression: ParameterExpression }
+            && name == innerPropertyName;
+    }
+
+    /// <summary>
     /// Recursively searches link entities to find one with the given alias.
     /// </summary>
     internal static FetchLinkEntity? FindLinkByAlias(this List<FetchLinkEntity> links, string alias)

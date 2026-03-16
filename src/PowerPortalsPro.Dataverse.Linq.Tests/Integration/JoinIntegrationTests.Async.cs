@@ -497,6 +497,39 @@ public partial class JoinIntegrationTests
     }
 
     // -------------------------------------------------------------------------
+    // Left join with where on outer entity
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ToListAsync_WithLeftJoin_WhereOnOuterEntity_ReturnsFilteredResults()
+    {
+        var results = await (from a in Service.Queryable<CustomAccount>()
+                             join c in Service.Queryable<CustomContact>()
+                                 on a.CustomAccountId equals c.ParentAccount.Id into contacts
+                             from c in contacts.DefaultIfEmpty()
+                             where a.Status == CustomAccount.CustomAccount_Status.Active
+                             select new { a.Name }).ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Should().AllSatisfy(r => r.Name.Should().NotBeNullOrEmpty());
+    }
+
+    [Fact]
+    public async Task ToListAsync_WithLeftJoin_WhereOnOuterAndInnerNull_ReturnsFilteredResults()
+    {
+        var results = await (from a in Service.Queryable<CustomAccount>()
+                             join c in Service.Queryable<CustomContact>()
+                                 on a.CustomAccountId equals c.ParentAccount.Id into contacts
+                             from c in contacts.DefaultIfEmpty()
+                             where a.Name.Contains("Account") && c == null
+                             select new { a.Name }).ToListAsync();
+
+        // Only accounts without contacts that contain "Account" in the name
+        results.Should().NotBeEmpty();
+        results.Should().AllSatisfy(r => r.Name.Should().Contain("Account"));
+    }
+
+    // -------------------------------------------------------------------------
     // WithFirstRow — matchfirstrowusingcrossapply
     // -------------------------------------------------------------------------
 

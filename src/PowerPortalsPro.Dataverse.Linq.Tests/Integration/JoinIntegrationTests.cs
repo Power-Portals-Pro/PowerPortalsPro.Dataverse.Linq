@@ -36,4 +36,37 @@ public partial class JoinIntegrationTests(ServiceClientFixture fixture) : Integr
         result!.Name.Should().NotBeNullOrEmpty();
         // Website may be null for some accounts, but the query should not throw
     }
+
+    // -------------------------------------------------------------------------
+    // Left join with where on outer entity
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void LeftJoin_WhereOnOuterEntity_ReturnsFilteredResults()
+    {
+        var results = (from a in Service.Queryable<CustomAccount>()
+                       join c in Service.Queryable<CustomContact>()
+                           on a.CustomAccountId equals c.ParentAccount.Id into contacts
+                       from c in contacts.DefaultIfEmpty()
+                       where a.Status == CustomAccount.CustomAccount_Status.Active
+                       select new { a.Name }).ToList();
+
+        results.Should().NotBeEmpty();
+        results.Should().AllSatisfy(r => r.Name.Should().NotBeNullOrEmpty());
+    }
+
+    [Fact]
+    public void LeftJoin_WhereOnOuterEntityAndInnerNull_ReturnsFilteredResults()
+    {
+        var results = (from a in Service.Queryable<CustomAccount>()
+                       join c in Service.Queryable<CustomContact>()
+                           on a.CustomAccountId equals c.ParentAccount.Id into contacts
+                       from c in contacts.DefaultIfEmpty()
+                       where a.Name.Contains("Account") && c == null
+                       select new { a.Name }).ToList();
+
+        // Only accounts without contacts that contain "Account" in the name
+        results.Should().NotBeEmpty();
+        results.Should().AllSatisfy(r => r.Name.Should().Contain("Account"));
+    }
 }

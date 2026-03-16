@@ -881,6 +881,13 @@ internal static class FetchXmlQueryTranslator
             };
         }
 
+        // Left-join inner entity null check: ti.c == null (inside compound predicate)
+        if (ctx.InnerEntityProperty is not null
+            && op is ConditionOperator.Equal or ConditionOperator.NotEqual
+            && TryTranslateInnerEntityNullCheck(binary, filter, ctx, op == ConditionOperator.Equal
+                ? ConditionOperator.Null : ConditionOperator.NotNull))
+            return;
+
         // string.Length comparison → like / not-like with underscore patterns
         if (TryTranslateStringLength(binary, op, filter, ctx))
             return;
@@ -962,6 +969,34 @@ internal static class FetchXmlQueryTranslator
     /// FetchXml <c>like</c> / <c>not-like</c> with underscore patterns, since FetchXml
     /// has no native string length operator.
     /// </summary>
+    /// <summary>
+    /// Detects <c>ti.innerEntity == null</c> patterns inside compound predicates
+    /// and translates them to a null/not-null condition on the inner link entity's primary key.
+    /// </summary>
+    private static bool TryTranslateInnerEntityNullCheck(
+        BinaryExpression binary, FetchFilter filter, TranslationContext ctx, ConditionOperator nullOp)
+    {
+        var (memberSide, constSide) = binary.Left is ConstantExpression
+            ? (binary.Right, binary.Left)
+            : (binary.Left, binary.Right);
+
+        if (constSide is not ConstantExpression { Value: null })
+            return false;
+
+        if (memberSide is not MemberExpression { Member.Name: var name, Expression: ParameterExpression }
+            || name != ctx.InnerEntityProperty)
+            return false;
+
+        var link = ctx.Query.Links[^1];
+        filter.Conditions.Add(new FetchCondition
+        {
+            EntityAlias = link.Alias,
+            Attribute = $"{link.Name}id",
+            Operator = nullOp
+        });
+        return true;
+    }
+
     private static bool TryTranslateStringLength(
         BinaryExpression binary, ConditionOperator op, FetchFilter filter, TranslationContext ctx)
     {
@@ -1303,10 +1338,46 @@ internal static class FetchXmlQueryTranslator
                 return joinResult;
         }
 
+        // Left-join transparent identifier: resolve through OuterEntityPath / InnerEntityProperty
+        if (ctx.OuterEntityPath is not null)
+        {
+            var leftResult = ResolveLeftJoinAttribute(expr, ctx);
+            if (leftResult is not null)
+                return leftResult;
+        }
+
         // Simple (non-join) resolution via GetAttributeName (includes Entity.Id when resolver is available)
         var simple = expr.GetAttributeName(ctx.PrimaryKeyResolver);
         if (simple is not null)
             return new ResolvedAttribute(simple, null);
+
+        return null;
+    }
+
+    /// <summary>
+    /// Resolves an attribute access through a left-join transparent identifier.
+    /// The outer entity (accessed via <see cref="TranslationContext.OuterEntityPath"/>)
+    /// maps to the root entity (null alias). The inner entity (accessed via
+    /// <see cref="TranslationContext.InnerEntityProperty"/>) maps to the last link entity.
+    /// </summary>
+    private static ResolvedAttribute? ResolveLeftJoinAttribute(Expression expr, TranslationContext ctx)
+    {
+        var access = expr.ResolveAttributeAccess(ctx.PrimaryKeyResolver);
+        if (access is null)
+            return null;
+
+        var entityExpr = access.Value.EntityExpression;
+
+        // Check if the access goes through the outer entity path (root entity)
+        if (ctx.OuterEntityPath is not null && entityExpr.IsOuterEntityAccess(ctx.OuterEntityPath))
+            return new ResolvedAttribute(access.Value.AttributeName, null);
+
+        // Check if the access is on the inner entity (link entity)
+        if (ctx.InnerEntityProperty is not null && entityExpr.IsInnerEntityAccess(ctx.InnerEntityProperty))
+        {
+            var linkAlias = ctx.Query.Links[^1].Alias;
+            return new ResolvedAttribute(access.Value.AttributeName, linkAlias);
+        }
 
         return null;
     }
