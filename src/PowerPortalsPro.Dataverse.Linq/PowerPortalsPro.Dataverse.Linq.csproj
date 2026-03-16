@@ -18,8 +18,8 @@
     <PackageTags>dataverse;linq;fetchxml;dynamics;power-platform;crm</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageIcon>PPP-Logo-128x128.png</PackageIcon>
-    <PackageLicenseFile>EULA.txt</PackageLicenseFile>
-    <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
+    <PackageLicenseExpression>LGPL-3.0-only</PackageLicenseExpression>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <RepositoryType>git</RepositoryType>
 
     <!-- Build configuration for packaging -->
@@ -35,7 +35,6 @@
   <ItemGroup>
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
     <None Include="..\..\PPP-Logo-128x128.png" Pack="true" PackagePath="\" />
-    <None Include="..\..\EULA.txt" Pack="true" PackagePath="\" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(TargetFramework)' == 'net462'">

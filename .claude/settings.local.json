@@ -15,7 +15,9 @@
       "Bash(pip show:*)",
       "Bash(python:*)",
       "Bash(powershell -NoProfile -Command \"Add-Type -AssemblyName System.Drawing; [System.Drawing.Image]::FromFile\\('F:\\\\Steve\\\\PowerPortalsLLC\\\\Media\\\\Logos\\\\PPP-Logo-350x350.png'\\).GetType\\(\\)\" 2>&1)",
-      "Bash(powershell -NoProfile -Command \"[string]\\(Get-Date\\).Year+'.'+[string]\\(Get-Date\\).Month+'.'+[string]\\(Get-Date\\).Day+'.'+[string]\\(\\(Get-Date\\).Hour*100+\\(Get-Date\\).Minute\\)\")"
+      "Bash(powershell -NoProfile -Command \"[string]\\(Get-Date\\).Year+'.'+[string]\\(Get-Date\\).Month+'.'+[string]\\(Get-Date\\).Day+'.'+[string]\\(\\(Get-Date\\).Hour*100+\\(Get-Date\\).Minute\\)\")",
+      "WebFetch(domain:www.gnu.org)",
+      "Bash(curl:*)"
     ]
   }
 }
