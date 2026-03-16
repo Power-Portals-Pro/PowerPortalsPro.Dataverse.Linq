@@ -1,5 +1,3 @@
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.PowerPlatform.Dataverse.Client;
 using FluentAssertions;
 using PowerPortalsPro.Dataverse.Linq.Tests.Proxies;
 
@@ -554,6 +552,32 @@ public partial class JoinIntegrationTests
             r.Contact!.FirstName.Should().NotBeNullOrEmpty();
             r.Contact.LastName.Should().NotBeNullOrEmpty();
             r.Contact.CustomContactId.Should().NotBe(Guid.Empty);
+        });
+    }
+
+    [Fact]
+    public async Task ToListAsync_WithLeftJoin_SelectProjectedProperties_ReturnsNestedAnonymousTypes()
+    {
+        var results = await (from a in Service.Queryable<CustomAccount>()
+                             join c in Service.Queryable<CustomContact>()
+                                 on a.CustomAccountId equals c.ParentAccount.Id into contacts
+                             from c in contacts.DefaultIfEmpty()
+                             where a.Status == CustomAccount.CustomAccount_Status.Active
+                             select new { Account = new { a.CustomAccountId, a.Name }, Contact = new { c.CustomContactId, c.Name } }).ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Should().AllSatisfy(r =>
+        {
+            r.Account.CustomAccountId.Should().NotBe(Guid.Empty);
+            r.Account.Name.Should().NotBeNullOrEmpty();
+        });
+        // Matched rows should have populated contact properties
+        var matched = results.Where(r => r.Contact.CustomContactId != Guid.Empty).ToList();
+        matched.Should().NotBeEmpty();
+        matched.Should().AllSatisfy(r =>
+        {
+            r.Contact.CustomContactId.Should().NotBe(Guid.Empty);
+            r.Contact.Name.Should().NotBeNullOrEmpty();
         });
     }
 

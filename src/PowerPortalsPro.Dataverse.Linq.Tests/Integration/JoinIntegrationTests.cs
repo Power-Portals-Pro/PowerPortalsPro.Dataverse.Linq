@@ -99,6 +99,32 @@ public partial class JoinIntegrationTests(ServiceClientFixture fixture) : Integr
     }
 
     [Fact]
+    public void LeftJoin_SelectProjectedProperties_ReturnsNestedAnonymousTypes()
+    {
+        var results = (from a in Service.Queryable<CustomAccount>()
+                       join c in Service.Queryable<CustomContact>()
+                           on a.CustomAccountId equals c.ParentAccount.Id into contacts
+                       from c in contacts.DefaultIfEmpty()
+                       where a.Status == CustomAccount.CustomAccount_Status.Active
+                       select new { Account = new { a.CustomAccountId, a.Name }, Contact = new { c.CustomContactId, c.Name } }).ToList();
+
+        results.Should().NotBeEmpty();
+        results.Should().AllSatisfy(r =>
+        {
+            r.Account.CustomAccountId.Should().NotBe(Guid.Empty);
+            r.Account.Name.Should().NotBeNullOrEmpty();
+        });
+        // Matched rows should have populated contact properties
+        var matched = results.Where(r => r.Contact.CustomContactId != Guid.Empty).ToList();
+        matched.Should().NotBeEmpty();
+        matched.Should().AllSatisfy(r =>
+        {
+            r.Contact.CustomContactId.Should().NotBe(Guid.Empty);
+            r.Contact.Name.Should().NotBeNullOrEmpty();
+        });
+    }
+
+    [Fact]
     public void LeftJoin_SelectWholeEntities_InnerIsNullForUnmatchedRows()
     {
         var results = (from a in Service.Queryable<CustomAccount>()

@@ -2193,13 +2193,35 @@ internal static class FetchXmlQueryTranslator
         // If it's a transparent-identifier wrapper, no columns are found and we
         // set up context for subsequent Select/Where instead.
         var columns = resultSelector.ExtractColumnsViaPath(outerPath);
+        var innerParam = resultSelector.Parameters[1];
 
-        if (columns is { Count: > 0 })
+        // A transparent-identifier wrapper (all arguments are parameters) means further
+        // operators follow. A real projection (not a TI) means the select was folded in.
+        var isFoldedProjection = !resultSelector.IsTransparentIdentifier();
+        var referencesInner = isFoldedProjection && resultSelector.Body.GetProjectionArguments()
+            .Any(a => ReferencesParameter(a, innerParam));
+
+        if (isFoldedProjection)
         {
             // Select folded into SelectMany — handle projection here
-            ctx.Query.ApplyColumns(columns);
+            if (columns is { Count: > 0 })
+                ctx.Query.ApplyColumns(columns);
 
-            ctx.Query.Projector = RebuildProjector(resultSelector, outerPath, outerEntityType);
+            // Check for inner entity references and extract columns or set all-attributes
+            var link = ctx.Query.Links[^1];
+            if (referencesInner)
+            {
+                var innerColumns = ExtractColumnsFromParameter(resultSelector.Body, innerParam);
+                if (innerColumns is { Count: > 0 })
+                    foreach (var col in innerColumns)
+                        link.Attributes.Add(new FetchAttribute { Name = col });
+                else
+                    link.AllAttributes = true;
+            }
+
+            ctx.Query.Projector = RebuildFoldedLeftJoinProjector(
+                resultSelector, outerPath, outerEntityType, innerParam, link.Alias!);
+            ctx.Query.InnerEntityType = outerEntityType;
             ctx.Query.ProjectionType = resultSelector.ReturnType;
         }
         else
@@ -2211,10 +2233,10 @@ internal static class FetchXmlQueryTranslator
             ctx.OuterEntityPath = resultSelector.ReturnType.FindOuterPropertyPath(outerEntityType);
 
             // Identify the inner entity property in the TI for null-check detection.
-            var innerParam = resultSelector.Parameters[1];
+            var tiInnerParam = resultSelector.Parameters[1];
             foreach (var prop in resultSelector.ReturnType.GetProperties())
             {
-                if (prop.PropertyType == innerParam.Type)
+                if (prop.PropertyType == tiInnerParam.Type)
                 {
                     ctx.InnerEntityProperty = prop.Name;
                     break;
@@ -2279,6 +2301,161 @@ internal static class FetchXmlQueryTranslator
     /// <c>ToEntity</c> and inner entity accesses via <c>ExtractLinkedEntity</c> /
     /// <c>ExtractValue</c>.
     /// </summary>
+    /// <summary>
+    /// Returns <c>true</c> when <paramref name="expr"/> or any nested projection argument
+    /// references <paramref name="param"/> (directly or via property access).
+    /// </summary>
+    private static bool ReferencesParameter(Expression expr, ParameterExpression param)
+    {
+        if (expr is ParameterExpression p && p == param) return true;
+        if (expr is MemberExpression me && me.Expression is ParameterExpression mp && mp == param) return true;
+        if (expr is NewExpression or MemberInitExpression)
+            return expr.GetProjectionArguments().Any(a => ReferencesParameter(a, param));
+        return false;
+    }
+
+    /// <summary>
+    /// Extracts attribute logical names from direct property accesses on a parameter
+    /// (e.g. <c>d.FirstName</c> where <c>d</c> is the inner entity parameter).
+    /// Recurses into nested projections.
+    /// </summary>
+    private static List<string> ExtractColumnsFromParameter(Expression body, ParameterExpression param)
+    {
+        var columns = new List<string>();
+        foreach (var arg in body.GetProjectionArguments())
+        {
+            if (arg is MemberExpression { Member: PropertyInfo prop, Expression: ParameterExpression p }
+                && p == param)
+            {
+                var name = prop.GetCustomAttribute<AttributeLogicalNameAttribute>()?.LogicalName;
+                if (name is not null)
+                    columns.Add(name);
+            }
+            else if (arg is NewExpression or MemberInitExpression)
+            {
+                columns.AddRange(ExtractColumnsFromParameter(arg, param));
+            }
+        }
+        return columns;
+    }
+
+    /// <summary>
+    /// Builds a projector for a folded left-join SelectMany where the inner entity is a
+    /// direct lambda parameter (not a TI property).
+    /// E.g. <c>(tiGroup, d) => new { Account = tiGroup.s, Contact = d }</c>
+    /// </summary>
+    private static Delegate RebuildFoldedLeftJoinProjector(
+        LambdaExpression lambda, string[] outerPath, Type outerEntityType,
+        ParameterExpression innerParam, string innerAlias)
+    {
+        var entityParam = Expression.Parameter(typeof(Entity), "e");
+        var rewriter = new FoldedLeftJoinProjectorRewriter(
+            entityParam, lambda.Parameters[0], outerPath, outerEntityType,
+            innerParam, innerAlias);
+        var newBody = rewriter.Visit(lambda.Body);
+        return Expression.Lambda(newBody, entityParam).Compile();
+    }
+
+    /// <summary>
+    /// Rewriter for folded left-join projections where the inner entity is a direct
+    /// lambda parameter. Rewrites outer entity accesses via the TI path, and inner
+    /// entity accesses via the direct parameter reference.
+    /// </summary>
+    private sealed class FoldedLeftJoinProjectorRewriter(
+        ParameterExpression entityParam,
+        ParameterExpression outerTiParam,
+        string[] outerPath,
+        Type outerEntityType,
+        ParameterExpression innerParam,
+        string innerAlias) : ExpressionVisitor
+    {
+        private static readonly MethodInfo ExtractRootValueMethod =
+            typeof(AggregateProjection).GetMethod(nameof(AggregateProjection.ExtractRootValue))!;
+        private static readonly MethodInfo ExtractValueMethod =
+            typeof(AggregateProjection).GetMethod(nameof(AggregateProjection.ExtractValue))!;
+        private static readonly MethodInfo ExtractLinkedEntityMethod =
+            typeof(AggregateProjection).GetMethod(nameof(AggregateProjection.ExtractLinkedEntity))!;
+        private static readonly MethodInfo ToEntityMethod =
+            typeof(Entity).GetMethod(nameof(Entity.ToEntity))!;
+
+        protected override Expression VisitMember(MemberExpression node)
+        {
+            // Property access on outer entity via TI: tiGroup.s.Name → ExtractRootValue
+            if (node.Expression is not null
+                && node.Expression.IsOuterEntityAccess(outerTiParam, outerPath))
+            {
+                var attrName = (node.Member as PropertyInfo)
+                    ?.GetCustomAttribute<AttributeLogicalNameAttribute>()?.LogicalName;
+                if (attrName is not null)
+                {
+                    var resultType = (node.Member as PropertyInfo)?.PropertyType ?? node.Type;
+                    return Expression.Call(
+                        ExtractRootValueMethod.MakeGenericMethod(resultType),
+                        entityParam, Expression.Constant(attrName));
+                }
+            }
+
+            // Whole outer entity via TI: tiGroup.s → e.ToEntity<T>()
+            if (node.Expression is not null && IsOuterEntityReference(node))
+                return Expression.Call(entityParam, ToEntityMethod.MakeGenericMethod(outerEntityType));
+
+            // Property access on inner entity parameter: d.Name → ExtractValue
+            if (node.Expression is ParameterExpression p && p == innerParam)
+            {
+                var attrName = (node.Member as PropertyInfo)
+                    ?.GetCustomAttribute<AttributeLogicalNameAttribute>()?.LogicalName;
+                if (attrName is not null)
+                {
+                    var resultType = (node.Member as PropertyInfo)?.PropertyType ?? node.Type;
+                    return Expression.Call(
+                        ExtractValueMethod.MakeGenericMethod(resultType),
+                        entityParam, Expression.Constant($"{innerAlias}.{attrName}"));
+                }
+            }
+
+            // Two-level unwrap on inner: d.NavProp.Id/.Value
+            if (node.Member.Name is "Id" or "Value"
+                && node.Expression is MemberExpression { Expression: ParameterExpression ip }
+                && ip == innerParam)
+            {
+                var parentProp = (node.Expression as MemberExpression)?.Member as PropertyInfo;
+                var attrName = parentProp?.GetCustomAttribute<AttributeLogicalNameAttribute>()?.LogicalName;
+                if (attrName is not null)
+                {
+                    var resultType = (node.Member as PropertyInfo)?.PropertyType ?? node.Type;
+                    return Expression.Call(
+                        ExtractValueMethod.MakeGenericMethod(resultType),
+                        entityParam, Expression.Constant($"{innerAlias}.{attrName}"));
+                }
+            }
+
+            return base.VisitMember(node);
+        }
+
+        protected override Expression VisitParameter(ParameterExpression node)
+        {
+            // Whole inner entity parameter: d → ExtractLinkedEntity<T>(e, "alias")
+            if (node == innerParam)
+                return Expression.Call(
+                    ExtractLinkedEntityMethod.MakeGenericMethod(node.Type),
+                    entityParam, Expression.Constant(innerAlias));
+
+            return base.VisitParameter(node);
+        }
+
+        private bool IsOuterEntityReference(MemberExpression node)
+        {
+            Expression expr = node;
+            for (var i = outerPath.Length - 1; i >= 0; i--)
+            {
+                if (expr is not MemberExpression me || me.Member.Name != outerPath[i])
+                    return false;
+                expr = me.Expression!;
+            }
+            return expr is ParameterExpression p && p == outerTiParam;
+        }
+    }
+
     private static Delegate RebuildLeftJoinProjector(LambdaExpression lambda, TranslationContext ctx)
     {
         var entityParam = Expression.Parameter(typeof(Entity), "e");

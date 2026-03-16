@@ -53,18 +53,12 @@ internal static class ProjectionExtensions
     {
         var param = lambda.Parameters[0];
         var columns = new List<string>();
-
-        foreach (var arg in lambda.Body.GetProjectionArguments())
-        {
-            if (arg is MemberExpression { Member: PropertyInfo prop, Expression: { } attrExpr }
-                && attrExpr.IsOuterEntityAccess(param, outerPath))
-            {
-                var name = prop.GetCustomAttribute<AttributeLogicalNameAttribute>()?.LogicalName;
-                if (name is not null)
-                    columns.Add(name);
-            }
-        }
-
+        CollectColumns(lambda.Body, arg =>
+            arg is MemberExpression { Member: PropertyInfo prop, Expression: { } attrExpr }
+            && attrExpr.IsOuterEntityAccess(param, outerPath)
+                ? prop.GetCustomAttribute<AttributeLogicalNameAttribute>()?.LogicalName
+                : null,
+            columns);
         return columns.Count > 0 ? columns : null;
     }
 
@@ -76,16 +70,9 @@ internal static class ProjectionExtensions
         this LambdaExpression lambda, string innerPropertyName)
     {
         var param = lambda.Parameters[0];
-
-        foreach (var arg in lambda.Body.GetProjectionArguments())
-        {
-            if (arg is MemberExpression { Member.Name: var name, Expression: ParameterExpression p }
-                && p == param
-                && name == innerPropertyName)
-                return true;
-        }
-
-        return false;
+        return MatchesProjectionArgument(lambda.Body, arg =>
+            arg is MemberExpression { Member.Name: var name, Expression: ParameterExpression p }
+            && p == param && name == innerPropertyName);
     }
 
     /// <summary>
@@ -98,21 +85,43 @@ internal static class ProjectionExtensions
     {
         var param = lambda.Parameters[0];
         var columns = new List<string>();
-
-        foreach (var arg in lambda.Body.GetProjectionArguments())
-        {
-            // property access on inner entity: ti.d.SomeProp
-            if (arg is MemberExpression { Member: PropertyInfo prop, Expression: MemberExpression inner }
-                && inner.Member.Name == innerPropertyName
-                && inner.Expression is ParameterExpression p && p == param)
-            {
-                var name = prop.GetCustomAttribute<AttributeLogicalNameAttribute>()?.LogicalName;
-                if (name is not null)
-                    columns.Add(name);
-            }
-        }
-
+        CollectColumns(lambda.Body, arg =>
+            arg is MemberExpression { Member: PropertyInfo prop, Expression: MemberExpression inner }
+            && inner.Member.Name == innerPropertyName
+            && inner.Expression is ParameterExpression p && p == param
+                ? prop.GetCustomAttribute<AttributeLogicalNameAttribute>()?.LogicalName
+                : null,
+            columns);
         return columns.Count > 0 ? columns : null;
+    }
+
+    /// <summary>
+    /// Recursively walks projection arguments and collects column names using the provided
+    /// matcher. Descends into nested <see cref="NewExpression"/> and <see cref="MemberInitExpression"/>.
+    /// </summary>
+    private static void CollectColumns(Expression body, Func<Expression, string?> matcher, List<string> columns)
+    {
+        foreach (var arg in body.GetProjectionArguments())
+        {
+            var name = matcher(arg);
+            if (name is not null)
+                columns.Add(name);
+            else if (arg is NewExpression or MemberInitExpression)
+                CollectColumns(arg, matcher, columns);
+        }
+    }
+
+    private static bool MatchesProjectionArgument(Expression body, Func<Expression, bool> predicate)
+    {
+        foreach (var arg in body.GetProjectionArguments())
+        {
+            if (predicate(arg))
+                return true;
+            if (arg is NewExpression or MemberInitExpression
+                && MatchesProjectionArgument(arg, predicate))
+                return true;
+        }
+        return false;
     }
 
     internal static IReadOnlyList<RowAggregateInfo>? ExtractRowAggregates(this Expression body)

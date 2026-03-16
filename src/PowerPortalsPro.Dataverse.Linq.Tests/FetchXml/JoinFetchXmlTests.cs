@@ -162,6 +162,34 @@ public class JoinFetchXmlTests : FetchXmlTestBase
     }
 
     [Fact]
+    public void ToFetchXml_WithLeftJoin_SelectProjectedProperties_GeneratesCorrectAttributes()
+    {
+        var fetchXml = (from a in _service.Queryable<CustomAccount>()
+                        join c in _service.Queryable<CustomContact>()
+                            on a.CustomAccountId equals c.ParentAccount.Id into contacts
+                        from c in contacts.DefaultIfEmpty()
+                        where a.Status == CustomAccount.CustomAccount_Status.Active
+                        select new { Account = new { a.CustomAccountId, a.Name }, Contact = new { c.CustomContactId, c.Name } }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_customaccountid" />
+                <attribute name="new_name" />
+                <filter type="and">
+                  <condition attribute="statecode" operator="eq" value="0" />
+                </filter>
+                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="outer">
+                  <attribute name="new_customcontactid" />
+                  <attribute name="new_name" />
+                </link-entity>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
     public void ToFetchXml_WithLeftJoin_WhereOnOuterEntity_GeneratesFilter()
     {
         var fetchXml = (from a in _service.Queryable<CustomAccount>()
