@@ -43,7 +43,7 @@
     <Using Include="System.Collections.Generic" />
     <Using Include="System.IO" />
     <Using Include="System.Linq" />
-<Using Include="System.Threading" />
+    <Using Include="System.Threading" />
     <Using Include="System.Threading.Tasks" />
   </ItemGroup>
 
