@@ -31,31 +31,27 @@ internal class DataverseQueryProviderAsync<T> : DataverseQueryProvider<T>, IAsyn
     {
         var query = FetchXmlQueryTranslator.Translate<T>(expression, Columns, EntityLogicalName, Service);
 
-        // Aggregate terminal operator: TResult = Task<TElement>
-        if (query.TerminalOperator is QueryTerminalOperator.Min or QueryTerminalOperator.Max
-            or QueryTerminalOperator.Sum or QueryTerminalOperator.Average
-            or QueryTerminalOperator.Count or QueryTerminalOperator.LongCount
-            or QueryTerminalOperator.CountColumn)
+        string methodName;
+        Type elementType;
+
+        if (query.TerminalOperator.IsAggregate())
         {
-            var elementType = typeof(TResult).GetGenericArguments()[0];
-            var method = GetAsyncMethod(nameof(ExecuteAggregateAsync)).MakeGenericMethod(elementType);
-            return (TResult)method.Invoke(this, [query, cancellationToken])!;
+            methodName = nameof(ExecuteAggregateAsync);
+            elementType = typeof(TResult).GetGenericArguments()[0];
+        }
+        else if (query.TerminalOperator.IsScalar())
+        {
+            methodName = nameof(ExecuteScalarAsync);
+            elementType = typeof(TResult).GetGenericArguments()[0];
+        }
+        else
+        {
+            methodName = nameof(ExecuteQueryAsync);
+            elementType = typeof(TResult).GetGenericArguments()[0].GetGenericArguments()[0];
         }
 
-        // Scalar terminal operator: TResult = Task<TElement>
-        if (query.TerminalOperator is not QueryTerminalOperator.List)
-        {
-            var elementType = typeof(TResult).GetGenericArguments()[0];
-            var method = GetAsyncMethod(nameof(ExecuteScalarAsync)).MakeGenericMethod(elementType);
-            return (TResult)method.Invoke(this, [query, cancellationToken])!;
-        }
-
-        // List: TResult = Task<List<TElement>>
-        {
-            var elementType = typeof(TResult).GetGenericArguments()[0].GetGenericArguments()[0];
-            var method = GetAsyncMethod(nameof(ExecuteQueryAsync)).MakeGenericMethod(elementType);
-            return (TResult)method.Invoke(this, [query, cancellationToken])!;
-        }
+        var method = GetAsyncMethod(methodName).MakeGenericMethod(elementType);
+        return (TResult)method.Invoke(this, [query, cancellationToken])!;
     }
 
     // -------------------------------------------------------------------------
@@ -101,27 +97,26 @@ internal class DataverseQueryProviderAsync<T> : DataverseQueryProvider<T>, IAsyn
     private async Task<List<TElement>> ExecuteQueryAsync<TElement>(
         FetchXmlQuery query, CancellationToken cancellationToken)
     {
-        var fetchXml = FetchXmlBuilder.Build(query);
-        var entities = await RetrieveAllAsync(fetchXml, cancellationToken);
+        var entities = await RetrieveQueryAsync(query, cancellationToken);
         return ProjectEntities<TElement>(entities, query);
     }
 
     private async Task<TElement> ExecuteScalarAsync<TElement>(
         FetchXmlQuery query, CancellationToken cancellationToken)
     {
-        var fetchXml = FetchXmlBuilder.Build(query);
-        var entities = await RetrieveAllAsync(fetchXml, cancellationToken);
-        var projected = ProjectEntities<TElement>(entities, query);
-        return ApplyTerminalOperator(projected, query.TerminalOperator);
+        var entities = await RetrieveQueryAsync(query, cancellationToken);
+        return ApplyTerminalOperator(ProjectEntities<TElement>(entities, query), query.TerminalOperator);
     }
 
     private async Task<TElement> ExecuteAggregateAsync<TElement>(
         FetchXmlQuery query, CancellationToken cancellationToken)
     {
-        var fetchXml = FetchXmlBuilder.Build(query);
-        var entities = await RetrieveAllAsync(fetchXml, cancellationToken);
+        var entities = await RetrieveQueryAsync(query, cancellationToken);
         return ExtractAggregateResult<TElement>(entities, query.TerminalOperator);
     }
+
+    private Task<List<Entity>> RetrieveQueryAsync(FetchXmlQuery query, CancellationToken cancellationToken) =>
+        RetrieveAllAsync(FetchXmlBuilder.Build(query), cancellationToken);
 
     // -------------------------------------------------------------------------
     // Paged retrieval (asynchronous)

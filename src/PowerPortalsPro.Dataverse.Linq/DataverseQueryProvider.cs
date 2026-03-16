@@ -50,14 +50,11 @@ internal class DataverseQueryProvider<T> : IQueryProvider where T : Entity
         var entities = RetrieveAll(fetchXml);
 
         // Aggregate terminal operator (Min, Max, Sum, Average, Count)
-        if (query.TerminalOperator is QueryTerminalOperator.Min or QueryTerminalOperator.Max
-            or QueryTerminalOperator.Sum or QueryTerminalOperator.Average
-            or QueryTerminalOperator.Count or QueryTerminalOperator.LongCount
-            or QueryTerminalOperator.CountColumn)
+        if (query.TerminalOperator.IsAggregate())
             return ExtractAggregateResult<TResult>(entities, query.TerminalOperator);
 
         // Scalar terminal operator (First, Single, etc.)
-        if (query.TerminalOperator is not QueryTerminalOperator.List)
+        if (query.TerminalOperator.IsScalar())
         {
             var projected = ProjectEntities<TResult>(entities, query);
             return ApplyTerminalOperator(projected, query.TerminalOperator);
@@ -203,32 +200,15 @@ internal class DataverseQueryProvider<T> : IQueryProvider where T : Entity
     /// </summary>
     protected List<TElement> ProjectEntities<TElement>(List<Entity> entities, FetchXmlQuery query)
     {
-        // Grouped aggregate: projector takes raw Entity (not typed)
-        if (query.Aggregate && query.Projector is not null)
-        {
-            return entities.Select(e =>
-                (TElement)query.Projector.DynamicInvoke(e)!
-            ).ToList();
-        }
+        if (query.Projector is null)
+            return entities.Select(e => (TElement)(object)e.ToEntity<T>()).ToList();
 
-        // Inner join: single-param (Entity) projector that extracts aliased values
-        if (query.InnerEntityType is not null && query.Projector is not null)
-        {
-            return entities.Select(e =>
-                (TElement)query.Projector.DynamicInvoke(e)!
-            ).ToList();
-        }
+        // Aggregate, inner join, and left join projectors all take raw Entity
+        if (query.Aggregate || query.InnerEntityType is not null)
+            return entities.Select(e => (TElement)query.Projector.DynamicInvoke(e)!).ToList();
 
-        // Simple select / left join: 1-param projector (entity) → TElement
-        if (query.Projector is not null)
-        {
-            return entities.Select(e =>
-                (TElement)query.Projector.DynamicInvoke(e.ToEntity<T>())!
-            ).ToList();
-        }
-
-        // No projection: return typed entities
-        return entities.Select(e => (TElement)(object)e.ToEntity<T>()).ToList();
+        // Simple select: projector takes typed entity
+        return entities.Select(e => (TElement)query.Projector.DynamicInvoke(e.ToEntity<T>())!).ToList();
     }
 
     protected static MethodInfo GetPrivateMethod(string name) =>
