@@ -709,4 +709,4 @@ For more information about FetchXml, see the official Microsoft documentation:
 
 ## License
 
-See the EULA for the license terms.
+This project is licensed under the [GNU Lesser General Public License v3.0 (LGPL-3.0)](https://www.gnu.org/licenses/lgpl-3.0.html). You are free to use this library in proprietary and open-source applications. If you modify the library itself, you must make those modifications available under the same license. See the [LICENSE](LICENSE) file for details.
