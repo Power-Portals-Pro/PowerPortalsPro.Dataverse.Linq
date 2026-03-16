@@ -1,11 +1,11 @@
-# XrmToolkit.Dataverse.Linq
+# PowerPortalsPro.Dataverse.Linq
 
 A strongly-typed LINQ query provider for Microsoft Dataverse (Dynamics 365 / Power Platform) that translates standard LINQ expressions into [FetchXml](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/fetchxml/overview) and executes them against the Dataverse API. Write queries using familiar C# syntax instead of hand-crafting FetchXml strings.
 
 ## Installation
 
 ```
-dotnet add package XrmToolkit.Dataverse.Linq
+dotnet add package PowerPortalsPro.Dataverse.Linq
 ```
 
 Supports **.NET 10+** (with full async support) and **.NET Framework 4.6.2+** (sync only).
@@ -13,7 +13,7 @@ Supports **.NET 10+** (with full async support) and **.NET Framework 4.6.2+** (s
 ## Quick Start
 
 ```csharp
-using XrmToolkit.Dataverse.Linq;
+using PowerPortalsPro.Dataverse.Linq;
 
 var accounts = await service.Queryable<Account>()
     .Where(a => a.Name.StartsWith("Contoso"))
@@ -205,10 +205,10 @@ await service.Queryable<Account>()
 
 ### DateTime Operators
 
-Extension methods in `XrmToolkit.Dataverse.Linq.Extensions` map to all [FetchXml datetime condition operators](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/fetchxml/reference/operators#datetime-data):
+Extension methods in `PowerPortalsPro.Dataverse.Linq.Extensions` map to all [FetchXml datetime condition operators](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/fetchxml/reference/operators#datetime-data):
 
 ```csharp
-using XrmToolkit.Dataverse.Linq.Extensions;
+using PowerPortalsPro.Dataverse.Linq.Extensions;
 ```
 
 **Parameterless operators:**
@@ -273,7 +273,7 @@ All DateTime methods have both `DateTime` and `DateTime?` overloads.
 Extension methods for [user/business unit condition operators](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/fetchxml/reference/operators#unique-identifier-data):
 
 ```csharp
-using XrmToolkit.Dataverse.Linq.Extensions;
+using PowerPortalsPro.Dataverse.Linq.Extensions;
 ```
 
 | Method | FetchXml Operator |
@@ -293,7 +293,7 @@ using XrmToolkit.Dataverse.Linq.Extensions;
 Extension methods for [hierarchical condition operators](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/fetchxml/reference/operators#hierarchical-data):
 
 ```csharp
-using XrmToolkit.Dataverse.Linq.Extensions;
+using PowerPortalsPro.Dataverse.Linq.Extensions;
 ```
 
 | Method | FetchXml Operator |
@@ -316,7 +316,7 @@ using XrmToolkit.Dataverse.Linq.Extensions;
 Extension methods for [choice column operators](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/fetchxml/reference/operators#choice-data) ([`contain-values`](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/fetchxml/reference/operators#contain-values) / [`not-contain-values`](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/fetchxml/reference/operators#not-contain-values)):
 
 ```csharp
-using XrmToolkit.Dataverse.Linq.Extensions;
+using PowerPortalsPro.Dataverse.Linq.Extensions;
 
 // ContainsValues — contain-values operator
 .Where(c => c.PreferredMethods.ContainsValues(Method.Email, Method.Phone))
@@ -567,7 +567,7 @@ Group by [date parts](https://learn.microsoft.com/en-us/power-apps/developer/dat
 | `.FiscalYear()` | `fiscal-year` |
 
 ```csharp
-using XrmToolkit.Dataverse.Linq.Extensions;
+using PowerPortalsPro.Dataverse.Linq.Extensions;
 
 var byYear = await (from o in service.Queryable<Opportunity>()
                     group o by o.ActualCloseDate.Value.Year into g
