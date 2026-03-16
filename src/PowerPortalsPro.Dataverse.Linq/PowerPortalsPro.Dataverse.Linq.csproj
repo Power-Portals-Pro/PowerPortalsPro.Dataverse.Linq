@@ -17,8 +17,9 @@
     <Description>A LINQ query provider for Microsoft Dataverse that translates LINQ expressions into FetchXml queries.</Description>
     <PackageTags>dataverse;linq;fetchxml;dynamics;power-platform;crm</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+    <PackageIcon>PPP-Logo-128x128.png</PackageIcon>
+    <PackageLicenseFile>EULA.txt</PackageLicenseFile>
+    <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
     <RepositoryType>git</RepositoryType>
 
     <!-- Build configuration for packaging -->
@@ -33,6 +34,8 @@
 
   <ItemGroup>
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+    <None Include="..\..\PPP-Logo-128x128.png" Pack="true" PackagePath="\" />
+    <None Include="..\..\EULA.txt" Pack="true" PackagePath="\" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(TargetFramework)' == 'net462'">

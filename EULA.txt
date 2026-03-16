@@ -1,0 +1,263 @@
+END USER LICENSE AGREEMENT (EULA)
+
+Power Portals Pro LLC
+PowerPortalsPro.Dataverse.Linq
+
+Last Updated: March 16, 2026
+
+IMPORTANT — READ CAREFULLY: This End User License Agreement ("Agreement") is 
+a legal agreement between you (either an individual or a single legal entity) 
+("Licensee") and [Your Company Name] ("Licensor") for the use of 
+[Product/Package Name] and any associated documentation, updates, and 
+supplementary materials (collectively, the "Software").
+
+BY INSTALLING, COPYING, DOWNLOADING, OR OTHERWISE USING THE SOFTWARE, YOU 
+AGREE TO BE BOUND BY THE TERMS OF THIS AGREEMENT. IF YOU DO NOT AGREE TO 
+THESE TERMS, DO NOT INSTALL OR USE THE SOFTWARE.
+
+────────────────────────────────────────────────────────────────────────────────
+1. DEFINITIONS
+────────────────────────────────────────────────────────────────────────────────
+
+1.1 "Software" means the compiled binary NuGet package(s) provided by 
+    Licensor, including any updates or new versions made available under an 
+    active Subscription.
+
+1.2 "Licensee Application" means a software application developed by 
+    Licensee that incorporates the Software, provided solely as a 
+    Software-as-a-Service (SaaS) offering.
+
+1.3 "Authorized User" means an individual employee or contractor of Licensee 
+    who is authorized by Licensee to use the Software on Licensee's behalf.
+
+1.4 "Subscription" means the time-limited license purchased by Licensee 
+    entitling Licensee to use the Software and receive updates for the 
+    duration of the Subscription Term.
+
+1.5 "Subscription Term" means the period for which Licensee has paid the 
+    applicable Subscription fee, as specified in the purchase order or 
+    invoice.
+
+1.6 "End User" means a third party who accesses or uses Licensee's 
+    Application as a SaaS service.
+
+────────────────────────────────────────────────────────────────────────────────
+2. GRANT OF LICENSE
+────────────────────────────────────────────────────────────────────────────────
+
+2.1 Subject to the terms of this Agreement and payment of the applicable 
+    Subscription fee, Licensor grants Licensee a limited, non-exclusive, 
+    non-transferable, non-sublicensable license during the Subscription Term 
+    to:
+
+    (a) Install and use the Software solely for the purpose of developing 
+        and operating Licensee Applications;
+
+    (b) Deploy the Software as part of a Licensee Application delivered as 
+        a SaaS product to End Users; and
+
+    (c) Allow Authorized Users to access and use the Software solely in 
+        connection with the development and operation of Licensee 
+        Applications.
+
+2.2 The Software is licensed, not sold. Licensor retains all right, title, 
+    and interest in and to the Software, including all intellectual property 
+    rights therein.
+
+────────────────────────────────────────────────────────────────────────────────
+3. RESTRICTIONS
+────────────────────────────────────────────────────────────────────────────────
+
+3.1 Licensee shall NOT:
+
+    (a) Redistribute, resell, sublicense, rent, lease, lend, or otherwise 
+        transfer the Software or any rights therein to any third party;
+
+    (b) Include the Software or any portion thereof in another software 
+        library, toolkit, component package, or product that is made 
+        available to third parties, whether commercially or otherwise;
+
+    (c) Decompile, disassemble, reverse engineer, or attempt to derive the 
+        source code of the Software, except to the extent that such activity 
+        is expressly permitted by applicable law notwithstanding this 
+        restriction;
+
+    (d) Modify, adapt, translate, or create derivative works of the 
+        Software;
+
+    (e) Remove, alter, or obscure any proprietary notices, labels, or marks 
+        on the Software;
+
+    (f) Use the Software to develop a product that competes with the 
+        Software or Licensor's other products or services;
+
+    (g) Make the Software available to any party who has not agreed to be 
+        bound by terms at least as restrictive as this Agreement; or
+
+    (h) Use the Software beyond the scope of the license granted in 
+        Section 2.
+
+3.2 For the avoidance of doubt, Licensee's End Users may access the 
+    functionality of the Software solely through Licensee's Application 
+    as a SaaS service and shall have no direct access to, or rights in, 
+    the Software itself.
+
+────────────────────────────────────────────────────────────────────────────────
+4. SUBSCRIPTION AND PAYMENT
+────────────────────────────────────────────────────────────────────────────────
+
+4.1 Use of the Software requires an active, paid Subscription. The license 
+    granted under Section 2 is contingent upon Licensee maintaining a valid 
+    Subscription.
+
+4.2 Subscription fees are due in advance for each Subscription Term as 
+    specified in Licensor's then-current pricing, invoice, or purchase 
+    order.
+
+4.3 Licensor reserves the right to modify Subscription pricing at any time, 
+    provided that such changes will not take effect until the commencement 
+    of the next Subscription Term. Licensor will provide at least thirty 
+    (30) days' written notice of any price changes.
+
+4.4 All fees are non-refundable except as required by applicable law or as 
+    expressly set forth in a separate written agreement between the parties.
+
+────────────────────────────────────────────────────────────────────────────────
+5. SUBSCRIPTION TERM AND TERMINATION
+────────────────────────────────────────────────────────────────────────────────
+
+5.1 This Agreement commences on the date Licensee first accesses or installs 
+    the Software and continues for the duration of the active Subscription 
+    Term, unless terminated earlier in accordance with this Section.
+
+5.2 Either party may terminate this Agreement immediately upon written notice 
+    if the other party materially breaches this Agreement and fails to cure 
+    such breach within thirty (30) days of receiving written notice of 
+    the breach.
+
+5.3 Licensor may suspend or terminate Licensee's access to the Software 
+    immediately if:
+
+    (a) Licensee fails to pay any Subscription fee when due; or
+
+    (b) Licensor reasonably believes that Licensee is using the Software in 
+        violation of this Agreement or applicable law.
+
+5.4 Upon expiration or termination of this Agreement for any reason:
+
+    (a) All licenses granted hereunder shall immediately terminate;
+
+    (b) Licensee shall immediately cease all use of the Software and 
+        destroy or remove all copies of the Software from Licensee's 
+        systems; and
+
+    (c) Sections 3, 6, 7, 8, 9, and 10 shall survive termination.
+
+5.5 Upon expiration of a Subscription Term without renewal, Licensee may 
+    no longer use the Software. Any Licensee Applications already deployed 
+    and in active use by End Users at the time of expiration may continue 
+    to operate using the last licensed version of the Software for a grace 
+    period of ninety (90) days, after which all use must cease.
+
+────────────────────────────────────────────────────────────────────────────────
+6. OWNERSHIP AND INTELLECTUAL PROPERTY
+────────────────────────────────────────────────────────────────────────────────
+
+6.1 The Software and all copies thereof are proprietary to Licensor and 
+    title thereto remains in Licensor. All rights in the Software not 
+    specifically granted in this Agreement are reserved to Licensor.
+
+6.2 Licensee acknowledges that no title to the intellectual property in 
+    the Software is transferred to Licensee. Licensee further acknowledges 
+    that title and full ownership rights to the Software will remain the 
+    exclusive property of Licensor.
+
+────────────────────────────────────────────────────────────────────────────────
+7. CONFIDENTIALITY
+────────────────────────────────────────────────────────────────────────────────
+
+7.1 Licensee acknowledges that the Software contains proprietary and 
+    confidential information of Licensor. Licensee agrees to maintain the 
+    confidentiality of the Software and not to disclose the Software or any 
+    information derived therefrom to any third party without Licensor's 
+    prior written consent.
+
+7.2 This obligation of confidentiality shall survive termination of this 
+    Agreement for a period of five (5) years.
+
+────────────────────────────────────────────────────────────────────────────────
+8. DISCLAIMER OF WARRANTIES
+────────────────────────────────────────────────────────────────────────────────
+
+8.1 THE SOFTWARE IS PROVIDED "AS IS" WITHOUT WARRANTY OF ANY KIND. TO THE 
+    MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, LICENSOR EXPRESSLY 
+    DISCLAIMS ALL WARRANTIES, WHETHER EXPRESS, IMPLIED, STATUTORY, OR 
+    OTHERWISE, INCLUDING WITHOUT LIMITATION ANY IMPLIED WARRANTIES OF 
+    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE, AND 
+    NON-INFRINGEMENT.
+
+8.2 LICENSOR DOES NOT WARRANT THAT THE SOFTWARE WILL MEET LICENSEE'S 
+    REQUIREMENTS, THAT THE OPERATION OF THE SOFTWARE WILL BE UNINTERRUPTED 
+    OR ERROR-FREE, OR THAT DEFECTS IN THE SOFTWARE WILL BE CORRECTED.
+
+────────────────────────────────────────────────────────────────────────────────
+9. LIMITATION OF LIABILITY
+────────────────────────────────────────────────────────────────────────────────
+
+9.1 TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT SHALL 
+    LICENSOR BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, 
+    CONSEQUENTIAL, OR PUNITIVE DAMAGES (INCLUDING WITHOUT LIMITATION DAMAGES 
+    FOR LOSS OF PROFITS, REVENUE, BUSINESS, DATA, GOODWILL, OR OTHER 
+    INTANGIBLE LOSSES), ARISING OUT OF OR RELATED TO THIS AGREEMENT OR THE 
+    USE OF OR INABILITY TO USE THE SOFTWARE, EVEN IF LICENSOR HAS BEEN 
+    ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
+
+9.2 IN NO EVENT SHALL LICENSOR'S TOTAL CUMULATIVE LIABILITY ARISING OUT OF 
+    OR RELATED TO THIS AGREEMENT EXCEED THE TOTAL SUBSCRIPTION FEES PAID 
+    BY LICENSEE TO LICENSOR IN THE TWELVE (12) MONTHS IMMEDIATELY PRECEDING 
+    THE EVENT GIVING RISE TO LIABILITY.
+
+────────────────────────────────────────────────────────────────────────────────
+10. GENERAL PROVISIONS
+────────────────────────────────────────────────────────────────────────────────
+
+10.1 Governing Law. This Agreement shall be governed by and construed in 
+     accordance with the laws of Utah, United States of America, without regard to 
+     its conflict of law provisions.
+
+10.2 Dispute Resolution. Any dispute arising out of or in connection with 
+     this Agreement shall be subject to the exclusive jurisdiction of the 
+     courts of Utah, United States of America.
+
+10.3 Entire Agreement. This Agreement constitutes the entire agreement 
+     between the parties with respect to the Software and supersedes all 
+     prior or contemporaneous understandings, agreements, representations, 
+     and warranties, whether written or oral, with respect to the Software.
+
+10.4 Amendment. Licensor reserves the right to amend this Agreement at any 
+     time. Licensor will provide at least thirty (30) days' written notice 
+     of any material changes. Continued use of the Software after the 
+     effective date of any amendment constitutes acceptance of the amended 
+     Agreement.
+
+10.5 Severability. If any provision of this Agreement is held to be invalid 
+     or unenforceable, such provision shall be modified to the minimum 
+     extent necessary to make it enforceable, and the remaining provisions 
+     shall continue in full force and effect.
+
+10.6 Waiver. The failure of either party to enforce any right or provision 
+     of this Agreement shall not constitute a waiver of such right or 
+     provision.
+
+10.7 Assignment. Licensee may not assign or transfer this Agreement or any 
+     rights hereunder without the prior written consent of Licensor. Any 
+     attempted assignment in violation of this Section shall be null and 
+     void. Licensor may freely assign this Agreement.
+
+10.8 Notices. All notices under this Agreement shall be in writing and 
+     delivered to the addresses specified in the applicable purchase order 
+     or invoice, or such other address as a party may designate in writing.
+
+────────────────────────────────────────────────────────────────────────────────
+
+Copyright (c) 2026 Power Portals Pro LLC. All rights reserved.

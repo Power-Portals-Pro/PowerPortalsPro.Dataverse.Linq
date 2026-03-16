@@ -10,7 +10,12 @@
       "Read(//c/Users/steve/.nuget/packages/microsoft.extensions.configuration/8.0.0/lib/**)",
       "Read(//c/Users/steve/.nuget/packages/microsoft.extensions.dependencyinjection/8.0.1/lib/**)",
       "Read(//c/Users/steve/.nuget/packages/microsoft.extensions.logging.console/8.0.1/**)",
-      "Bash(git:*)"
+      "Bash(git:*)",
+      "Bash(where magick:*)",
+      "Bash(pip show:*)",
+      "Bash(python:*)",
+      "Bash(powershell -NoProfile -Command \"Add-Type -AssemblyName System.Drawing; [System.Drawing.Image]::FromFile\\('F:\\\\Steve\\\\PowerPortalsLLC\\\\Media\\\\Logos\\\\PPP-Logo-350x350.png'\\).GetType\\(\\)\" 2>&1)",
+      "Bash(powershell -NoProfile -Command \"[string]\\(Get-Date\\).Year+'.'+[string]\\(Get-Date\\).Month+'.'+[string]\\(Get-Date\\).Day+'.'+[string]\\(\\(Get-Date\\).Hour*100+\\(Get-Date\\).Minute\\)\")"
     ]
   }
 }

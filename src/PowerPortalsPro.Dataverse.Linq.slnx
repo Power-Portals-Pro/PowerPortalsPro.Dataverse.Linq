@@ -2,6 +2,7 @@
   <Project Path="PowerPortalsPro.Dataverse.Linq/PowerPortalsPro.Dataverse.Linq.csproj" />
   <Folder Name="/Solution Items/">
     <File Path="../.gitignore" />
+    <File Path="../publish.cmd" />
     <File Path="../README.md" />
   </Folder>
   <Project Path="PowerPortalsPro.Dataverse.Linq.Tests/PowerPortalsPro.Dataverse.Linq.Tests.csproj" />
