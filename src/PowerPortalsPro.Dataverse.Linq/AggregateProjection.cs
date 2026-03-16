@@ -29,6 +29,32 @@ internal static class AggregateProjection
         return ConvertRawValue<T>(av.Value);
     }
 
+    /// <summary>
+    /// Reconstructs a linked entity from AliasedValue entries with the given alias prefix.
+    /// Returns <c>null</c> when no aliased values match (left-join, no match).
+    /// </summary>
+    public static T? ExtractLinkedEntity<T>(Entity entity, string alias) where T : Entity, new()
+    {
+        var prefix = alias + ".";
+        T? result = null;
+
+        foreach (var kvp in entity.Attributes)
+        {
+            if (kvp.Key.StartsWith(prefix) && kvp.Value is AliasedValue av)
+            {
+                result ??= new T { LogicalName = av.EntityLogicalName, Id = Guid.Empty };
+                var attrName = kvp.Key.Substring(prefix.Length);
+                result.Attributes[attrName] = av.Value;
+
+                // Set the entity Id if this is the primary key
+                if (attrName == av.EntityLogicalName + "id" && av.Value is Guid id)
+                    result.Id = id;
+            }
+        }
+
+        return result;
+    }
+
     private static T ConvertRawValue<T>(object raw)
     {
         // Unwrap Dataverse wrapper types to their underlying CLR values

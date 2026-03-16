@@ -401,7 +401,27 @@ internal static class FetchXmlQueryTranslator
             if (columns is { Count: > 0 })
                 ctx.Query.ApplyColumns(columns);
 
-            ctx.Query.Projector = RebuildProjector(lambda, ctx.OuterEntityPath, ctx.OuterEntityType!);
+            // Also extract columns from inner entity accesses
+            if (ctx.InnerEntityProperty is not null)
+            {
+                var link = ctx.Query.Links[^1];
+                if (lambda.ReferencesWholeInnerEntity(ctx.InnerEntityProperty))
+                {
+                    link.AllAttributes = true;
+                }
+                else
+                {
+                    var innerColumns = lambda.ExtractInnerColumnsViaProperty(ctx.InnerEntityProperty);
+                    if (innerColumns is { Count: > 0 })
+                    {
+                        foreach (var col in innerColumns)
+                            link.Attributes.Add(new FetchAttribute { Name = col });
+                    }
+                }
+            }
+
+            ctx.Query.Projector = RebuildLeftJoinProjector(lambda, ctx);
+            ctx.Query.InnerEntityType = ctx.OuterEntityType; // signals ProjectEntities to use raw Entity
             ctx.Query.ProjectionType = lambda.ReturnType;
         }
         else
@@ -2251,6 +2271,146 @@ internal static class FetchXmlQueryTranslator
 
             return base.VisitMember(node);
         }
+    }
+
+    /// <summary>
+    /// Builds a single-parameter <c>(Entity e) => new { ... }</c> projector for left-join
+    /// projections. Rewrites outer entity accesses via <c>GetAttributeValue</c> /
+    /// <c>ToEntity</c> and inner entity accesses via <c>ExtractLinkedEntity</c> /
+    /// <c>ExtractValue</c>.
+    /// </summary>
+    private static Delegate RebuildLeftJoinProjector(LambdaExpression lambda, TranslationContext ctx)
+    {
+        var entityParam = Expression.Parameter(typeof(Entity), "e");
+        var rewriter = new LeftJoinProjectorRewriter(
+            entityParam,
+            lambda.Parameters[0],
+            ctx.OuterEntityPath!,
+            ctx.OuterEntityType!,
+            ctx.InnerEntityProperty,
+            ctx.Query.Links[^1].Alias!);
+        var newBody = rewriter.Visit(lambda.Body);
+        return Expression.Lambda(newBody, entityParam).Compile();
+    }
+
+    private sealed class LeftJoinProjectorRewriter(
+        ParameterExpression entityParam,
+        ParameterExpression originalParam,
+        string[] outerPath,
+        Type outerEntityType,
+        string? innerPropertyName,
+        string innerAlias) : ExpressionVisitor
+    {
+        private static readonly MethodInfo ExtractRootValueMethod =
+            typeof(AggregateProjection).GetMethod(nameof(AggregateProjection.ExtractRootValue))!;
+
+        private static readonly MethodInfo ExtractValueMethod =
+            typeof(AggregateProjection).GetMethod(nameof(AggregateProjection.ExtractValue))!;
+
+        private static readonly MethodInfo ExtractLinkedEntityMethod =
+            typeof(AggregateProjection).GetMethod(nameof(AggregateProjection.ExtractLinkedEntity))!;
+
+        private static readonly MethodInfo ToEntityMethod =
+            typeof(Entity).GetMethod(nameof(Entity.ToEntity))!;
+
+        private static readonly MethodInfo GetAttributeValueMethod =
+            typeof(Entity).GetMethod(nameof(Entity.GetAttributeValue))!;
+
+        protected override Expression VisitMember(MemberExpression node)
+        {
+            // Property access on the outer entity: ti.TI0.s.Name → e.GetAttributeValue<T>("name")
+            if (node.Expression is not null
+                && node.Expression.IsOuterEntityAccess(originalParam, outerPath))
+            {
+                var attrName = (node.Member as PropertyInfo)
+                    ?.GetCustomAttribute<AttributeLogicalNameAttribute>()?.LogicalName;
+                if (attrName is not null)
+                {
+                    var resultType = (node.Member as PropertyInfo)?.PropertyType ?? node.Type;
+                    return Expression.Call(
+                        ExtractRootValueMethod.MakeGenericMethod(resultType),
+                        entityParam,
+                        Expression.Constant(attrName));
+                }
+            }
+
+            // Whole outer entity reference: ti.TI0.s → e.ToEntity<TOut>()
+            if (node.Expression is not null
+                && IsOuterEntityReference(node))
+            {
+                return Expression.Call(entityParam,
+                    ToEntityMethod.MakeGenericMethod(outerEntityType));
+            }
+
+            // Property access on inner entity: ti.d.Name → ExtractValue<T>(e, "alias.name")
+            if (innerPropertyName is not null
+                && node.Expression is MemberExpression innerAccess
+                && innerAccess.Member.Name == innerPropertyName
+                && IsRootParam(innerAccess.Expression))
+            {
+                var attrName = (node.Member as PropertyInfo)
+                    ?.GetCustomAttribute<AttributeLogicalNameAttribute>()?.LogicalName;
+                if (attrName is not null)
+                {
+                    var resultType = (node.Member as PropertyInfo)?.PropertyType ?? node.Type;
+                    var aliasedKey = $"{innerAlias}.{attrName}";
+                    return Expression.Call(
+                        ExtractValueMethod.MakeGenericMethod(resultType),
+                        entityParam,
+                        Expression.Constant(aliasedKey));
+                }
+            }
+
+            // Two-level unwrap on inner: ti.d.NavProp.Id/.Value
+            if (innerPropertyName is not null
+                && node.Member.Name is "Id" or "Value"
+                && node.Expression is MemberExpression { Expression: MemberExpression innerAccess2 }
+                && innerAccess2.Member.Name == innerPropertyName
+                && IsRootParam(innerAccess2.Expression))
+            {
+                var parentProp = (node.Expression as MemberExpression)?.Member as PropertyInfo;
+                var attrName = parentProp?.GetCustomAttribute<AttributeLogicalNameAttribute>()?.LogicalName;
+                if (attrName is not null)
+                {
+                    var resultType = (node.Member as PropertyInfo)?.PropertyType ?? node.Type;
+                    var aliasedKey = $"{innerAlias}.{attrName}";
+                    return Expression.Call(
+                        ExtractValueMethod.MakeGenericMethod(resultType),
+                        entityParam,
+                        Expression.Constant(aliasedKey));
+                }
+            }
+
+            // Whole inner entity reference: ti.d → ExtractLinkedEntity<TIn>(e, "alias")
+            if (innerPropertyName is not null
+                && node.Member.Name == innerPropertyName
+                && IsRootParam(node.Expression))
+            {
+                var innerType = (node.Member as PropertyInfo)?.PropertyType ?? node.Type;
+                return Expression.Call(
+                    ExtractLinkedEntityMethod.MakeGenericMethod(innerType),
+                    entityParam,
+                    Expression.Constant(innerAlias));
+            }
+
+            return base.VisitMember(node);
+        }
+
+        private bool IsOuterEntityReference(MemberExpression node)
+        {
+            // Check if this node itself IS the outer entity access (not a property on it)
+            Expression expr = node;
+            for (var i = outerPath.Length - 1; i >= 0; i--)
+            {
+                if (expr is not MemberExpression me || me.Member.Name != outerPath[i])
+                    return false;
+                expr = me.Expression!;
+            }
+            return expr is ParameterExpression p && p == originalParam;
+        }
+
+        private bool IsRootParam(Expression? expr) =>
+            expr is ParameterExpression p && p == originalParam;
     }
 
     /// <summary>

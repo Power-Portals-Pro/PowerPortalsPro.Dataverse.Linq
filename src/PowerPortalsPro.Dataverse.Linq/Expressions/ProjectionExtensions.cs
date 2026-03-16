@@ -68,6 +68,53 @@ internal static class ProjectionExtensions
         return columns.Count > 0 ? columns : null;
     }
 
+    /// <summary>
+    /// Returns <c>true</c> when the projection references the whole inner entity
+    /// (e.g. <c>select new { ..., Contact = c }</c>) rather than individual properties on it.
+    /// </summary>
+    internal static bool ReferencesWholeInnerEntity(
+        this LambdaExpression lambda, string innerPropertyName)
+    {
+        var param = lambda.Parameters[0];
+
+        foreach (var arg in lambda.Body.GetProjectionArguments())
+        {
+            if (arg is MemberExpression { Member.Name: var name, Expression: ParameterExpression p }
+                && p == param
+                && name == innerPropertyName)
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Extracts attribute logical names from inner entity property accesses in a left-join
+    /// projection. Only members accessed through <paramref name="innerPropertyName"/> are
+    /// collected.
+    /// </summary>
+    internal static IReadOnlyList<string>? ExtractInnerColumnsViaProperty(
+        this LambdaExpression lambda, string innerPropertyName)
+    {
+        var param = lambda.Parameters[0];
+        var columns = new List<string>();
+
+        foreach (var arg in lambda.Body.GetProjectionArguments())
+        {
+            // property access on inner entity: ti.d.SomeProp
+            if (arg is MemberExpression { Member: PropertyInfo prop, Expression: MemberExpression inner }
+                && inner.Member.Name == innerPropertyName
+                && inner.Expression is ParameterExpression p && p == param)
+            {
+                var name = prop.GetCustomAttribute<AttributeLogicalNameAttribute>()?.LogicalName;
+                if (name is not null)
+                    columns.Add(name);
+            }
+        }
+
+        return columns.Count > 0 ? columns : null;
+    }
+
     internal static IReadOnlyList<RowAggregateInfo>? ExtractRowAggregates(this Expression body)
     {
         List<RowAggregateInfo>? results = null;
