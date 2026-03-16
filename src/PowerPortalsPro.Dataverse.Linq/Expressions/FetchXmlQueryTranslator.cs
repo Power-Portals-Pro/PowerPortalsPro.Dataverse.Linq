@@ -644,13 +644,13 @@ internal static class FetchXmlQueryTranslator
             // Queryable.Any(source, predicate) → link-type="any" / negated → "not any"
             case MethodCallExpression { Method: { Name: "Any", DeclaringType: var anyDeclType } } anyCall
                 when anyDeclType == typeof(Queryable) && anyCall.Arguments.Count == 2:
-                HandleAnyPredicate(anyCall, filter, negated, ctx.PrimaryKeyResolver);
+                filter.Links.Add(BuildSubqueryLink(anyCall, negated ? "not any" : "any", negateConditions: false, ctx.PrimaryKeyResolver));
                 return;
 
             // Queryable.All(source, predicate) → link-type="all" / negated → "not all"
             case MethodCallExpression { Method: { Name: "All", DeclaringType: var allDeclType } } allCall
                 when allDeclType == typeof(Queryable) && allCall.Arguments.Count == 2:
-                HandleAllPredicate(allCall, filter, negated, ctx.PrimaryKeyResolver);
+                filter.Links.Add(BuildSubqueryLink(allCall, negated ? "not all" : "all", negateConditions: true, ctx.PrimaryKeyResolver));
                 return;
 
             // ServiceClientExtensions.Exists(source, predicate) → link-type="exists"
@@ -659,7 +659,7 @@ internal static class FetchXmlQueryTranslator
             case MethodCallExpression { Method: { Name: "Exists", DeclaringType: var existsDeclType } } existsCall
                 when existsDeclType == typeof(ServiceClientExtensions) && existsCall.Arguments.Count == 2:
                 if (negated)
-                    HandleAnyPredicate(existsCall, filter, negated: true, ctx.PrimaryKeyResolver);
+                    filter.Links.Add(BuildSubqueryLink(existsCall, "not any", negateConditions: false, ctx.PrimaryKeyResolver));
                 else
                     HandleEntityLevelLinkPredicate(existsCall, ctx, "exists");
                 return;
@@ -670,7 +670,7 @@ internal static class FetchXmlQueryTranslator
             case MethodCallExpression { Method: { Name: "In", DeclaringType: var inDeclType } } inCall
                 when inDeclType == typeof(ServiceClientExtensions) && inCall.Arguments.Count == 2:
                 if (negated)
-                    HandleAnyPredicate(inCall, filter, negated: true, ctx.PrimaryKeyResolver);
+                    filter.Links.Add(BuildSubqueryLink(inCall, "not any", negateConditions: false, ctx.PrimaryKeyResolver));
                 else
                     HandleEntityLevelLinkPredicate(inCall, ctx, "in");
                 return;
@@ -895,11 +895,6 @@ internal static class FetchXmlQueryTranslator
     }
 
     /// <summary>
-    /// Detects <c>x.StringProp.Length op value</c> patterns and translates them to
-    /// FetchXml <c>like</c> / <c>not-like</c> with underscore patterns, since FetchXml
-    /// has no native string length operator.
-    /// </summary>
-    /// <summary>
     /// Detects <c>ti.innerEntity == null</c> patterns inside compound predicates
     /// and translates them to a null/not-null condition on the inner link entity's primary key.
     /// </summary>
@@ -971,41 +966,17 @@ internal static class FetchXmlQueryTranslator
         }
 
         // Build the underscore pattern and determine the like/not-like operator
-        var pattern = new string('_', lengthValue);
-        ConditionOperator condOp;
-
-        if (op == ConditionOperator.Equal)
+        var (condOp, suffix) = op switch
         {
-            condOp = ConditionOperator.Like;
-        }
-        else if (op == ConditionOperator.NotEqual)
-        {
-            condOp = ConditionOperator.NotLike;
-        }
-        else if (op == ConditionOperator.GreaterThan)
-        {
-            pattern += "_%";
-            condOp = ConditionOperator.Like;
-        }
-        else if (op == ConditionOperator.GreaterEqual)
-        {
-            pattern += "%";
-            condOp = ConditionOperator.Like;
-        }
-        else if (op == ConditionOperator.LessThan)
-        {
-            pattern += "%";
-            condOp = ConditionOperator.NotLike;
-        }
-        else if (op == ConditionOperator.LessEqual)
-        {
-            pattern += "_%";
-            condOp = ConditionOperator.NotLike;
-        }
-        else
-        {
-            throw new NotSupportedException($"Unsupported operator for string.Length: {op}");
-        }
+            ConditionOperator.Equal => (ConditionOperator.Like, ""),
+            ConditionOperator.NotEqual => (ConditionOperator.NotLike, ""),
+            ConditionOperator.GreaterThan => (ConditionOperator.Like, "_%"),
+            ConditionOperator.GreaterEqual => (ConditionOperator.Like, "%"),
+            ConditionOperator.LessThan => (ConditionOperator.NotLike, "%"),
+            ConditionOperator.LessEqual => (ConditionOperator.NotLike, "_%"),
+            _ => throw new NotSupportedException($"Unsupported operator for string.Length: {op}")
+        };
+        var pattern = new string('_', lengthValue) + suffix;
 
         filter.Conditions.Add(new FetchCondition
         {
@@ -1015,45 +986,6 @@ internal static class FetchXmlQueryTranslator
             Value = pattern
         });
         return true;
-    }
-
-    // -------------------------------------------------------------------------
-    // Any() → link-type="any" / "not any"
-    // -------------------------------------------------------------------------
-
-    /// <summary>
-    /// Translates a <c>Queryable.Any(source, predicate)</c> call into a
-    /// <see cref="FetchLinkEntity"/> with <c>link-type="any"</c> (or <c>"not any"</c>
-    /// when negated) nested inside the current filter.
-    /// </summary>
-    private static void HandleAnyPredicate(
-        MethodCallExpression anyCall, FetchFilter filter, bool negated,
-        Func<string, string>? primaryKeyResolver = null)
-    {
-        var linkEntity = BuildSubqueryLink(
-            anyCall, negated ? "not any" : "any",
-            negateConditions: false, primaryKeyResolver);
-        filter.Links.Add(linkEntity);
-    }
-
-    /// <summary>
-    /// Translates a <c>Queryable.All(source, predicate)</c> call into a
-    /// <see cref="FetchLinkEntity"/> with <c>link-type="all"</c> (or <c>"not all"</c>
-    /// when negated) nested inside the current filter.
-    /// <para>
-    /// FetchXml <c>link-type="all"</c> returns the parent row when NO child rows match
-    /// the filter. The conditions are therefore the logical inverse of the LINQ predicate:
-    /// <c>.All(t =&gt; t.StateCode == 0)</c> becomes <c>operator="ne" value="0"</c>.
-    /// </para>
-    /// </summary>
-    private static void HandleAllPredicate(
-        MethodCallExpression allCall, FetchFilter filter, bool negated,
-        Func<string, string>? primaryKeyResolver = null)
-    {
-        var linkEntity = BuildSubqueryLink(
-            allCall, negated ? "not all" : "all",
-            negateConditions: true, primaryKeyResolver);
-        filter.Links.Add(linkEntity);
     }
 
     /// <summary>
@@ -1853,28 +1785,15 @@ internal static class FetchXmlQueryTranslator
         };
         ctx.Query.Links.Add(link);
 
-        // Detect transparent identifier: (c, a) => new { c, a }
-        // When subsequent operators (Where/OrderBy/Select) follow the join,
-        // the compiler wraps the result in a TI rather than projecting directly.
-        if (resultLambda.IsTransparentIdentifier())
-        {
-            ctx.JoinMappings = new Dictionary<string, JoinEntityInfo>
-            {
-                [resultLambda.Parameters[0].Name!] = new() { EntityType = outerEntityType, LinkAlias = null },
-                [resultLambda.Parameters[1].Name!] = new() { EntityType = innerEntityType, LinkAlias = link.Alias }
-            };
-            ctx.Query.InnerEntityType = innerEntityType;
-            return;
-        }
-
-        // Final projection in the join result selector — use the unified multi-join path.
         ctx.JoinMappings = new Dictionary<string, JoinEntityInfo>
         {
             [resultLambda.Parameters[0].Name!] = new() { EntityType = outerEntityType, LinkAlias = null },
             [resultLambda.Parameters[1].Name!] = new() { EntityType = innerEntityType, LinkAlias = link.Alias }
         };
         ctx.Query.InnerEntityType = innerEntityType;
-        HandleJoinSelect(resultLambda, ctx);
+
+        if (!resultLambda.IsTransparentIdentifier())
+            HandleJoinSelect(resultLambda, ctx);
     }
 
     /// <summary>
@@ -1932,21 +1851,11 @@ internal static class FetchXmlQueryTranslator
             LinkAlias = link.Alias
         };
 
-        if (resultLambda.IsTransparentIdentifier())
-        {
-            // Transparent identifier — further operators (Where/Select) follow.
-            // Keep flattened mappings for downstream resolution.
-            ctx.JoinMappings = updatedMappings;
-            ctx.Query.InnerEntityType = innerEntityType;
-        }
-        else
-        {
-            // Final projection folded into the join result selector.
-            // Extract columns and build the multi-join projector.
-            ctx.JoinMappings = updatedMappings;
-            ctx.Query.InnerEntityType = innerEntityType;
+        ctx.JoinMappings = updatedMappings;
+        ctx.Query.InnerEntityType = innerEntityType;
+
+        if (!resultLambda.IsTransparentIdentifier())
             HandleJoinSelect(resultLambda, ctx);
-        }
     }
 
     // -------------------------------------------------------------------------
