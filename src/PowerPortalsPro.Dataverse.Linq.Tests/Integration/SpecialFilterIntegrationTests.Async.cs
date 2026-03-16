@@ -1,7 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.PowerPlatform.Dataverse.Client;
 using FluentAssertions;
-using PowerPortalsPro.Dataverse.Linq.Extensions;
 using PowerPortalsPro.Dataverse.Linq.Model;
 using PowerPortalsPro.Dataverse.Linq.Tests.Proxies;
 

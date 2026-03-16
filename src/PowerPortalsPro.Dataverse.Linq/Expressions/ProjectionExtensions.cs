@@ -1,4 +1,3 @@
-using PowerPortalsPro.Dataverse.Linq.Extensions;
 using PowerPortalsPro.Dataverse.Linq.Model;
 using Microsoft.Xrm.Sdk;
 using System.Linq.Expressions;

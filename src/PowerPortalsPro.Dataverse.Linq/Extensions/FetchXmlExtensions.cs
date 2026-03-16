@@ -1,6 +1,6 @@
 using Microsoft.Xrm.Sdk.Query;
 
-namespace PowerPortalsPro.Dataverse.Linq.Extensions;
+namespace PowerPortalsPro.Dataverse.Linq;
 
 internal static class FetchXmlExtensions
 {

@@ -1,4 +1,4 @@
-namespace PowerPortalsPro.Dataverse.Linq.Extensions;
+namespace PowerPortalsPro.Dataverse.Linq;
 
 /// <summary>
 /// Placeholder extension methods for Guid/Guid? that are translated into

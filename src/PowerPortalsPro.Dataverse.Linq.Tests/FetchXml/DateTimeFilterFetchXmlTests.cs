@@ -1,5 +1,4 @@
 using FluentAssertions;
-using PowerPortalsPro.Dataverse.Linq.Extensions;
 using PowerPortalsPro.Dataverse.Linq.Tests.Proxies;
 
 namespace PowerPortalsPro.Dataverse.Linq.Tests.FetchXml;

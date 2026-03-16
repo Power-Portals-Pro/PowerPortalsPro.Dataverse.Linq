@@ -1,6 +1,6 @@
 using Microsoft.Xrm.Sdk;
 
-namespace PowerPortalsPro.Dataverse.Linq.Extensions;
+namespace PowerPortalsPro.Dataverse.Linq;
 
 /// <summary>
 /// Extension methods for multi-select option set fields that are translated into
