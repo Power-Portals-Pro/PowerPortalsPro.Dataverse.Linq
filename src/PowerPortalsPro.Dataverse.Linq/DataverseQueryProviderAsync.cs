@@ -65,29 +65,15 @@ internal class DataverseQueryProviderAsync<T> : DataverseQueryProvider<T>, IAsyn
     {
         var query = FetchXmlQueryTranslator.Translate<T>(expression, Columns, EntityLogicalName, Service);
         var fetchXml = FetchXmlBuilder.Build(query);
-        var fetchDocument = XDocument.Parse(fetchXml);
-        string? pagingCookie = null;
-        var pageNumber = 1;
 
-        while (true)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            if (pagingCookie != null)
+        await PagedFetchAsync(fetchXml,
+            expr => _asyncService.RetrieveMultipleAsync(expr),
+            async (response, _) =>
             {
-                fetchDocument.Root!.SetAttributeValue("paging-cookie", pagingCookie);
-                fetchDocument.Root!.SetAttributeValue("page", pageNumber);
-            }
-
-            var response = await _asyncService.RetrieveMultipleAsync(new FetchExpression(fetchDocument.ToString()));
-            var page = ProjectEntities<TElement>(response.Entities.ToList(), query);
-            await onPage(page);
-
-            if (!response.MoreRecords) break;
-
-            pagingCookie = response.PagingCookie;
-            pageNumber++;
-        }
+                cancellationToken.ThrowIfCancellationRequested();
+                await onPage(ProjectEntities<TElement>(response.Entities.ToList(), query));
+                return response.MoreRecords;
+            });
     }
 
     // -------------------------------------------------------------------------
@@ -115,16 +101,42 @@ internal class DataverseQueryProviderAsync<T> : DataverseQueryProvider<T>, IAsyn
         return ExtractAggregateResult<TElement>(entities, query.TerminalOperator);
     }
 
-    private Task<List<Entity>> RetrieveQueryAsync(FetchXmlQuery query, CancellationToken cancellationToken) =>
-        RetrieveAllAsync(FetchXmlBuilder.Build(query), cancellationToken);
-
-    // -------------------------------------------------------------------------
-    // Paged retrieval (asynchronous)
-    // -------------------------------------------------------------------------
-
-    private async Task<List<Entity>> RetrieveAllAsync(string baseFetchXml, CancellationToken cancellationToken)
+    private async Task<List<Entity>> RetrieveQueryAsync(FetchXmlQuery query, CancellationToken cancellationToken)
     {
         var results = new List<Entity>();
+        await PagedFetchAsync(FetchXmlBuilder.Build(query),
+            expr => _asyncService.RetrieveMultipleAsync(expr),
+            (response, _) =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                results.AddRange(response.Entities);
+                return response.MoreRecords;
+            });
+        return results;
+    }
+
+    // -------------------------------------------------------------------------
+    // Async paged retrieval
+    // -------------------------------------------------------------------------
+
+    private static Task PagedFetchAsync(
+        string baseFetchXml,
+        Func<FetchExpression, Task<EntityCollection>> retrieve,
+        Func<EntityCollection, int, Task<bool>> onPage) =>
+        PagedFetchAsyncCore(baseFetchXml, retrieve, onPage);
+
+    private static Task PagedFetchAsync(
+        string baseFetchXml,
+        Func<FetchExpression, Task<EntityCollection>> retrieve,
+        Func<EntityCollection, int, bool> onPage) =>
+        PagedFetchAsyncCore(baseFetchXml, retrieve,
+            (response, page) => Task.FromResult(onPage(response, page)));
+
+    private static async Task PagedFetchAsyncCore(
+        string baseFetchXml,
+        Func<FetchExpression, Task<EntityCollection>> retrieve,
+        Func<EntityCollection, int, Task<bool>> onPage)
+    {
         var fetchDocument = XDocument.Parse(baseFetchXml);
         var explicitPage = fetchDocument.Root!.Attribute("page") != null;
         string? pagingCookie = null;
@@ -138,16 +150,14 @@ internal class DataverseQueryProviderAsync<T> : DataverseQueryProvider<T>, IAsyn
                 fetchDocument.Root!.SetAttributeValue("page", pageNumber);
             }
 
-            var response = await _asyncService.RetrieveMultipleAsync(new FetchExpression(fetchDocument.ToString()));
-            results.AddRange(response.Entities);
+            var response = await retrieve(new FetchExpression(fetchDocument.ToString()));
+            var shouldContinue = await onPage(response, pageNumber);
 
-            if (explicitPage || !response.MoreRecords) break;
+            if (explicitPage || !shouldContinue || !response.MoreRecords) break;
 
             pagingCookie = response.PagingCookie;
             pageNumber++;
         }
-
-        return results;
     }
 
     private static MethodInfo GetAsyncMethod(string name) =>

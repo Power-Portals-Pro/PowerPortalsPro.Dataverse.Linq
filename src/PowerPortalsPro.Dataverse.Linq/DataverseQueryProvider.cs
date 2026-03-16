@@ -85,27 +85,12 @@ internal class DataverseQueryProvider<T> : IQueryProvider where T : Entity
     {
         var query = FetchXmlQueryTranslator.Translate<T>(expression, Columns, EntityLogicalName, Service);
         var fetchXml = FetchXmlBuilder.Build(query);
-        var fetchDocument = XDocument.Parse(fetchXml);
-        string? pagingCookie = null;
-        var pageNumber = 1;
 
-        while (true)
+        PagedFetch(fetchXml, expr => Service.RetrieveMultiple(expr), (response, _) =>
         {
-            if (pagingCookie != null)
-            {
-                fetchDocument.Root!.SetAttributeValue("paging-cookie", pagingCookie);
-                fetchDocument.Root!.SetAttributeValue("page", pageNumber);
-            }
-
-            var response = Service.RetrieveMultiple(new FetchExpression(fetchDocument.ToString()));
-            var page = ProjectEntities<TElement>(response.Entities.ToList(), query);
-            onPage(page);
-
-            if (!response.MoreRecords) break;
-
-            pagingCookie = response.PagingCookie;
-            pageNumber++;
-        }
+            onPage(ProjectEntities<TElement>(response.Entities.ToList(), query));
+            return response.MoreRecords;
+        });
     }
 
     internal string GenerateFetchXml(Expression expression)
@@ -115,12 +100,34 @@ internal class DataverseQueryProvider<T> : IQueryProvider where T : Entity
     }
 
     // -------------------------------------------------------------------------
-    // Paged retrieval (synchronous)
+    // Paged retrieval
     // -------------------------------------------------------------------------
 
-    protected List<Entity> RetrieveAll(string baseFetchXml)
+    protected List<Entity> RetrieveAll(string baseFetchXml) =>
+        RetrieveWithPaging(baseFetchXml, expr => Service.RetrieveMultiple(expr));
+
+    protected static List<Entity> RetrieveWithPaging(
+        string baseFetchXml, Func<FetchExpression, EntityCollection> retrieve)
     {
         var results = new List<Entity>();
+        PagedFetch(baseFetchXml, retrieve, (response, _) =>
+        {
+            results.AddRange(response.Entities);
+            return response.MoreRecords;
+        });
+        return results;
+    }
+
+    /// <summary>
+    /// Core paging loop shared by all retrieval methods. Calls <paramref name="retrieve"/>
+    /// for each page and passes the response to <paramref name="onPage"/>. The callback
+    /// returns <c>true</c> to continue paging or <c>false</c> to stop.
+    /// </summary>
+    protected static void PagedFetch(
+        string baseFetchXml,
+        Func<FetchExpression, EntityCollection> retrieve,
+        Func<EntityCollection, int, bool> onPage)
+    {
         var fetchDocument = XDocument.Parse(baseFetchXml);
         var explicitPage = fetchDocument.Root!.Attribute("page") != null;
         string? pagingCookie = null;
@@ -134,16 +141,14 @@ internal class DataverseQueryProvider<T> : IQueryProvider where T : Entity
                 fetchDocument.Root!.SetAttributeValue("page", pageNumber);
             }
 
-            var response = Service.RetrieveMultiple(new FetchExpression(fetchDocument.ToString()));
-            results.AddRange(response.Entities);
+            var response = retrieve(new FetchExpression(fetchDocument.ToString()));
+            var shouldContinue = onPage(response, pageNumber);
 
-            if (explicitPage || !response.MoreRecords) break;
+            if (explicitPage || !shouldContinue || !response.MoreRecords) break;
 
             pagingCookie = response.PagingCookie;
             pageNumber++;
         }
-
-        return results;
     }
 
     // -------------------------------------------------------------------------
