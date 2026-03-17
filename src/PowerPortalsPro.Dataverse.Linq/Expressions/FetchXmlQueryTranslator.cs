@@ -1268,12 +1268,23 @@ internal static class FetchXmlQueryTranslator
         var descending = call.Method.Name is nameof(Queryable.OrderByDescending)
                                            or nameof(Queryable.ThenByDescending);
 
-        // Grouped aggregate ordering by g.Key — defer until Select assigns aliases
-        if (ctx.IsGrouped && lambda.Body is MemberExpression { Member.Name: "Key" })
+        if (ctx.IsGrouped)
         {
-            ctx.DeferredGroupOrders ??= [];
-            ctx.DeferredGroupOrders.Add(descending);
-            return;
+            // Grouped ordering by g.Key — defer until Select assigns aliases
+            if (lambda.Body is MemberExpression { Member.Name: "Key" })
+            {
+                ctx.DeferredGroupOrders ??= [];
+                ctx.DeferredGroupOrders.Add(new DeferredGroupOrder(descending));
+                return;
+            }
+
+            // Grouped ordering by aggregate — g.Count(), g.Max(x => x.Prop), etc.
+            if (lambda.Body is MethodCallExpression mc && _aggregateFunctionMap.ContainsKey(mc.Method.Name))
+            {
+                ctx.DeferredGroupOrders ??= [];
+                ctx.DeferredGroupOrders.Add(new DeferredGroupOrder(descending, mc));
+                return;
+            }
         }
 
         var resolved = ResolveAttribute(lambda.Body, ctx)
@@ -1612,16 +1623,32 @@ internal static class FetchXmlQueryTranslator
                     Expression.Constant(alias)));
         }
 
-        // Add deferred orders (from OrderBy on g.Key processed before this Select)
-        if (ctx.DeferredGroupOrders is not null && groupKeyAlias is not null)
+        // Apply deferred orders (from OrderBy processed before this Select)
+        if (ctx.DeferredGroupOrders is not null)
         {
-            foreach (var descending in ctx.DeferredGroupOrders)
+            foreach (var order in ctx.DeferredGroupOrders)
             {
-                ctx.Query.Orders.Add(new FetchOrder
+                if (order.IsKeyOrder && groupKeyAlias is not null)
                 {
-                    Alias = groupKeyAlias,
-                    Descending = descending
-                });
+                    ctx.Query.Orders.Add(new FetchOrder
+                    {
+                        Alias = groupKeyAlias,
+                        Descending = order.Descending
+                    });
+                }
+                else if (order.AggregateCall is not null)
+                {
+                    // Match the aggregate order to a Select member by method name + selector
+                    var orderAlias = ResolveAggregateOrderAlias(order.AggregateCall, ne, ctx);
+                    if (orderAlias is not null)
+                    {
+                        ctx.Query.Orders.Add(new FetchOrder
+                        {
+                            Alias = orderAlias,
+                            Descending = order.Descending
+                        });
+                    }
+                }
             }
         }
 
@@ -1666,6 +1693,57 @@ internal static class FetchXmlQueryTranslator
     /// <summary>
     /// Routes a FetchAttribute to the correct entity or link-entity based on alias.
     /// </summary>
+    /// <summary>
+    /// Matches a deferred aggregate order (e.g. <c>g.Count()</c>) to the alias assigned
+    /// to the matching aggregate in the Select projection. Matches by method name and,
+    /// for aggregates with selectors, by the resolved attribute name.
+    /// </summary>
+    private static string? ResolveAggregateOrderAlias(
+        MethodCallExpression orderCall, NewExpression selectBody, TranslationContext ctx)
+    {
+        var orderMethodName = orderCall.Method.Name;
+
+        // Resolve the attribute from the order's selector (if any)
+        string? orderAttrName = null;
+        if (orderCall.Arguments.Count == 2)
+        {
+            var orderSelector = orderCall.Arguments[1].ExtractLambda();
+            orderAttrName = orderSelector.Body.GetAttributeName(ctx.PrimaryKeyResolver);
+        }
+
+        for (var i = 0; i < selectBody.Arguments.Count; i++)
+        {
+            if (selectBody.Arguments[i] is not MethodCallExpression selectMc
+                || selectMc.Method.Name != orderMethodName)
+                continue;
+
+            // For aggregates with selectors, verify the attribute matches
+            if (orderAttrName is not null && selectMc.Arguments.Count == 2)
+            {
+                var selectSelector = selectMc.Arguments[1].ExtractLambda();
+                var selectAttrName = selectSelector.Body.GetAttributeName(ctx.PrimaryKeyResolver);
+                if (selectAttrName != orderAttrName)
+                    continue;
+            }
+
+            // Found a match — derive the alias from the member name
+            if (selectBody.Members is not null)
+            {
+                var member = selectBody.Members[i];
+                var memberName = member is MethodInfo { Name: ['g', 'e', 't', '_', ..] } getter
+                    ? getter.Name[4..] : member.Name;
+                return memberName.ToLowerInvariant();
+            }
+            else
+            {
+                var ctorParam = selectBody.Constructor!.GetParameters()[i];
+                return ctorParam.Name!.ToLowerInvariant();
+            }
+        }
+
+        return null;
+    }
+
     private static void AddGroupAttribute(TranslationContext ctx, FetchAttribute attr, string? entityAlias)
     {
         if (entityAlias is null)
@@ -2451,7 +2529,7 @@ internal static class FetchXmlQueryTranslator
         /// Orders requested on <c>g.Key</c> before the Select assigns aliases.
         /// Each entry is the <c>descending</c> flag.
         /// </summary>
-        public List<bool>? DeferredGroupOrders { get; set; }
+        public List<DeferredGroupOrder>? DeferredGroupOrders { get; set; }
 
         /// <summary>
         /// Entity alias for the group key attribute (null = root entity).
@@ -2481,4 +2559,13 @@ internal static class FetchXmlQueryTranslator
     }
 
     private record GroupKeyProperty(string MemberName, string AttributeName, string? DateGrouping, string? EntityAlias);
+
+    /// <summary>
+    /// A deferred order in a grouped query. Key orders have <see cref="AggregateCall"/> as null;
+    /// aggregate orders store the method call expression for matching against Select aliases.
+    /// </summary>
+    private record DeferredGroupOrder(bool Descending, MethodCallExpression? AggregateCall = null)
+    {
+        public bool IsKeyOrder => AggregateCall is null;
+    }
 }

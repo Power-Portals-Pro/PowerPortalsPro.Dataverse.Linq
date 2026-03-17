@@ -346,4 +346,41 @@ public partial class GroupByIntegrationTests(ServiceClientFixture fixture) : Int
         // Each of the 100 accounts should have 5 contacts
         results.Should().AllSatisfy(r => r.Count.Should().Be(5));
     }
+
+    // -------------------------------------------------------------------------
+    // OrderBy on aggregate
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void GroupBy_OrderByCountDescending_ReturnsResultsInDescendingOrder()
+    {
+        var results = (from c in Service.Queryable<CustomContact>()
+                       group c by c.ParentAccount into g
+                       orderby g.Count() descending
+                       select new
+                       {
+                           g.Key,
+                           Count = g.Count(),
+                       }).ToList();
+
+        results.Should().NotBeEmpty();
+        results.Select(r => r.Count).Should().BeInDescendingOrder();
+    }
+
+    [Fact]
+    public void GroupBy_OrderByMaxAscending_ReturnsResultsInAscendingOrder()
+    {
+        var results = (from c in Service.Queryable<CustomContact>()
+                       group c by c.ParentAccount into g
+                       orderby g.Max(x => x.CreatedOn)
+                       select new
+                       {
+                           g.Key,
+                           Count = g.Count(),
+                           MostRecent = g.Max(x => x.CreatedOn),
+                       }).ToList();
+
+        results.Should().NotBeEmpty();
+        results.Select(r => r.MostRecent).Should().BeInAscendingOrder();
+    }
 }

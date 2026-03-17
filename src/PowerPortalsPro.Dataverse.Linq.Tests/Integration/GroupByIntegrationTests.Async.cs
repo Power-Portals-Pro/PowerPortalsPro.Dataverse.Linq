@@ -103,4 +103,41 @@ public partial class GroupByIntegrationTests
             result.NumberOfChildren.Should().Be(childCountByParent[result.CustomAccountId]);
         }
     }
+
+    // -------------------------------------------------------------------------
+    // OrderBy on aggregate
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task GroupByAsync_OrderByCountDescending_ReturnsResultsInDescendingOrder()
+    {
+        var results = await (from c in Service.Queryable<CustomContact>()
+                             group c by c.ParentAccount into g
+                             orderby g.Count() descending
+                             select new
+                             {
+                                 g.Key,
+                                 Count = g.Count(),
+                             }).ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Select(r => r.Count).Should().BeInDescendingOrder();
+    }
+
+    [Fact]
+    public async Task GroupByAsync_OrderByMaxAscending_ReturnsResultsInAscendingOrder()
+    {
+        var results = await (from c in Service.Queryable<CustomContact>()
+                             group c by c.ParentAccount into g
+                             orderby g.Max(x => x.CreatedOn)
+                             select new
+                             {
+                                 g.Key,
+                                 Count = g.Count(),
+                                 MostRecent = g.Max(x => x.CreatedOn),
+                             }).ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Select(r => r.MostRecent).Should().BeInAscendingOrder();
+    }
 }

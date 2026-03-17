@@ -822,6 +822,59 @@ public class AggregateFetchXmlTests : FetchXmlTestBase
             </fetch>
             """);
     }
+    // -------------------------------------------------------------------------
+    // OrderBy on aggregate in grouped query
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_GroupByWithOrderByAggregate_GeneratesOrderWithAlias()
+    {
+        var fetchXml = (from c in _service.Queryable<CustomContact>()
+                        group c by c.ParentAccount into g
+                        orderby g.Count() descending
+                        select new
+                        {
+                            g.Key,
+                            Count = g.Count(),
+                        }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="new_customcontact">
+                <attribute name="new_parentaccount" alias="key" groupby="true" />
+                <attribute name="new_customcontactid" alias="count" aggregate="count" />
+                <order alias="count" descending="true" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_GroupByWithOrderByMaxAggregate_GeneratesOrderWithAlias()
+    {
+        var fetchXml = (from c in _service.Queryable<CustomContact>()
+                        group c by c.ParentAccount into g
+                        orderby g.Max(x => x.CreatedOn)
+                        select new
+                        {
+                            g.Key,
+                            Count = g.Count(),
+                            MostRecent = g.Max(x => x.CreatedOn),
+                        }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="new_customcontact">
+                <attribute name="new_parentaccount" alias="key" groupby="true" />
+                <attribute name="new_customcontactid" alias="count" aggregate="count" />
+                <attribute name="createdon" alias="mostrecent" aggregate="max" />
+                <order alias="mostrecent" descending="false" />
+              </entity>
+            </fetch>
+            """);
+    }
 }
 
 internal record GroupTestResult(Guid AccountId, int Year, int Month, int Count);
