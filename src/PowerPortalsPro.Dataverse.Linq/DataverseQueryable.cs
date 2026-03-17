@@ -11,7 +11,7 @@ namespace PowerPortalsPro.Dataverse.Linq;
 /// An async-capable queryable for Dataverse entities that builds and executes FetchXml.
 /// </summary>
 /// <typeparam name="T">An entity type decorated with <see cref="Microsoft.Xrm.Sdk.Client.EntityLogicalNameAttribute"/>.</typeparam>
-public class DataverseQueryable<T> : IQueryable<T>, IOrderedQueryable<T> where T : Entity
+internal class DataverseQueryable<T> : IQueryable<T>, IOrderedQueryable<T> where T : Entity
 {
     private readonly DataverseQueryProvider<T> _provider;
 
@@ -21,7 +21,7 @@ public class DataverseQueryable<T> : IQueryable<T>, IOrderedQueryable<T> where T
         _provider = new DataverseQueryProviderAsync<T>(service, entityLogicalName, columns);
         Expression = Expression.Constant(this);
     }
-#else
+#endif
     internal DataverseQueryable(IOrganizationService service, string entityLogicalName, IReadOnlyList<string>? columns = null)
     {
         _provider = new DataverseQueryProvider<T>(service, entityLogicalName, columns);
