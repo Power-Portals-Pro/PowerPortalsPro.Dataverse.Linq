@@ -2,7 +2,10 @@
 setlocal enabledelayedexpansion
 
 :: ============================================================================
-:: publish.cmd - Build and publish PowerPortalsPro.Dataverse.Linq to NuGet.org
+:: publish.cmd - Local build and publish for PowerPortalsPro.Dataverse.Linq
+::
+:: For CI/CD publishing, use the GitHub Actions workflow instead.
+:: This script is for local testing and pushing to a local NuGet feed.
 :: ============================================================================
 
 set "PROJECT=src\PowerPortalsPro.Dataverse.Linq\PowerPortalsPro.Dataverse.Linq.csproj"
@@ -11,11 +14,28 @@ set "LOCAL_FEED=D:\Code\LocalNugetFeed"
 set "SECRETS_ID=f2866066-518b-43f7-997a-83d178b60059"
 
 :: -------------------------------------------------------------------
-:: 1. Prompts
+:: 1. Read VersionPrefix from csproj
+:: -------------------------------------------------------------------
+for /f "delims=" %%V in ('powershell -NoProfile -Command "([xml](Get-Content '%PROJECT%')).Project.PropertyGroup.VersionPrefix | Where-Object { $_ }"') do set "VERSION_PREFIX=%%V"
+
+if not defined VERSION_PREFIX (
+    echo   ERROR: Could not read VersionPrefix from %PROJECT%
+    exit /b 1
+)
+
+:: -------------------------------------------------------------------
+:: 2. Prompts
 :: -------------------------------------------------------------------
 echo.
+echo   VersionPrefix : !VERSION_PREFIX!
+echo.
+set "PATCH="
+set /p "PATCH=Patch number [e.g. 1, 2, 3] or press Enter for 0: "
+if not defined PATCH set "PATCH=0"
+
 set "PRERELEASE="
 set /p "PRERELEASE=Pre-release suffix [e.g. alpha, beta.1, rc1] or press Enter for stable: "
+
 set "PUSH_NUGET=n"
 set /p "PUSH_NUGET=Push to NuGet.org? [y/N]: "
 
@@ -36,14 +56,12 @@ if /i "!PUSH_NUGET!"=="y" (
 )
 
 :: -------------------------------------------------------------------
-:: 2. Generate version: yyyy.M.d.HHmm
+:: 3. Generate version
 :: -------------------------------------------------------------------
-for /f "delims=" %%V in ('powershell -NoProfile -Command "[string](Get-Date).Year+'.'+[string](Get-Date).Month+'.'+[string](Get-Date).Day+'.'+[string]((Get-Date).Hour*100+(Get-Date).Minute)"') do set "VERSION=%%V"
-
 if not defined PRERELEASE (
-    set "FULL_VERSION=!VERSION!"
+    set "FULL_VERSION=!VERSION_PREFIX!.!PATCH!"
 ) else (
-    set "FULL_VERSION=!VERSION!-!PRERELEASE!"
+    set "FULL_VERSION=!VERSION_PREFIX!.!PATCH!-!PRERELEASE!"
 )
 
 echo.
@@ -51,7 +69,7 @@ echo   Version : !FULL_VERSION!
 echo.
 
 :: -------------------------------------------------------------------
-:: 3. Build and pack
+:: 4. Build and pack
 :: -------------------------------------------------------------------
 echo --- Building and packing v!FULL_VERSION! [Release] ---
 echo.
@@ -66,7 +84,7 @@ if errorlevel 1 (
 )
 
 :: -------------------------------------------------------------------
-:: 4. Copy to local feed
+:: 5. Copy to local feed
 :: -------------------------------------------------------------------
 echo.
 echo --- Copying to local feed ---
@@ -83,7 +101,7 @@ if errorlevel 1 (
 echo   Copied to %LOCAL_FEED%
 
 :: -------------------------------------------------------------------
-:: 5. Push to NuGet.org
+:: 6. Push to NuGet.org
 :: -------------------------------------------------------------------
 if /i not "!PUSH_NUGET!"=="y" goto :done
 if not defined API_KEY (

@@ -12,7 +12,7 @@
   <!-- NuGet Package Metadata -->
   <PropertyGroup>
     <PackageId>PowerPortalsPro.Dataverse.Linq</PackageId>
-    <Version>1.0.0</Version>
+    <VersionPrefix>1.0</VersionPrefix>
     <Authors>$(Authors)</Authors>
     <Description>A LINQ query provider for Microsoft Dataverse that translates LINQ expressions into FetchXml queries.</Description>
     <PackageTags>dataverse;linq;fetchxml;dynamics;power-platform;crm</PackageTags>
@@ -21,11 +21,15 @@
     <PackageLicenseExpression>LGPL-3.0-only</PackageLicenseExpression>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <RepositoryType>git</RepositoryType>
+    <RepositoryUrl>https://github.com/Power-Portals-Pro/PowerPortalsPro.Dataverse.Linq</RepositoryUrl>
 
-    <!-- Build configuration for packaging -->
+    <!-- Build and debug configuration -->
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <IncludeSymbols>true</IncludeSymbols>
-    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <DebugType>embedded</DebugType>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
   </PropertyGroup>
 
   <ItemGroup>
@@ -44,6 +48,10 @@
     <Using Include="System.Linq" />
     <Using Include="System.Threading" />
     <Using Include="System.Threading.Tasks" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="10.0.102" PrivateAssets="All" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(TargetFramework)' != 'net462'">

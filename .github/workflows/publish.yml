@@ -1,0 +1,107 @@
+name: Publish NuGet Package
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: Read VersionPrefix from csproj
+        id: version
+        run: |
+          PREFIX=$(grep '<VersionPrefix>' src/PowerPortalsPro.Dataverse.Linq/PowerPortalsPro.Dataverse.Linq.csproj | sed 's/.*<VersionPrefix>\(.*\)<\/VersionPrefix>.*/\1/')
+          VERSION="${PREFIX}.${{ github.run_number }}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Version: $VERSION"
+
+      - name: Get merged PR description
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Find the PR associated with this merge commit
+          PR_JSON=$(gh pr list --state merged --base main --json number,title,body --limit 1 --search "${{ github.sha }}")
+          PR_TITLE=$(echo "$PR_JSON" | jq -r '.[0].title // empty')
+          PR_BODY=$(echo "$PR_JSON" | jq -r '.[0].body // empty')
+
+          if [ -z "$PR_TITLE" ]; then
+            # Fallback: use the commit message if no PR found
+            PR_TITLE=$(git log -1 --format=%s)
+            PR_BODY=""
+          fi
+
+          # Write to output using delimiter to handle multiline body
+          echo "title=$PR_TITLE" >> "$GITHUB_OUTPUT"
+          {
+            echo "body<<PREOF"
+            echo "$PR_BODY"
+            echo "PREOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        run: dotnet build src/PowerPortalsPro.Dataverse.Linq/PowerPortalsPro.Dataverse.Linq.csproj -c Release -p:Version=${{ steps.version.outputs.version }}
+
+      - name: Pack
+        run: dotnet pack src/PowerPortalsPro.Dataverse.Linq/PowerPortalsPro.Dataverse.Linq.csproj -c Release -p:Version=${{ steps.version.outputs.version }} --no-build --output ./nupkg
+
+      - name: Push to NuGet.org
+        run: dotnet nuget push ./nupkg/PowerPortalsPro.Dataverse.Linq.${{ steps.version.outputs.version }}.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate --no-symbols
+
+      - name: Update CHANGELOG
+        shell: bash
+        run: |
+          DATE=$(date +%Y-%m-%d)
+          VERSION=${{ steps.version.outputs.version }}
+          PR_TITLE="${{ steps.pr.outputs.title }}"
+          PR_BODY=$(cat <<'PREOF'
+          ${{ steps.pr.outputs.body }}
+          PREOF
+          )
+
+          # Build the new entry
+          ENTRY="## [$VERSION] - $DATE\n\n"
+          if [ -n "$PR_TITLE" ]; then
+            ENTRY+="### $PR_TITLE\n\n"
+          fi
+          if [ -n "$PR_BODY" ] && [ "$PR_BODY" != "null" ]; then
+            ENTRY+="$PR_BODY\n"
+          fi
+
+          # Insert after [Unreleased]
+          sed -i "s/## \[Unreleased\]/## [Unreleased]\n\n${ENTRY}/" CHANGELOG.md
+
+      - name: Commit CHANGELOG
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+          git diff --cached --quiet || git commit -m "Update CHANGELOG for v${{ steps.version.outputs.version }}"
+          git push
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: v${{ steps.version.outputs.version }}
+          generate_release_notes: true
+          files: ./nupkg/PowerPortalsPro.Dataverse.Linq.${{ steps.version.outputs.version }}.nupkg
