@@ -1575,7 +1575,9 @@ internal static class FetchXmlQueryTranslator
 
     /// <summary>
     /// Tries to resolve a composite key property access from a grouped select argument.
-    /// Handles <c>g.Key.PropertyName</c> and <c>g.Key.PropertyName.Id</c> (navigation property unwrap).
+    /// Handles <c>g.Key.PropertyName</c> and <c>g.Key.PropertyName.Id/.Value</c>
+    /// (navigation property unwrap) by stripping the unwrap first, then matching
+    /// the property name against <see cref="TranslationContext.GroupKeyProperties"/>.
     /// </summary>
     private static bool TryResolveCompositeKeyAccess(
         Expression arg, TranslationContext ctx, out GroupKeyProperty keyProp)
@@ -1584,24 +1586,17 @@ internal static class FetchXmlQueryTranslator
         if (ctx.GroupKeyProperties is null)
             return false;
 
-        // g.Key.PropertyName
-        if (arg is MemberExpression keyPropAccess
-            && keyPropAccess.Expression is MemberExpression { Member.Name: "Key" })
-        {
-            keyProp = ctx.GroupKeyProperties.FirstOrDefault(p => p.MemberName == keyPropAccess.Member.Name)
-                ?? throw new NotSupportedException(
-                    $"Group key property '{keyPropAccess.Member.Name}' not found in composite key.");
-            return true;
-        }
+        // Strip .Id/.Value unwrap if present: g.Key.Prop.Id → g.Key.Prop
+        if (arg is MemberExpression { Member.Name: "Id" or "Value", Expression: MemberExpression inner })
+            arg = inner;
 
-        // g.Key.PropertyName.Id (navigation property like EntityReference.Id)
-        if (arg is MemberExpression { Member.Name: "Id" or "Value" } unwrap
-            && unwrap.Expression is MemberExpression innerAccess
-            && innerAccess.Expression is MemberExpression { Member.Name: "Key" })
+        // Match g.Key.PropertyName
+        if (arg is MemberExpression keyAccess
+            && keyAccess.Expression is MemberExpression { Member.Name: "Key" })
         {
-            keyProp = ctx.GroupKeyProperties.FirstOrDefault(p => p.MemberName == innerAccess.Member.Name)
+            keyProp = ctx.GroupKeyProperties.FirstOrDefault(p => p.MemberName == keyAccess.Member.Name)
                 ?? throw new NotSupportedException(
-                    $"Group key property '{innerAccess.Member.Name}' not found in composite key.");
+                    $"Group key property '{keyAccess.Member.Name}' not found in composite key.");
             return true;
         }
 
