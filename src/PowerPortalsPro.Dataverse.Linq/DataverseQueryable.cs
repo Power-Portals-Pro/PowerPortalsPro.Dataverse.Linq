@@ -27,7 +27,6 @@ internal class DataverseQueryable<T> : IQueryable<T>, IOrderedQueryable<T> where
         _provider = new DataverseQueryProvider<T>(service, entityLogicalName, columns);
         Expression = Expression.Constant(this);
     }
-#endif
 
     // Called by CreateQuery<T> when LINQ operators are applied (e.g. Where, OrderBy).
     internal DataverseQueryable(DataverseQueryProvider<T> provider, Expression expression)
@@ -42,6 +41,12 @@ internal class DataverseQueryable<T> : IQueryable<T>, IOrderedQueryable<T> where
     public Expression Expression { get; }
     /// <inheritdoc />
     public IQueryProvider Provider => _provider;
+
+    /// <summary>
+    /// The Dataverse entity logical name for this queryable.
+    /// Used by the translator to resolve unbound entity metadata.
+    /// </summary>
+    internal string EntityLogicalName => _provider.EntityLogicalName;
 
     /// <inheritdoc />
     public IEnumerator<T> GetEnumerator() =>

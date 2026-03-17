@@ -44,22 +44,32 @@ internal static class AttributeExtensions
 
         // Two-level: unwrap .Id (EntityReference) or .Value (Money/OptionSetValue)
         // to resolve the [AttributeLogicalName] on the parent property
-        if (memberExpr.Expression is MemberExpression { Member: PropertyInfo parentProp, Expression: { } parentContainer })
+        var isUnwrap = memberExpr.Member.Name switch
         {
-            var isUnwrap = memberExpr.Member.Name switch
-            {
-                "Id" => true,
-                "Value" when memberExpr.Member.DeclaringType == typeof(Money)
-                          || memberExpr.Member.DeclaringType == typeof(OptionSetValue)
-                          || Nullable.GetUnderlyingType(memberExpr.Member.DeclaringType!) is not null => true,
-                _ => false
-            };
+            "Id" => true,
+            "Value" when memberExpr.Member.DeclaringType == typeof(Money)
+                      || memberExpr.Member.DeclaringType == typeof(OptionSetValue)
+                      || Nullable.GetUnderlyingType(memberExpr.Member.DeclaringType!) is not null => true,
+            _ => false
+        };
 
-            if (isUnwrap)
+        if (isUnwrap)
+        {
+            // Parent is a property with [AttributeLogicalName]: entity.NavProp.Id
+            if (memberExpr.Expression is MemberExpression { Member: PropertyInfo parentProp, Expression: { } parentContainer })
             {
                 var attrName = parentProp.GetCustomAttribute<AttributeLogicalNameAttribute>()?.LogicalName;
                 if (attrName is not null)
                     return (attrName, parentContainer);
+            }
+
+            // Parent is GetAttributeValue<T>("name"): entity.GetAttributeValue<EntityReference>("attr").Id
+            if (memberExpr.Expression is MethodCallExpression { Method.Name: nameof(Entity.GetAttributeValue) } getAttrUnwrap
+                && getAttrUnwrap.Arguments.Count == 1
+                && getAttrUnwrap.Arguments[0] is ConstantExpression { Value: string unwrapAttrName }
+                && getAttrUnwrap.Object is not null)
+            {
+                return (unwrapAttrName, getAttrUnwrap.Object);
             }
         }
 
@@ -106,6 +116,16 @@ internal static class AttributeExtensions
             if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(DataverseQueryable<>))
             {
                 var entityType = type.GetGenericArguments()[0];
+
+                // For unbound entities (Entity base class), read the logical name from the instance
+                if (entityType == typeof(Entity))
+                {
+                    var logicalName = (string)type.GetProperty(
+                        nameof(DataverseQueryable<Entity>.EntityLogicalName),
+                        BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(val)!;
+                    return (logicalName, entityType);
+                }
+
                 return (entityType.GetEntityLogicalName(), entityType);
             }
         }
@@ -120,6 +140,6 @@ internal static class AttributeExtensions
         }
 
         throw new NotSupportedException(
-            "Any() source must be a DataverseQueryable<T> or IQueryable<T> where T has [EntityLogicalName].");
+            "Source must be a DataverseQueryable<T> or IQueryable<T> where T has [EntityLogicalName].");
     }
 }

@@ -371,29 +371,89 @@ internal static class FetchXmlQueryTranslator
     {
         // Collect columns keyed by entity alias ("" = root entity)
         var columnsByAlias = new Dictionary<string, List<string>>();
+        var wholeEntityAliases = new HashSet<string>();
 
         foreach (var arg in lambda.Body.GetProjectionArguments())
+        {
+            // Try attribute resolution first — if it succeeds, it's a property access
+            var resolved = ResolveAttribute(arg, ctx);
+            if (resolved is not null)
+            {
+                var key = resolved.Value.EntityAlias ?? string.Empty;
+                if (!columnsByAlias.TryGetValue(key, out var list))
+                {
+                    list = [];
+                    columnsByAlias[key] = list;
+                }
+                list.Add(resolved.Value.Name);
+                continue;
+            }
+
+            // Check if it's a whole entity reference (not a property on it)
+            var wholeEntity = ResolveWholeJoinEntity(arg, ctx.JoinMappings!);
+            if (wholeEntity is not null)
+            {
+                wholeEntityAliases.Add(wholeEntity);
+                continue;
+            }
+
+            // Walk into sub-expressions for nested projections
             CollectJoinAttributesByAlias(arg, ctx, columnsByAlias);
+        }
 
         foreach (var (alias, columns) in columnsByAlias)
         {
             if (alias == string.Empty)
-            {
                 ctx.Query.ApplyColumns(columns);
+            else
+            {
+                var link = ctx.Query.Links.FindLinkByAlias(alias);
+                if (link is not null)
+                    foreach (var col in columns)
+                        link.Attributes.Add(new FetchAttribute { Name = col });
+            }
+        }
+
+        // Set all-attributes for whole entity references
+        foreach (var alias in wholeEntityAliases)
+        {
+            if (alias == string.Empty)
+            {
+                // Root entity — keep all-attributes (don't call ApplyColumns)
             }
             else
             {
                 var link = ctx.Query.Links.FindLinkByAlias(alias);
                 if (link is not null)
-                {
-                    foreach (var col in columns)
-                        link.Attributes.Add(new FetchAttribute { Name = col });
-                }
+                    link.AllAttributes = true;
             }
         }
 
         ctx.Query.Projector = BuildProjector(lambda, CreateJoinResolver(ctx.JoinMappings!));
         ctx.Query.ProjectionType = lambda.ReturnType;
+    }
+
+    /// <summary>
+    /// Returns the join entity alias if the expression is a whole entity reference
+    /// (e.g. <c>ti.pa</c> in a join projection), or null if it's a property access.
+    /// Returns "" for the root entity.
+    /// </summary>
+    private static string? ResolveWholeJoinEntity(
+        Expression expr, Dictionary<string, JoinEntityInfo> joinMappings)
+    {
+        var current = expr;
+        while (current is MemberExpression me)
+        {
+            if (joinMappings.TryGetValue(me.Member.Name, out var mapping))
+                return mapping.LinkAlias ?? string.Empty;
+            current = me.Expression;
+        }
+
+        if (current is ParameterExpression param
+            && joinMappings.TryGetValue(param.Name!, out var directMapping))
+            return directMapping.LinkAlias ?? string.Empty;
+
+        return null;
     }
 
     /// <summary>
@@ -1996,15 +2056,46 @@ internal static class FetchXmlQueryTranslator
     private static (string OuterKey, string InnerKey) ExtractJoinKeys(
         MethodCallExpression joinCall, Func<string, string>? primaryKeyResolver = null)
     {
-        var outerKey = joinCall.Arguments[2].ExtractLambda().Body.GetAttributeName(primaryKeyResolver)
+        var outerKey = ResolveJoinKey(joinCall.Arguments[2], joinCall.Arguments[0], primaryKeyResolver)
             ?? throw new NotSupportedException(
                 "Outer join key must be a property decorated with [AttributeLogicalName].");
 
-        var innerKey = joinCall.Arguments[3].ExtractLambda().Body.GetAttributeName(primaryKeyResolver)
+        var innerKey = ResolveJoinKey(joinCall.Arguments[3], joinCall.Arguments[1], primaryKeyResolver)
             ?? throw new NotSupportedException(
                 "Inner join key must be a property decorated with [AttributeLogicalName].");
 
         return (outerKey, innerKey);
+    }
+
+    /// <summary>
+    /// Resolves a join key expression to an attribute name. Handles proxy entity properties,
+    /// <c>GetAttributeValue</c> calls, and <c>Entity.Id</c> for both typed and unbound entities.
+    /// </summary>
+    private static string? ResolveJoinKey(
+        Expression keyArg, Expression sourceExpr, Func<string, string>? primaryKeyResolver)
+    {
+        var keyExpr = keyArg.ExtractLambda().Body;
+
+        // Standard resolution handles [AttributeLogicalName] properties, GetAttributeValue,
+        // .Id/.Value unwrap, and Entity.Id on typed proxies
+        var resolved = keyExpr.GetAttributeName(primaryKeyResolver);
+        if (resolved is not null)
+            return resolved;
+
+        // Unbound Entity.Id — resolve via the source's entity logical name
+        var unwrapped = keyExpr is UnaryExpression { NodeType: ExpressionType.Convert } convert
+            ? convert.Operand : keyExpr;
+
+        if (unwrapped is MemberExpression { Member.Name: "Id", Expression: ParameterExpression { Type: var paramType } }
+            && paramType == typeof(Entity)
+            && sourceExpr is ConstantExpression { Value: DataverseQueryable<Entity> queryable })
+        {
+            return primaryKeyResolver is not null
+                ? primaryKeyResolver(queryable.EntityLogicalName)
+                : $"{queryable.EntityLogicalName}id";
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -2147,7 +2238,7 @@ internal static class FetchXmlQueryTranslator
         return expr =>
         {
             // Outer entity via TI path
-            if (expr.IsOuterEntityAccess(originalParam, outerPath))
+            if (expr.IsOuterEntityAccess(outerPath, originalParam))
                 return new EntityResolution(null, outerEntityType);
 
             // Inner entity via property: ti.innerProp
@@ -2175,7 +2266,7 @@ internal static class FetchXmlQueryTranslator
         return expr =>
         {
             // Outer entity via TI path
-            if (expr.IsOuterEntityAccess(outerTiParam, outerPath))
+            if (expr.IsOuterEntityAccess(outerPath, outerTiParam))
                 return new EntityResolution(null, outerEntityType);
 
             // Inner entity via direct parameter
@@ -2276,14 +2367,17 @@ internal static class FetchXmlQueryTranslator
 
         protected override Expression VisitParameter(ParameterExpression node)
         {
-            // Whole inner entity as a direct parameter (folded left join): d → ExtractLinkedEntity<T>(e, "alias")
-            if (innerDirectParam is not null && node == innerDirectParam
-                && resolveEntity(node) is { LinkAlias: not null } paramRes)
+            // Whole entity as a direct parameter: resolve via the entity resolver
+            if (resolveEntity(node) is { } paramRes)
             {
-                return Expression.Call(
-                    ExtractLinkedEntityMethod.MakeGenericMethod(node.Type),
-                    entityParam,
-                    Expression.Constant(paramRes.LinkAlias));
+                if (paramRes.LinkAlias is not null)
+                    return Expression.Call(
+                        ExtractLinkedEntityMethod.MakeGenericMethod(node.Type),
+                        entityParam,
+                        Expression.Constant(paramRes.LinkAlias));
+
+                // Root entity
+                return Expression.Call(entityParam, ToEntityMethod.MakeGenericMethod(node.Type));
             }
 
             return base.VisitParameter(node);

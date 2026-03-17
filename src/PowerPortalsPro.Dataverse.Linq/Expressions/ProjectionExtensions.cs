@@ -55,7 +55,7 @@ internal static class ProjectionExtensions
         var columns = new List<string>();
         CollectColumns(lambda.Body, arg =>
             arg is MemberExpression { Member: PropertyInfo prop, Expression: { } attrExpr }
-            && attrExpr.IsOuterEntityAccess(param, outerPath)
+            && attrExpr.IsOuterEntityAccess(outerPath, param)
                 ? prop.GetCustomAttribute<AttributeLogicalNameAttribute>()?.LogicalName
                 : null,
             columns);
