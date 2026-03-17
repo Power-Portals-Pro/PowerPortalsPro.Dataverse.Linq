@@ -89,6 +89,36 @@ public partial class AggregateIntegrationTests(ServiceClientFixture fixture) : I
             r.Count.Should().BeGreaterThan(0);
         });
     }
+
+    [Fact]
+    public void GroupBy_CompositeKeySelectEntityReference_ReturnsEntityReference()
+    {
+        var results = (from c in Service.Queryable<CustomContact>()
+                       where c.CreatedOn != null
+                       group c by new
+                       {
+                           Year = c.CreatedOn!.Value.Year,
+                           Month = c.CreatedOn!.Value.Month,
+                           Account = c.ParentAccount,
+                       } into g
+                       select new
+                       {
+                           g.Key.Account,
+                           g.Key.Year,
+                           g.Key.Month,
+                           Count = g.Count(),
+                       }).ToList();
+
+        results.Should().NotBeEmpty();
+        results.Should().AllSatisfy(r =>
+        {
+            r.Account.Should().NotBeNull();
+            r.Account.Id.Should().NotBe(Guid.Empty);
+            r.Year.Should().BeGreaterThan(0);
+            r.Month.Should().BeInRange(1, 12);
+            r.Count.Should().BeGreaterThan(0);
+        });
+    }
 }
 
 internal record GroupTestResult(Guid AccountId, int Year, int Month, int Count);

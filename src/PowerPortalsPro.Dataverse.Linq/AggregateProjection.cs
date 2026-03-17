@@ -57,14 +57,18 @@ internal static class AggregateProjection
 
     private static T ConvertRawValue<T>(object raw)
     {
+        var targetType = Nullable.GetUnderlyingType(typeof(T)) ?? typeof(T);
+
+        // Direct cast when already the right type (e.g. EntityReference → EntityReference)
+        if (targetType.IsInstanceOfType(raw))
+            return (T)raw;
+
         // Unwrap Dataverse wrapper types to their underlying CLR values
         if (raw is Money m) raw = m.Value;
         else if (raw is OptionSetValue osv) raw = osv.Value;
         else if (raw is EntityReference er) raw = er.Id;
 
-        var targetType = Nullable.GetUnderlyingType(typeof(T)) ?? typeof(T);
-
-        // Direct cast when already the right type (avoids IConvertible requirement)
+        // Check again after unwrapping
         if (targetType.IsInstanceOfType(raw))
             return (T)raw;
 
