@@ -715,4 +715,78 @@ public class AggregateFetchXmlTests : FetchXmlTestBase
             </fetch>
             """);
     }
+
+    // -------------------------------------------------------------------------
+    // Composite key with date grouping and navigation property
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_GroupByCompositeKeyWithDateAndNavProperty_GeneratesCorrectFetchXml()
+    {
+        var fetchXml = (from c in _service.Queryable<CustomContact>()
+                        where c.CreatedOn != null
+                        group c by new
+                        {
+                            Year = c.CreatedOn!.Value.Year,
+                            Month = c.CreatedOn!.Value.Month,
+                            Account = c.ParentAccount,
+                        } into g
+                        select new
+                        {
+                            AccountId = g.Key.Account.Id,
+                            g.Key.Year,
+                            g.Key.Month,
+                            Count = g.Count()
+                        }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="new_customcontact">
+                <attribute name="new_parentaccount" alias="accountid" groupby="true" />
+                <attribute name="createdon" alias="year" groupby="true" dategrouping="year" />
+                <attribute name="createdon" alias="month" groupby="true" dategrouping="month" />
+                <attribute name="new_customcontactid" alias="count" aggregate="count" />
+                <filter type="and">
+                  <condition attribute="createdon" operator="not-null" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_GroupByCompositeKeyWithConstructorProjection_GeneratesCorrectFetchXml()
+    {
+        var fetchXml = (from c in _service.Queryable<CustomContact>()
+                        where c.CreatedOn != null
+                        group c by new
+                        {
+                            Year = c.CreatedOn!.Value.Year,
+                            Month = c.CreatedOn!.Value.Month,
+                            Account = c.ParentAccount,
+                        } into g
+                        select new GroupTestResult(
+                            g.Key.Account.Id,
+                            g.Key.Year,
+                            g.Key.Month,
+                            g.Count())).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="new_customcontact">
+                <attribute name="new_parentaccount" alias="accountid" groupby="true" />
+                <attribute name="createdon" alias="year" groupby="true" dategrouping="year" />
+                <attribute name="createdon" alias="month" groupby="true" dategrouping="month" />
+                <attribute name="new_customcontactid" alias="count" aggregate="count" />
+                <filter type="and">
+                  <condition attribute="createdon" operator="not-null" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
 }
+
+internal record GroupTestResult(Guid AccountId, int Year, int Month, int Count);

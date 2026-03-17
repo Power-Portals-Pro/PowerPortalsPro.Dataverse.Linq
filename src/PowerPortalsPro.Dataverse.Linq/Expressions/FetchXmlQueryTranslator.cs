@@ -1366,10 +1366,9 @@ internal static class FetchXmlQueryTranslator
             ctx.GroupKeyDateGrouping = null;
         }
         else if (keySelector.Body is NewExpression compositeKey
-                 && compositeKey.Members is not null
-                 && ctx.JoinMappings is not null)
+                 && compositeKey.Members is not null)
         {
-            // Composite key (e.g. group by new { a.AccountId })
+            // Composite key (e.g. group by new { Year = ip.Date.Value.Year, Participant = ip.Participant })
             ctx.GroupKeyProperties = [];
             for (var i = 0; i < compositeKey.Arguments.Count; i++)
             {
@@ -1464,8 +1463,8 @@ internal static class FetchXmlQueryTranslator
     {
         var body = lambda.Body;
 
-        if (body is not NewExpression ne || ne.Members is null)
-            throw new NotSupportedException("Grouped query must project into an anonymous type.");
+        if (body is not NewExpression ne)
+            throw new NotSupportedException("Grouped query must project into a new expression.");
 
         var entityParam = Expression.Parameter(typeof(Entity), "e");
         var extractMethod = typeof(AggregateProjection).GetMethod(nameof(AggregateProjection.ExtractValue))!;
@@ -1475,14 +1474,26 @@ internal static class FetchXmlQueryTranslator
         for (var i = 0; i < ne.Arguments.Count; i++)
         {
             var arg = ne.Arguments[i];
-            var member = ne.Members[i];
-            // Anonymous type members may be PropertyInfo or getter MethodInfo (get_Xxx)
-            var memberName = member is MethodInfo { Name: ['g', 'e', 't', '_', ..] } getter
-                ? getter.Name[4..] : member.Name;
-            var alias = memberName.ToLowerInvariant();
-            var memberType = member is PropertyInfo pi ? pi.PropertyType
-                : member is MethodInfo mi ? mi.ReturnType
-                : throw new NotSupportedException($"Unexpected member type: {member.GetType().Name}");
+
+            // Determine alias and type from Members (anonymous type) or constructor parameters (named type)
+            string alias;
+            Type memberType;
+            if (ne.Members is not null)
+            {
+                var member = ne.Members[i];
+                var memberName = member is MethodInfo { Name: ['g', 'e', 't', '_', ..] } getter
+                    ? getter.Name[4..] : member.Name;
+                alias = memberName.ToLowerInvariant();
+                memberType = member is PropertyInfo pi ? pi.PropertyType
+                    : member is MethodInfo mi ? mi.ReturnType
+                    : throw new NotSupportedException($"Unexpected member type: {member.GetType().Name}");
+            }
+            else
+            {
+                var ctorParam = ne.Constructor!.GetParameters()[i];
+                alias = ctorParam.Name!.ToLowerInvariant();
+                memberType = ctorParam.ParameterType;
+            }
 
             if (arg is MemberExpression { Member.Name: "Key" })
             {
@@ -1504,16 +1515,9 @@ internal static class FetchXmlQueryTranslator
                     DateGrouping = ctx.GroupKeyDateGrouping
                 }, ctx.GroupKeyEntityAlias);
             }
-            else if (arg is MemberExpression keyPropAccess
-                     && keyPropAccess.Expression is MemberExpression { Member.Name: "Key" }
-                     && ctx.GroupKeyProperties is not null)
+            else if (TryResolveCompositeKeyAccess(arg, ctx, out var keyProp))
             {
-                // Composite key property: g.Key.PropertyName
-                var keyPropName = keyPropAccess.Member.Name;
-                var keyProp = ctx.GroupKeyProperties.FirstOrDefault(p => p.MemberName == keyPropName)
-                    ?? throw new NotSupportedException(
-                        $"Group key property '{keyPropName}' not found in composite key.");
-
+                // Composite key property: g.Key.PropertyName or g.Key.Participant.Id
                 groupKeyAlias = alias;
                 AddGroupAttribute(ctx, new FetchAttribute
                 {
@@ -1535,8 +1539,9 @@ internal static class FetchXmlQueryTranslator
             }
             else
             {
+                var argDesc = ne.Members is not null ? $"member '{ne.Members[i].Name}'" : $"parameter {i}";
                 throw new NotSupportedException(
-                    $"Unsupported expression in grouped projection at member '{ne.Members[i].Name}'.");
+                    $"Unsupported expression in grouped projection at {argDesc}.");
             }
 
             // Build projector argument
@@ -1560,10 +1565,47 @@ internal static class FetchXmlQueryTranslator
             }
         }
 
-        // Compile projector: (Entity e) => new AnonType(ExtractValue<T>(e, "alias"), ...)
-        var newExpr = Expression.New(ne.Constructor!, constructorArgs, ne.Members);
+        // Compile projector: (Entity e) => new Type(ExtractValue<T>(e, "alias"), ...)
+        var newExpr = ne.Members is not null
+            ? Expression.New(ne.Constructor!, constructorArgs, ne.Members)
+            : Expression.New(ne.Constructor!, constructorArgs);
         ctx.Query.Projector = Expression.Lambda(newExpr, entityParam).Compile();
         ctx.Query.ProjectionType = ne.Type;
+    }
+
+    /// <summary>
+    /// Tries to resolve a composite key property access from a grouped select argument.
+    /// Handles <c>g.Key.PropertyName</c> and <c>g.Key.PropertyName.Id</c> (navigation property unwrap).
+    /// </summary>
+    private static bool TryResolveCompositeKeyAccess(
+        Expression arg, TranslationContext ctx, out GroupKeyProperty keyProp)
+    {
+        keyProp = default!;
+        if (ctx.GroupKeyProperties is null)
+            return false;
+
+        // g.Key.PropertyName
+        if (arg is MemberExpression keyPropAccess
+            && keyPropAccess.Expression is MemberExpression { Member.Name: "Key" })
+        {
+            keyProp = ctx.GroupKeyProperties.FirstOrDefault(p => p.MemberName == keyPropAccess.Member.Name)
+                ?? throw new NotSupportedException(
+                    $"Group key property '{keyPropAccess.Member.Name}' not found in composite key.");
+            return true;
+        }
+
+        // g.Key.PropertyName.Id (navigation property like EntityReference.Id)
+        if (arg is MemberExpression { Member.Name: "Id" or "Value" } unwrap
+            && unwrap.Expression is MemberExpression innerAccess
+            && innerAccess.Expression is MemberExpression { Member.Name: "Key" })
+        {
+            keyProp = ctx.GroupKeyProperties.FirstOrDefault(p => p.MemberName == innerAccess.Member.Name)
+                ?? throw new NotSupportedException(
+                    $"Group key property '{innerAccess.Member.Name}' not found in composite key.");
+            return true;
+        }
+
+        return false;
     }
 
     /// <summary>

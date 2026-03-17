@@ -213,4 +213,64 @@ public partial class AggregateIntegrationTests
 
         avg.Should().Be(expected);
     }
+
+    // -------------------------------------------------------------------------
+    // Composite key GroupBy with date grouping and navigation property
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task GroupByAsync_CompositeKeyWithDateAndNavProperty_ReturnsGroupedResults()
+    {
+        var results = await (from c in Service.Queryable<CustomContact>()
+                             where c.CreatedOn != null
+                             group c by new
+                             {
+                                 Year = c.CreatedOn!.Value.Year,
+                                 Month = c.CreatedOn!.Value.Month,
+                                 Account = c.ParentAccount,
+                             } into g
+                             select new
+                             {
+                                 AccountId = g.Key.Account.Id,
+                                 g.Key.Year,
+                                 g.Key.Month,
+                                 Count = g.Count()
+                             }).ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Should().AllSatisfy(r =>
+        {
+            r.AccountId.Should().NotBe(Guid.Empty);
+            r.Year.Should().BeGreaterThan(0);
+            r.Month.Should().BeInRange(1, 12);
+            r.Count.Should().BeGreaterThan(0);
+        });
+    }
+
+    [Fact]
+    public async Task GroupByAsync_CompositeKeyWithConstructorProjection_ReturnsGroupedResults()
+    {
+        var results = await (from c in Service.Queryable<CustomContact>()
+                             where c.CreatedOn != null
+                             group c by new
+                             {
+                                 Year = c.CreatedOn!.Value.Year,
+                                 Month = c.CreatedOn!.Value.Month,
+                                 Account = c.ParentAccount,
+                             } into g
+                             select new GroupTestResult(
+                                 g.Key.Account.Id,
+                                 g.Key.Year,
+                                 g.Key.Month,
+                                 g.Count())).ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Should().AllSatisfy(r =>
+        {
+            r.AccountId.Should().NotBe(Guid.Empty);
+            r.Year.Should().BeGreaterThan(0);
+            r.Month.Should().BeInRange(1, 12);
+            r.Count.Should().BeGreaterThan(0);
+        });
+    }
 }
