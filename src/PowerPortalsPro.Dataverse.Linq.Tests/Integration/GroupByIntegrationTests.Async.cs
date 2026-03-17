@@ -125,6 +125,24 @@ public partial class GroupByIntegrationTests
     }
 
     [Fact]
+    public async Task GroupByAsync_JoinOrderByCountDescending_ReturnsResultsInDescendingOrder()
+    {
+        var results = await (from a in Service.Queryable<CustomAccount>()
+                             join c in Service.Queryable<CustomContact>()
+                                 on a.CustomAccountId equals c.ParentAccount.Id
+                             group c by a.Name into g
+                             orderby g.Count() descending
+                             select new
+                             {
+                                 AccountName = g.Key,
+                                 Count = g.Count(),
+                             }).ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Select(r => r.Count).Should().BeInDescendingOrder();
+    }
+
+    [Fact]
     public async Task GroupByAsync_OrderByMaxAscending_ReturnsResultsInAscendingOrder()
     {
         var results = await (from c in Service.Queryable<CustomContact>()

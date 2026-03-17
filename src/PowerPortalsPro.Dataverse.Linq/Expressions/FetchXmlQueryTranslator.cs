@@ -1630,23 +1630,16 @@ internal static class FetchXmlQueryTranslator
             {
                 if (order.IsKeyOrder && groupKeyAlias is not null)
                 {
-                    ctx.Query.Orders.Add(new FetchOrder
-                    {
-                        Alias = groupKeyAlias,
-                        Descending = order.Descending
-                    });
+                    AddGroupOrder(ctx, new FetchOrder { Alias = groupKeyAlias, Descending = order.Descending },
+                        ctx.GroupKeyEntityAlias);
                 }
                 else if (order.AggregateCall is not null)
                 {
-                    // Match the aggregate order to a Select member by method name + selector
-                    var orderAlias = ResolveAggregateOrderAlias(order.AggregateCall, ne, ctx);
-                    if (orderAlias is not null)
+                    var result = ResolveAggregateOrderAlias(order.AggregateCall, ne, ctx);
+                    if (result is not null)
                     {
-                        ctx.Query.Orders.Add(new FetchOrder
-                        {
-                            Alias = orderAlias,
-                            Descending = order.Descending
-                        });
+                        AddGroupOrder(ctx, new FetchOrder { Alias = result.Value.Alias, Descending = order.Descending },
+                            result.Value.EntityAlias);
                     }
                 }
             }
@@ -1695,10 +1688,10 @@ internal static class FetchXmlQueryTranslator
     /// </summary>
     /// <summary>
     /// Matches a deferred aggregate order (e.g. <c>g.Count()</c>) to the alias assigned
-    /// to the matching aggregate in the Select projection. Matches by method name and,
-    /// for aggregates with selectors, by the resolved attribute name.
+    /// to the matching aggregate in the Select projection. Returns the alias and the
+    /// entity alias where the attribute was placed.
     /// </summary>
-    private static string? ResolveAggregateOrderAlias(
+    private static (string Alias, string? EntityAlias)? ResolveAggregateOrderAlias(
         MethodCallExpression orderCall, NewExpression selectBody, TranslationContext ctx)
     {
         var orderMethodName = orderCall.Method.Name;
@@ -1727,21 +1720,42 @@ internal static class FetchXmlQueryTranslator
             }
 
             // Found a match — derive the alias from the member name
+            string alias;
             if (selectBody.Members is not null)
             {
                 var member = selectBody.Members[i];
                 var memberName = member is MethodInfo { Name: ['g', 'e', 't', '_', ..] } getter
                     ? getter.Name[4..] : member.Name;
-                return memberName.ToLowerInvariant();
+                alias = memberName.ToLowerInvariant();
             }
             else
             {
                 var ctorParam = selectBody.Constructor!.GetParameters()[i];
-                return ctorParam.Name!.ToLowerInvariant();
+                alias = ctorParam.Name!.ToLowerInvariant();
             }
+
+            // Determine which entity the aggregate was placed on
+            var (_, _, entityAlias) = ResolveGroupAggregate(selectMc, ctx);
+            return (alias, entityAlias);
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Routes a FetchOrder to the correct entity or link-entity based on alias.
+    /// </summary>
+    private static void AddGroupOrder(TranslationContext ctx, FetchOrder order, string? entityAlias)
+    {
+        if (entityAlias is null)
+        {
+            ctx.Query.Orders.Add(order);
+        }
+        else
+        {
+            var link = ctx.Query.Links.FindLinkByAlias(entityAlias);
+            link?.Orders.Add(order);
+        }
     }
 
     private static void AddGroupAttribute(TranslationContext ctx, FetchAttribute attr, string? entityAlias)

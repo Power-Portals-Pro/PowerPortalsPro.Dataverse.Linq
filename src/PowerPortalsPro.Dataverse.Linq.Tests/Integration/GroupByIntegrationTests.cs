@@ -368,6 +368,24 @@ public partial class GroupByIntegrationTests(ServiceClientFixture fixture) : Int
     }
 
     [Fact]
+    public void GroupBy_JoinOrderByCountDescending_ReturnsResultsInDescendingOrder()
+    {
+        var results = (from a in Service.Queryable<CustomAccount>()
+                       join c in Service.Queryable<CustomContact>()
+                           on a.CustomAccountId equals c.ParentAccount.Id
+                       group c by a.Name into g
+                       orderby g.Count() descending
+                       select new
+                       {
+                           AccountName = g.Key,
+                           Count = g.Count(),
+                       }).ToList();
+
+        results.Should().NotBeEmpty();
+        results.Select(r => r.Count).Should().BeInDescendingOrder();
+    }
+
+    [Fact]
     public void GroupBy_OrderByMaxAscending_ReturnsResultsInAscendingOrder()
     {
         var results = (from c in Service.Queryable<CustomContact>()

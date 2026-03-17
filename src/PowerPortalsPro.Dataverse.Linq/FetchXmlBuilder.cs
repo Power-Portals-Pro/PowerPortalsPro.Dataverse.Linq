@@ -81,6 +81,9 @@ internal static class FetchXmlBuilder
 
         AddAttributes(element, link.Attributes, link.AllAttributes);
 
+        foreach (var order in link.Orders)
+            element.Add(BuildOrder(order));
+
         if (link.Filter is not null)
             element.Add(BuildFilter(link.Filter));
 

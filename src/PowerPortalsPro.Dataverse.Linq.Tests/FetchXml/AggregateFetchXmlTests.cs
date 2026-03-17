@@ -875,6 +875,33 @@ public class AggregateFetchXmlTests : FetchXmlTestBase
             </fetch>
             """);
     }
+    [Fact]
+    public void ToFetchXml_JoinGroupByWithOrderByAggregate_PlacesOrderOnLinkEntity()
+    {
+        var fetchXml = (from a in _service.Queryable<CustomAccount>()
+                        join c in _service.Queryable<CustomContact>()
+                            on a.CustomAccountId equals c.ParentAccount.Id
+                        group c by a.Name into g
+                        orderby g.Count() descending
+                        select new
+                        {
+                            AccountName = g.Key,
+                            Count = g.Count(),
+                        }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="new_customaccount">
+                <attribute name="new_name" alias="accountname" groupby="true" />
+                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="inner">
+                  <attribute name="new_customcontactid" alias="count" aggregate="count" />
+                  <order alias="count" descending="true" />
+                </link-entity>
+              </entity>
+            </fetch>
+            """);
+    }
 }
 
 internal record GroupTestResult(Guid AccountId, int Year, int Month, int Count);
