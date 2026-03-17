@@ -3,6 +3,8 @@ name: Publish NuGet Package
 on:
   push:
     branches: [main]
+    paths:
+      - 'src/PowerPortalsPro.Dataverse.Linq/**'
 
 permissions:
   contents: write
