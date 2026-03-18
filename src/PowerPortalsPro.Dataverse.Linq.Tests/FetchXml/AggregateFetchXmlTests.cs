@@ -954,6 +954,36 @@ public class AggregateFetchXmlTests : FetchXmlTestBase
             </fetch>
             """);
     }
+
+    // -------------------------------------------------------------------------
+    // MemberInit with type conversion (long property ← int Count)
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_GroupByMemberInitWithConvertedType_GeneratesCorrectFetchXml()
+    {
+        var fetchXml = (from c in _service.Queryable<CustomContact>()
+                        group c by c.ParentAccount into g
+                        orderby g.Count() descending
+                        select new GroupInitWithConvertResult
+                        {
+                            Account = g.Key,
+                            Count = g.Count(),
+                            MostRecent = g.Max(x => x.CreatedOn),
+                        }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="new_customcontact">
+                <attribute name="new_parentaccount" alias="account" groupby="true" />
+                <attribute name="new_customcontactid" alias="count" aggregate="count" />
+                <attribute name="createdon" alias="mostrecent" aggregate="max" />
+                <order alias="count" descending="true" />
+              </entity>
+            </fetch>
+            """);
+    }
 }
 
 internal record GroupTestResult(Guid AccountId, int Year, int Month, int Count);
@@ -962,5 +992,15 @@ internal class GroupInitResult
 {
     public EntityReference? Account { get; set; }
     public int Count { get; set; }
+    public DateTime? MostRecent { get; set; }
+}
+
+/// <summary>
+/// Uses nullable/widened properties to force Convert wrapping on int-returning aggregates.
+/// </summary>
+internal class GroupInitWithConvertResult
+{
+    public EntityReference? Account { get; set; }
+    public int? Count { get; set; }
     public DateTime? MostRecent { get; set; }
 }

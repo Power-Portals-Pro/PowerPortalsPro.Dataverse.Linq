@@ -449,11 +449,41 @@ public partial class GroupByIntegrationTests(ServiceClientFixture fixture) : Int
             r.MostRecent.Should().NotBeNull();
         });
     }
+    [Fact]
+    public void GroupBy_MemberInitWithConvertedType_ReturnsTypedResults()
+    {
+        var results = (from c in Service.Queryable<CustomContact>()
+                       group c by c.ParentAccount into g
+                       orderby g.Count() descending
+                       select new GroupByInitWithConvertResult
+                       {
+                           Account = g.Key,
+                           Count = g.Count(),
+                           MostRecent = g.Max(x => x.CreatedOn),
+                       }).ToList();
+
+        results.Should().NotBeEmpty();
+        results.Select(r => r.Count).Should().BeInDescendingOrder();
+        results.Should().AllSatisfy(r =>
+        {
+            r.Account.Should().NotBeNull();
+            r.Account!.Id.Should().NotBe(Guid.Empty);
+            r.Count.Should().BeGreaterThan(0);
+            r.MostRecent.Should().NotBeNull();
+        });
+    }
 }
 
 internal class GroupByInitResult
 {
     public EntityReference? Account { get; set; }
     public int Count { get; set; }
+    public DateTime? MostRecent { get; set; }
+}
+
+internal class GroupByInitWithConvertResult
+{
+    public EntityReference? Account { get; set; }
+    public int? Count { get; set; }
     public DateTime? MostRecent { get; set; }
 }

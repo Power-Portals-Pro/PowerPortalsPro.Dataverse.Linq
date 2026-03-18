@@ -1581,6 +1581,9 @@ internal static class FetchXmlQueryTranslator
         for (var i = 0; i < argExpressions.Length; i++)
         {
             var arg = argExpressions[i];
+            // Unwrap Convert (e.g. (int)g.Count() when assigned to a typed property)
+            if (arg is UnaryExpression { NodeType: ExpressionType.Convert } convert)
+                arg = convert.Operand;
             var alias = memberNames[i].ToLowerInvariant();
             var memberType = memberTypes[i];
 
@@ -1736,7 +1739,10 @@ internal static class FetchXmlQueryTranslator
 
         for (var i = 0; i < selectArgs.Length; i++)
         {
-            if (selectArgs[i] is not MethodCallExpression selectMc
+            var selectArg = selectArgs[i];
+            if (selectArg is UnaryExpression { NodeType: ExpressionType.Convert } conv)
+                selectArg = conv.Operand;
+            if (selectArg is not MethodCallExpression selectMc
                 || selectMc.Method.Name != orderMethodName)
                 continue;
 
