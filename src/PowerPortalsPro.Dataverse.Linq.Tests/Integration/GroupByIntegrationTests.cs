@@ -346,4 +346,174 @@ public partial class GroupByIntegrationTests(ServiceClientFixture fixture) : Int
         // Each of the 100 accounts should have 5 contacts
         results.Should().AllSatisfy(r => r.Count.Should().Be(5));
     }
+
+    // -------------------------------------------------------------------------
+    // OrderBy on aggregate
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void GroupBy_OrderByCountDescending_ReturnsResultsInDescendingOrder()
+    {
+        var results = (from c in Service.Queryable<CustomContact>()
+                       group c by c.ParentAccount into g
+                       orderby g.Count() descending
+                       select new
+                       {
+                           g.Key,
+                           Count = g.Count(),
+                       }).ToList();
+
+        results.Should().NotBeEmpty();
+        results.Select(r => r.Count).Should().BeInDescendingOrder();
+    }
+
+    [Fact]
+    public void GroupBy_JoinOrderByCountDescending_ReturnsResultsInDescendingOrder()
+    {
+        var results = (from a in Service.Queryable<CustomAccount>()
+                       join c in Service.Queryable<CustomContact>()
+                           on a.CustomAccountId equals c.ParentAccount.Id
+                       group c by a.Name into g
+                       orderby g.Count() descending
+                       select new
+                       {
+                           AccountName = g.Key,
+                           Count = g.Count(),
+                       }).ToList();
+
+        results.Should().NotBeEmpty();
+        results.Select(r => r.Count).Should().BeInDescendingOrder();
+    }
+
+    [Fact]
+    public void GroupBy_OrderByMaxAscending_ReturnsResultsInAscendingOrder()
+    {
+        var results = (from c in Service.Queryable<CustomContact>()
+                       group c by c.ParentAccount into g
+                       orderby g.Max(x => x.CreatedOn)
+                       select new
+                       {
+                           g.Key,
+                           Count = g.Count(),
+                           MostRecent = g.Max(x => x.CreatedOn),
+                       }).ToList();
+
+        results.Should().NotBeEmpty();
+        results.Select(r => r.MostRecent).Should().BeInAscendingOrder();
+    }
+
+    // -------------------------------------------------------------------------
+    // MemberInitExpression (object initializer) in grouped select
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void GroupBy_MemberInitProjection_ReturnsTypedResults()
+    {
+        var results = (from c in Service.Queryable<CustomContact>()
+                       group c by c.ParentAccount into g
+                       select new GroupByInitResult
+                       {
+                           Account = g.Key,
+                           Count = g.Count(),
+                       }).ToList();
+
+        results.Should().NotBeEmpty();
+        results.Should().AllSatisfy(r =>
+        {
+            r.Account.Should().NotBeNull();
+            r.Account!.Id.Should().NotBe(Guid.Empty);
+            r.Count.Should().BeGreaterThan(0);
+        });
+    }
+
+    [Fact]
+    public void GroupBy_MemberInitWithOrderAndMax_ReturnsOrderedTypedResults()
+    {
+        var results = (from c in Service.Queryable<CustomContact>()
+                       group c by c.ParentAccount into g
+                       orderby g.Count() descending
+                       select new GroupByInitResult
+                       {
+                           Account = g.Key,
+                           Count = g.Count(),
+                           MostRecent = g.Max(x => x.CreatedOn),
+                       }).ToList();
+
+        results.Should().NotBeEmpty();
+        results.Select(r => r.Count).Should().BeInDescendingOrder();
+        results.Should().AllSatisfy(r =>
+        {
+            r.Account.Should().NotBeNull();
+            r.Account!.Id.Should().NotBe(Guid.Empty);
+            r.Count.Should().BeGreaterThan(0);
+            r.MostRecent.Should().NotBeNull();
+        });
+    }
+    [Fact]
+    public void GroupBy_MemberInitWithConvertedType_ReturnsTypedResults()
+    {
+        var results = (from c in Service.Queryable<CustomContact>()
+                       group c by c.ParentAccount into g
+                       orderby g.Count() descending
+                       select new GroupByInitWithConvertResult
+                       {
+                           Account = g.Key,
+                           Count = g.Count(),
+                           MostRecent = g.Max(x => x.CreatedOn),
+                       }).ToList();
+
+        results.Should().NotBeEmpty();
+        results.Select(r => r.Count).Should().BeInDescendingOrder();
+        results.Should().AllSatisfy(r =>
+        {
+            r.Account.Should().NotBeNull();
+            r.Account!.Id.Should().NotBe(Guid.Empty);
+            r.Count.Should().BeGreaterThan(0);
+            r.MostRecent.Should().NotBeNull();
+        });
+    }
+
+    [Fact]
+    public void GroupBy_MemberInitWithComputedValue_PassesThroughNonAggregate()
+    {
+        var results = (from c in Service.Queryable<CustomContact>()
+                       group c by c.ParentAccount into g
+                       select new GroupByInitWithComputedResult
+                       {
+                           Id = Guid.NewGuid(),
+                           Account = g.Key,
+                           Count = g.Count(),
+                       }).ToList();
+
+        results.Should().NotBeEmpty();
+        results.Should().AllSatisfy(r =>
+        {
+            r.Id.Should().NotBe(Guid.Empty);
+            r.Account.Should().NotBeNull();
+            r.Count.Should().BeGreaterThan(0);
+        });
+        // Each row should have a unique generated Id
+        results.Select(r => r.Id).Distinct().Should().HaveCount(results.Count);
+    }
+}
+
+internal class GroupByInitResult
+{
+    public EntityReference? Account { get; set; }
+    public int Count { get; set; }
+    public DateTime? MostRecent { get; set; }
+}
+
+internal class GroupByInitWithConvertResult
+{
+    public EntityReference? Account { get; set; }
+    public int? Count { get; set; }
+    public DateTime? MostRecent { get; set; }
+}
+
+internal class GroupByInitWithComputedResult
+{
+    public Guid Id { get; set; }
+    public EntityReference? Account { get; set; }
+    public int Count { get; set; }
 }

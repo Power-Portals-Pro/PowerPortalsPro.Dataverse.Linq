@@ -200,20 +200,14 @@ internal class DataverseQueryProvider<T> : IQueryProvider where T : Entity
 
     /// <summary>
     /// Projects raw Dataverse entity rows into <typeparamref name="TElement"/> based
-    /// on the query model: inner join (2-param projector), simple/left join (1-param
-    /// projector), or no projection (typed entity).
+    /// on the query model: materializer-based projection or plain typed entity cast.
     /// </summary>
     protected List<TElement> ProjectEntities<TElement>(List<Entity> entities, FetchXmlQuery query)
     {
-        if (query.Projector is null)
-            return entities.Select(e => (TElement)(object)e.ToEntity<T>()).ToList();
+        if (query.Materializer is not null)
+            return entities.Select(e => (TElement)query.Materializer.Invoke(e)).ToList();
 
-        // Aggregate, inner join, and left join projectors all take raw Entity
-        if (query.Aggregate || query.InnerEntityType is not null)
-            return entities.Select(e => (TElement)query.Projector.DynamicInvoke(e)!).ToList();
-
-        // Simple select: projector takes typed entity
-        return entities.Select(e => (TElement)query.Projector.DynamicInvoke(e.ToEntity<T>())!).ToList();
+        return entities.Select(e => (TElement)(object)e.ToEntity<T>()).ToList();
     }
 
     protected static MethodInfo GetPrivateMethod(string name) =>

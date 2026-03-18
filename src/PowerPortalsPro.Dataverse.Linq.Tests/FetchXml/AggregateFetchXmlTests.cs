@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Microsoft.Xrm.Sdk;
 using PowerPortalsPro.Dataverse.Linq.Tests.Proxies;
 
 namespace PowerPortalsPro.Dataverse.Linq.Tests.FetchXml;
@@ -822,6 +823,218 @@ public class AggregateFetchXmlTests : FetchXmlTestBase
             </fetch>
             """);
     }
+    // -------------------------------------------------------------------------
+    // OrderBy on aggregate in grouped query
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_GroupByWithOrderByAggregate_GeneratesOrderWithAlias()
+    {
+        var fetchXml = (from c in _service.Queryable<CustomContact>()
+                        group c by c.ParentAccount into g
+                        orderby g.Count() descending
+                        select new
+                        {
+                            g.Key,
+                            Count = g.Count(),
+                        }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="new_customcontact">
+                <attribute name="new_parentaccount" alias="key" groupby="true" />
+                <attribute name="new_customcontactid" alias="count" aggregate="count" />
+                <order alias="count" descending="true" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_GroupByWithOrderByMaxAggregate_GeneratesOrderWithAlias()
+    {
+        var fetchXml = (from c in _service.Queryable<CustomContact>()
+                        group c by c.ParentAccount into g
+                        orderby g.Max(x => x.CreatedOn)
+                        select new
+                        {
+                            g.Key,
+                            Count = g.Count(),
+                            MostRecent = g.Max(x => x.CreatedOn),
+                        }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="new_customcontact">
+                <attribute name="new_parentaccount" alias="key" groupby="true" />
+                <attribute name="new_customcontactid" alias="count" aggregate="count" />
+                <attribute name="createdon" alias="mostrecent" aggregate="max" />
+                <order alias="mostrecent" descending="false" />
+              </entity>
+            </fetch>
+            """);
+    }
+    [Fact]
+    public void ToFetchXml_JoinGroupByWithOrderByAggregate_PlacesOrderOnLinkEntity()
+    {
+        var fetchXml = (from a in _service.Queryable<CustomAccount>()
+                        join c in _service.Queryable<CustomContact>()
+                            on a.CustomAccountId equals c.ParentAccount.Id
+                        group c by a.Name into g
+                        orderby g.Count() descending
+                        select new
+                        {
+                            AccountName = g.Key,
+                            Count = g.Count(),
+                        }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="new_customaccount">
+                <attribute name="new_name" alias="accountname" groupby="true" />
+                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="inner">
+                  <attribute name="new_customcontactid" alias="count" aggregate="count" />
+                  <order alias="count" descending="true" />
+                </link-entity>
+              </entity>
+            </fetch>
+            """);
+    }
+    // -------------------------------------------------------------------------
+    // MemberInitExpression (object initializer) in grouped select
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_GroupByWithMemberInitProjection_GeneratesCorrectFetchXml()
+    {
+        var fetchXml = (from c in _service.Queryable<CustomContact>()
+                        group c by c.ParentAccount into g
+                        select new GroupInitResult
+                        {
+                            Account = g.Key,
+                            Count = g.Count(),
+                        }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="new_customcontact">
+                <attribute name="new_parentaccount" alias="account" groupby="true" />
+                <attribute name="new_customcontactid" alias="count" aggregate="count" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_GroupByWithMemberInitAndOrderBy_GeneratesCorrectFetchXml()
+    {
+        var fetchXml = (from c in _service.Queryable<CustomContact>()
+                        group c by c.ParentAccount into g
+                        orderby g.Count() descending
+                        select new GroupInitResult
+                        {
+                            Account = g.Key,
+                            Count = g.Count(),
+                            MostRecent = g.Max(x => x.CreatedOn),
+                        }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="new_customcontact">
+                <attribute name="new_parentaccount" alias="account" groupby="true" />
+                <attribute name="new_customcontactid" alias="count" aggregate="count" />
+                <attribute name="createdon" alias="mostrecent" aggregate="max" />
+                <order alias="count" descending="true" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    // -------------------------------------------------------------------------
+    // MemberInit with type conversion (long property ← int Count)
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_GroupByMemberInitWithConvertedType_GeneratesCorrectFetchXml()
+    {
+        var fetchXml = (from c in _service.Queryable<CustomContact>()
+                        group c by c.ParentAccount into g
+                        orderby g.Count() descending
+                        select new GroupInitWithConvertResult
+                        {
+                            Account = g.Key,
+                            Count = g.Count(),
+                            MostRecent = g.Max(x => x.CreatedOn),
+                        }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="new_customcontact">
+                <attribute name="new_parentaccount" alias="account" groupby="true" />
+                <attribute name="new_customcontactid" alias="count" aggregate="count" />
+                <attribute name="createdon" alias="mostrecent" aggregate="max" />
+                <order alias="count" descending="true" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    // -------------------------------------------------------------------------
+    // Non-aggregate expressions in grouped select (e.g. Guid.NewGuid())
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_GroupByMemberInitWithComputedValue_IgnoresNonAggregateExpression()
+    {
+        var fetchXml = (from c in _service.Queryable<CustomContact>()
+                        group c by c.ParentAccount into g
+                        select new GroupInitWithComputedResult
+                        {
+                            Id = Guid.NewGuid(),
+                            Account = g.Key,
+                            Count = g.Count(),
+                        }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="new_customcontact">
+                <attribute name="new_parentaccount" alias="account" groupby="true" />
+                <attribute name="new_customcontactid" alias="count" aggregate="count" />
+              </entity>
+            </fetch>
+            """);
+    }
 }
 
 internal record GroupTestResult(Guid AccountId, int Year, int Month, int Count);
+
+internal class GroupInitResult
+{
+    public EntityReference? Account { get; set; }
+    public int Count { get; set; }
+    public DateTime? MostRecent { get; set; }
+}
+
+/// <summary>
+/// Uses nullable/widened properties to force Convert wrapping on int-returning aggregates.
+/// </summary>
+internal class GroupInitWithConvertResult
+{
+    public EntityReference? Account { get; set; }
+    public int? Count { get; set; }
+    public DateTime? MostRecent { get; set; }
+}
+
+internal class GroupInitWithComputedResult
+{
+    public Guid Id { get; set; }
+    public EntityReference? Account { get; set; }
+    public int Count { get; set; }
+}

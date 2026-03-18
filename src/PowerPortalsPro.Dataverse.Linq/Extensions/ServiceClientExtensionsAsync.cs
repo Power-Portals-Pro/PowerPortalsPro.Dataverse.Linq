@@ -1,10 +1,37 @@
 #if !NETFRAMEWORK
+using Microsoft.PowerPlatform.Dataverse.Client;
+using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Client;
 using System.Linq.Expressions;
+using System.Reflection;
 
 namespace PowerPortalsPro.Dataverse.Linq;
 
 public static partial class ServiceClientExtensions
 {
+    /// <summary>
+    /// Creates a <see cref="IQueryable{T}"/> for the given entity type.
+    /// The entity type must be decorated with <see cref="EntityLogicalNameAttribute"/>.
+    /// </summary>
+    public static IQueryable<T> Queryable<T>(this IOrganizationServiceAsync service, params string[] columns)
+        where T : Entity
+    {
+        var entityLogicalName = typeof(T).GetCustomAttribute<EntityLogicalNameAttribute>()?.LogicalName
+            ?? throw new InvalidOperationException(
+                $"Type '{typeof(T).Name}' must be decorated with '{nameof(EntityLogicalNameAttribute)}'.");
+
+        return new DataverseQueryable<T>(service, entityLogicalName, columns.Length > 0 ? columns : null);
+    }
+
+    /// <summary>
+    /// Creates a <see cref="IQueryable{Entity}"/> for unbound queries using the
+    /// <see cref="Entity"/> base class directly (no proxy class required).
+    /// </summary>
+    public static IQueryable<Entity> Queryable(this IOrganizationServiceAsync service, string entityLogicalName, params string[] columns)
+    {
+        return new DataverseQueryable<Entity>(service, entityLogicalName, columns.Length > 0 ? columns : null);
+    }
+
     /// <summary>
     /// Asynchronously executes the query and returns all results as a <see cref="List{T}"/>.
     /// Works on both root queryables and projected queryables (e.g. after a Select clause).

@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.PowerPlatform.Dataverse.Client;
+using Microsoft.Xrm.Sdk;
 using FluentAssertions;
 using PowerPortalsPro.Dataverse.Linq.Tests.Proxies;
 
@@ -153,5 +154,42 @@ public partial class UnboundEntityIntegrationTests
 
         unbound.Should().HaveSameCount(typed);
         unbound.Select(u => u.Name).Should().BeEquivalentTo(typed.Select(t => t.Name));
+    }
+
+    // -------------------------------------------------------------------------
+    // Unbound entity join
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ToListAsync_UnboundEntityJoin_WithGetAttributeValueIdKey_ReturnsResults()
+    {
+        var results = await (from a in Service.Queryable("new_customaccount")
+                             join c in Service.Queryable("new_customcontact")
+                                 on a.Id equals c.GetAttributeValue<EntityReference>("new_parentaccount").Id
+                             select new { Account = a, Contact = c }).ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Should().AllSatisfy(r =>
+        {
+            r.Account.Should().NotBeNull();
+            r.Account.Id.Should().NotBe(Guid.Empty);
+            r.Account.GetAttributeValue<string>("new_name").Should().NotBeNullOrEmpty();
+            r.Contact.Should().NotBeNull();
+            r.Contact.Id.Should().NotBe(Guid.Empty);
+        });
+    }
+
+    [Fact]
+    public async Task ToListAsync_UnboundEntityJoin_WhereOnJoinedEntity_ReturnsFilteredResults()
+    {
+        var results = await (from a in Service.Queryable("new_customaccount")
+                             join c in Service.Queryable("new_customcontact")
+                                 on a.Id equals c.GetAttributeValue<EntityReference>("new_parentaccount").Id
+                             where a.GetAttributeValue<string>("new_name") != null
+                             select new { Account = a, Contact = c }).ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Should().AllSatisfy(r =>
+            r.Account.GetAttributeValue<string>("new_name").Should().NotBeNull());
     }
 }

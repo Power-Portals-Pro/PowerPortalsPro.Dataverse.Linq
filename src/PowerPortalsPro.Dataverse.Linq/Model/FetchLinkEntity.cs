@@ -14,6 +14,7 @@ internal sealed class FetchLinkEntity
     public string LinkType { get; set; } = "inner";
     public List<FetchAttribute> Attributes { get; } = [];
     public bool AllAttributes { get; set; }
+    public List<FetchOrder> Orders { get; } = [];
     public FetchFilter? Filter { get; set; }
     public List<FetchLinkEntity> Links { get; } = [];
 }

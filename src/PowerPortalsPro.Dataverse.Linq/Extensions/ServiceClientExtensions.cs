@@ -1,9 +1,6 @@
-using PowerPortalsPro.Dataverse.Linq.Model;
-#if !NETFRAMEWORK
-using Microsoft.PowerPlatform.Dataverse.Client;
-#endif
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Client;
+using PowerPortalsPro.Dataverse.Linq.Model;
 using System.Linq.Expressions;
 using System.Reflection;
 
@@ -16,14 +13,10 @@ namespace PowerPortalsPro.Dataverse.Linq;
 public static partial class ServiceClientExtensions
 {
     /// <summary>
-    /// Creates a <see cref="DataverseQueryable{T}"/> for the given entity type.
+    /// Creates a <see cref="IQueryable{T}"/> for the given entity type.
     /// The entity type must be decorated with <see cref="EntityLogicalNameAttribute"/>.
     /// </summary>
-#if NETFRAMEWORK
-    public static DataverseQueryable<T> Queryable<T>(this IOrganizationService service, params string[] columns)
-#else
-    public static DataverseQueryable<T> Queryable<T>(this IOrganizationServiceAsync service, params string[] columns)
-#endif
+    public static IQueryable<T> Queryable<T>(this IOrganizationService service, params string[] columns)
         where T : Entity
     {
         var entityLogicalName = typeof(T).GetCustomAttribute<EntityLogicalNameAttribute>()?.LogicalName
@@ -34,14 +27,10 @@ public static partial class ServiceClientExtensions
     }
 
     /// <summary>
-    /// Creates a <see cref="DataverseQueryable{Entity}"/> for unbound queries using the
+    /// Creates a <see cref="IQueryable{Entity}"/> for unbound queries using the
     /// <see cref="Entity"/> base class directly (no proxy class required).
     /// </summary>
-#if NETFRAMEWORK
-    public static DataverseQueryable<Entity> Queryable(this IOrganizationService service, string entityLogicalName, params string[] columns)
-#else
-    public static DataverseQueryable<Entity> Queryable(this IOrganizationServiceAsync service, string entityLogicalName, params string[] columns)
-#endif
+    public static IQueryable<Entity> Queryable(this IOrganizationService service, string entityLogicalName, params string[] columns)
     {
         return new DataverseQueryable<Entity>(service, entityLogicalName, columns.Length > 0 ? columns : null);
     }

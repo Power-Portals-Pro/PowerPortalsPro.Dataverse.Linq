@@ -1,5 +1,6 @@
 using PowerPortalsPro.Dataverse.Linq.Model;
 using System.Linq.Expressions;
+using System.Reflection;
 
 namespace PowerPortalsPro.Dataverse.Linq.Expressions;
 
@@ -9,10 +10,27 @@ namespace PowerPortalsPro.Dataverse.Linq.Expressions;
 /// </summary>
 internal static class TransparentIdentifierExtensions
 {
-    internal static bool IsTransparentIdentifier(this LambdaExpression lambda) =>
-        lambda.Body is NewExpression ne
-        && ne.Arguments.Count > 0
-        && ne.Arguments.All(a => a is ParameterExpression);
+    internal static bool IsTransparentIdentifier(this LambdaExpression lambda)
+    {
+        if (lambda.Body is not NewExpression { Arguments.Count: > 0, Members: not null } ne)
+            return false;
+
+        // All arguments must be parameters AND member names must match parameter names.
+        // This distinguishes compiler-generated TIs like `new { a = a, c = c }` from
+        // user projections like `new { Account = a, Contact = c }`.
+        for (var i = 0; i < ne.Arguments.Count; i++)
+        {
+            if (ne.Arguments[i] is not ParameterExpression param)
+                return false;
+
+            var memberName = ne.Members[i] is MethodInfo { Name: ['g', 'e', 't', '_', ..] } getter
+                ? getter.Name[4..] : ne.Members[i].Name;
+            if (memberName != param.Name)
+                return false;
+        }
+
+        return true;
+    }
 
     /// <summary>
     /// Recursively searches <paramref name="type"/> for a property whose type is (or is
@@ -40,9 +58,10 @@ internal static class TransparentIdentifierExtensions
 
     /// <summary>
     /// Returns <c>true</c> when <paramref name="expr"/> matches the member-access chain
-    /// <c>param.path[0].path[1]...path[n-1]</c>.
+    /// <c>param.path[0].path[1]...path[n-1]</c>. When <paramref name="param"/> is provided,
+    /// the root must match that exact parameter; otherwise any parameter is accepted.
     /// </summary>
-    internal static bool IsOuterEntityAccess(this Expression expr, ParameterExpression param, string[] path)
+    internal static bool IsOuterEntityAccess(this Expression expr, string[] path, ParameterExpression? param = null)
     {
         for (var i = path.Length - 1; i >= 0; i--)
         {
@@ -51,24 +70,9 @@ internal static class TransparentIdentifierExtensions
             expr = me.Expression!;
         }
 
-        return expr is ParameterExpression p && p == param;
-    }
-
-    /// <summary>
-    /// Returns <c>true</c> when <paramref name="expr"/> accesses the outer entity through
-    /// the transparent-identifier <paramref name="path"/>, regardless of which parameter
-    /// instance is at the root. Used in Where/OrderBy resolution after a left join.
-    /// </summary>
-    internal static bool IsOuterEntityAccess(this Expression expr, string[] path)
-    {
-        for (var i = path.Length - 1; i >= 0; i--)
-        {
-            if (expr is not MemberExpression me || me.Member.Name != path[i])
-                return false;
-            expr = me.Expression!;
-        }
-
-        return expr is ParameterExpression;
+        return param is not null
+            ? expr is ParameterExpression p && p == param
+            : expr is ParameterExpression;
     }
 
     /// <summary>

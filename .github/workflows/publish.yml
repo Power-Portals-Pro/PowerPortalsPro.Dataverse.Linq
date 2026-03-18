@@ -8,7 +8,6 @@ on:
 
 permissions:
   contents: write
-  pull-requests: read
 
 jobs:
   publish:
@@ -36,28 +35,25 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Version: $VERSION"
 
-      - name: Get merged PR description
-        id: pr
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Collect commit messages since last release
+        id: changes
         run: |
-          # Find the PR associated with this merge commit
-          PR_JSON=$(gh pr list --state merged --base main --json number,title,body --limit 1 --search "${{ github.sha }}")
-          PR_TITLE=$(echo "$PR_JSON" | jq -r '.[0].title // empty')
-          PR_BODY=$(echo "$PR_JSON" | jq -r '.[0].body // empty')
+          # Find the most recent release tag
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
 
-          if [ -z "$PR_TITLE" ]; then
-            # Fallback: use the commit message if no PR found
-            PR_TITLE=$(git log -1 --format=%s)
-            PR_BODY=""
+          if [ -n "$LAST_TAG" ]; then
+            echo "Last release tag: $LAST_TAG"
+            COMMITS=$(git log "${LAST_TAG}..HEAD" --format="- %s" --no-merges)
+          else
+            echo "No previous release tag found, using all commits"
+            COMMITS=$(git log --format="- %s" --no-merges)
           fi
 
-          # Write to output using delimiter to handle multiline body
-          echo "title=$PR_TITLE" >> "$GITHUB_OUTPUT"
+          # Write to output using delimiter to handle multiline
           {
-            echo "body<<PREOF"
-            echo "$PR_BODY"
-            echo "PREOF"
+            echo "commits<<COMMITSEOF"
+            echo "$COMMITS"
+            echo "COMMITSEOF"
           } >> "$GITHUB_OUTPUT"
 
       - name: Build
@@ -74,23 +70,22 @@ jobs:
         run: |
           DATE=$(date +%Y-%m-%d)
           VERSION=${{ steps.version.outputs.version }}
-          PR_TITLE="${{ steps.pr.outputs.title }}"
-          PR_BODY=$(cat <<'PREOF'
-          ${{ steps.pr.outputs.body }}
-          PREOF
+
+          COMMITS=$(cat <<'COMMITSEOF'
+          ${{ steps.changes.outputs.commits }}
+          COMMITSEOF
           )
 
-          # Build the new entry
-          ENTRY="## [$VERSION] - $DATE\n\n"
-          if [ -n "$PR_TITLE" ]; then
-            ENTRY+="### $PR_TITLE\n\n"
-          fi
-          if [ -n "$PR_BODY" ] && [ "$PR_BODY" != "null" ]; then
-            ENTRY+="$PR_BODY\n"
-          fi
+          # Build the new entry as a temp file to avoid sed escaping issues
+          {
+            echo ""
+            echo "## [$VERSION] - $DATE"
+            echo ""
+            echo "$COMMITS"
+          } > /tmp/changelog_entry.txt
 
-          # Insert after [Unreleased]
-          sed -i "s/## \[Unreleased\]/## [Unreleased]\n\n${ENTRY}/" CHANGELOG.md
+          # Insert after [Unreleased] line
+          sed -i '/## \[Unreleased\]/r /tmp/changelog_entry.txt' CHANGELOG.md
 
       - name: Commit CHANGELOG
         run: |
@@ -105,5 +100,5 @@ jobs:
         with:
           tag_name: v${{ steps.version.outputs.version }}
           name: v${{ steps.version.outputs.version }}
-          generate_release_notes: true
+          body: ${{ steps.changes.outputs.commits }}
           files: ./nupkg/PowerPortalsPro.Dataverse.Linq.${{ steps.version.outputs.version }}.nupkg

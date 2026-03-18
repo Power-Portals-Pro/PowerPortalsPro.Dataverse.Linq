@@ -55,6 +55,28 @@ internal static class AggregateProjection
         return result;
     }
 
+    // ------------------------------------------------------------------
+    // Non-generic overloads (used by MaterializerInfo.Invoke)
+    // ------------------------------------------------------------------
+
+    public static object? ExtractRootValueUntyped(Entity entity, string attributeName, Type targetType)
+    {
+        var raw = entity.Attributes.TryGetValue(attributeName, out var val) ? val : null;
+        if (raw == null) return GetDefault(targetType);
+        return ConvertRawValue(raw, targetType);
+    }
+
+    public static object? ExtractValueUntyped(Entity entity, string alias, Type targetType)
+    {
+        var av = entity.GetAttributeValue<AliasedValue>(alias);
+        if (av?.Value == null) return GetDefault(targetType);
+        return ConvertRawValue(av.Value, targetType);
+    }
+
+    // ------------------------------------------------------------------
+    // Shared conversion helpers
+    // ------------------------------------------------------------------
+
     private static T ConvertRawValue<T>(object raw)
     {
         var targetType = Nullable.GetUnderlyingType(typeof(T)) ?? typeof(T);
@@ -78,4 +100,30 @@ internal static class AggregateProjection
 
         return (T)Convert.ChangeType(raw, targetType);
     }
+
+    private static object? ConvertRawValue(object raw, Type targetType)
+    {
+        // Same logic as ConvertRawValue<T> but non-generic
+        if (targetType.IsInstanceOfType(raw)) return raw;
+
+        if (raw is Money m) raw = m.Value;
+        else if (raw is OptionSetValue osv) raw = osv.Value;
+        else if (raw is EntityReference er) raw = er.Id;
+
+        if (targetType.IsInstanceOfType(raw)) return raw;
+
+        if (targetType.IsEnum) return Enum.ToObject(targetType, raw);
+
+        var underlying = Nullable.GetUnderlyingType(targetType);
+        if (underlying is not null)
+        {
+            if (underlying.IsInstanceOfType(raw)) return raw;
+            if (underlying.IsEnum) return Enum.ToObject(underlying, raw);
+            return Convert.ChangeType(raw, underlying);
+        }
+
+        return Convert.ChangeType(raw, targetType);
+    }
+
+    private static object? GetDefault(Type type) => type.IsValueType ? Activator.CreateInstance(type) : null;
 }

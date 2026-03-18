@@ -103,4 +103,153 @@ public partial class GroupByIntegrationTests
             result.NumberOfChildren.Should().Be(childCountByParent[result.CustomAccountId]);
         }
     }
+
+    // -------------------------------------------------------------------------
+    // OrderBy on aggregate
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task GroupByAsync_OrderByCountDescending_ReturnsResultsInDescendingOrder()
+    {
+        var results = await (from c in Service.Queryable<CustomContact>()
+                             group c by c.ParentAccount into g
+                             orderby g.Count() descending
+                             select new
+                             {
+                                 g.Key,
+                                 Count = g.Count(),
+                             }).ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Select(r => r.Count).Should().BeInDescendingOrder();
+    }
+
+    [Fact]
+    public async Task GroupByAsync_JoinOrderByCountDescending_ReturnsResultsInDescendingOrder()
+    {
+        var results = await (from a in Service.Queryable<CustomAccount>()
+                             join c in Service.Queryable<CustomContact>()
+                                 on a.CustomAccountId equals c.ParentAccount.Id
+                             group c by a.Name into g
+                             orderby g.Count() descending
+                             select new
+                             {
+                                 AccountName = g.Key,
+                                 Count = g.Count(),
+                             }).ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Select(r => r.Count).Should().BeInDescendingOrder();
+    }
+
+    [Fact]
+    public async Task GroupByAsync_OrderByMaxAscending_ReturnsResultsInAscendingOrder()
+    {
+        var results = await (from c in Service.Queryable<CustomContact>()
+                             group c by c.ParentAccount into g
+                             orderby g.Max(x => x.CreatedOn)
+                             select new
+                             {
+                                 g.Key,
+                                 Count = g.Count(),
+                                 MostRecent = g.Max(x => x.CreatedOn),
+                             }).ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Select(r => r.MostRecent).Should().BeInAscendingOrder();
+    }
+
+    // -------------------------------------------------------------------------
+    // MemberInitExpression (object initializer) in grouped select
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task GroupByAsync_MemberInitProjection_ReturnsTypedResults()
+    {
+        var results = await (from c in Service.Queryable<CustomContact>()
+                             group c by c.ParentAccount into g
+                             select new GroupByInitResult
+                             {
+                                 Account = g.Key,
+                                 Count = g.Count(),
+                             }).ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Should().AllSatisfy(r =>
+        {
+            r.Account.Should().NotBeNull();
+            r.Account!.Id.Should().NotBe(Guid.Empty);
+            r.Count.Should().BeGreaterThan(0);
+        });
+    }
+
+    [Fact]
+    public async Task GroupByAsync_MemberInitWithOrderAndMax_ReturnsOrderedTypedResults()
+    {
+        var results = await (from c in Service.Queryable<CustomContact>()
+                             group c by c.ParentAccount into g
+                             orderby g.Count() descending
+                             select new GroupByInitResult
+                             {
+                                 Account = g.Key,
+                                 Count = g.Count(),
+                                 MostRecent = g.Max(x => x.CreatedOn),
+                             }).ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Select(r => r.Count).Should().BeInDescendingOrder();
+        results.Should().AllSatisfy(r =>
+        {
+            r.Account.Should().NotBeNull();
+            r.Account!.Id.Should().NotBe(Guid.Empty);
+            r.Count.Should().BeGreaterThan(0);
+            r.MostRecent.Should().NotBeNull();
+        });
+    }
+
+    [Fact]
+    public async Task GroupByAsync_MemberInitWithComputedValue_PassesThroughNonAggregate()
+    {
+        var results = await (from c in Service.Queryable<CustomContact>()
+                             group c by c.ParentAccount into g
+                             select new GroupByInitWithComputedResult
+                             {
+                                 Id = Guid.NewGuid(),
+                                 Account = g.Key,
+                                 Count = g.Count(),
+                             }).ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Should().AllSatisfy(r =>
+        {
+            r.Id.Should().NotBe(Guid.Empty);
+            r.Account.Should().NotBeNull();
+            r.Count.Should().BeGreaterThan(0);
+        });
+        results.Select(r => r.Id).Distinct().Should().HaveCount(results.Count);
+    }
+
+    [Fact]
+    public async Task GroupByAsync_MemberInitWithConvertedType_ReturnsTypedResults()
+    {
+        var results = await (from c in Service.Queryable<CustomContact>()
+                             group c by c.ParentAccount into g
+                             orderby g.Count() descending
+                             select new GroupByInitWithConvertResult
+                             {
+                                 Account = g.Key,
+                                 Count = g.Count(),
+                                 MostRecent = g.Max(x => x.CreatedOn),
+                             }).ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Select(r => r.Count).Should().BeInDescendingOrder();
+        results.Should().AllSatisfy(r =>
+        {
+            r.Account.Should().NotBeNull();
+            r.Account!.Id.Should().NotBe(Guid.Empty);
+            r.Count.Should().BeGreaterThan(0);
+            r.MostRecent.Should().NotBeNull();
+        });
+    }
 }
