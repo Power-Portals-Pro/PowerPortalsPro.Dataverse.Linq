@@ -8,7 +8,7 @@ A strongly-typed LINQ query provider for Microsoft Dataverse (Dynamics 365 / Pow
 dotnet add package PowerPortalsPro.Dataverse.Linq
 ```
 
-Supports **.NET 10+** (with full async support) and **.NET Framework 4.6.2+** (sync only).
+Supports **.NET 8, .NET 10+** (with full async support) and **.NET Framework 4.6.2+** (sync only).
 
 ## Quick Start
 
@@ -652,7 +652,7 @@ var fetchXml = service.Queryable<Account>()
 Console.WriteLine(fetchXml);
 ```
 
-## Async Operations (.NET 10+)
+## Async Operations (.NET 8, .NET 10+)
 
 All query execution methods have async counterparts. These are only available when targeting .NET 10+.
 
@@ -687,7 +687,7 @@ See the [ForEachPage / ForEachPageAsync](#foreachpage--foreachpageasync) section
 
 | Target | SDK Package |
 |--------|------------|
-| .NET 10+ | [Microsoft.PowerPlatform.Dataverse.Client](https://www.nuget.org/packages/Microsoft.PowerPlatform.Dataverse.Client) |
+| .NET 8, .NET 10+ | [Microsoft.PowerPlatform.Dataverse.Client](https://www.nuget.org/packages/Microsoft.PowerPlatform.Dataverse.Client) |
 | .NET Framework 4.6.2+ | [Microsoft.CrmSdk.CoreAssemblies](https://www.nuget.org/packages/Microsoft.CrmSdk.CoreAssemblies) |
 
 ## FetchXml Documentation

@@ -1,9 +1,10 @@
 <Solution>
-  <Project Path="PowerPortalsPro.Dataverse.Linq/PowerPortalsPro.Dataverse.Linq.csproj" />
   <Folder Name="/Solution Items/">
+    <File Path="../.github/workflows/publish.yml" />
     <File Path="../.gitignore" />
     <File Path="../publish.cmd" />
     <File Path="../README.md" />
   </Folder>
   <Project Path="PowerPortalsPro.Dataverse.Linq.Tests/PowerPortalsPro.Dataverse.Linq.Tests.csproj" />
+  <Project Path="PowerPortalsPro.Dataverse.Linq/PowerPortalsPro.Dataverse.Linq.csproj" />
 </Solution>
