@@ -103,14 +103,25 @@ internal class DataverseQueryProviderAsync<T> : DataverseQueryProvider<T>, IAsyn
     private async Task<List<Entity>> RetrieveQueryAsync(FetchXmlQuery query, CancellationToken cancellationToken)
     {
         var results = new List<Entity>();
+        var recordCountInvoked = false;
+
         await PagedFetchAsync(FetchXmlBuilder.Build(query),
             expr => _asyncService.RetrieveMultipleAsync(expr),
-            (response, _) =>
+            async (response, _) =>
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                if (!recordCountInvoked)
+                {
+                    if (query.OnRecordCountAsync != null)
+                        await query.OnRecordCountAsync(new RecordCountArguments(response.TotalRecordCount, response.TotalRecordCountLimitExceeded));
+                    else
+                        query.OnRecordCount?.Invoke(new RecordCountArguments(response.TotalRecordCount, response.TotalRecordCountLimitExceeded));
+                    recordCountInvoked = true;
+                }
                 results.AddRange(response.Entities);
                 return response.MoreRecords;
             });
+
         return results;
     }
 

@@ -40,6 +40,8 @@ internal static class FetchXmlBuilder
                 string.Join(",", query.QueryHints.Select(h => h.ToFetchXmlString()))));
         if (query.UseRawOrderBy)
             fetchElement.Add(new XAttribute("useraworderby", "true"));
+        if (query.ReturnTotalRecordCount)
+            fetchElement.Add(new XAttribute("returntotalrecordcount", "true"));
 
         fetchElement.Add(BuildEntity(query));
         return fetchElement.ToString();

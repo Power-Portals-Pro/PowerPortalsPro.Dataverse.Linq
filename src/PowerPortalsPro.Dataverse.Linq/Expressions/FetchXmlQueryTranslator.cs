@@ -1,6 +1,6 @@
-using PowerPortalsPro.Dataverse.Linq.Model;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
+using PowerPortalsPro.Dataverse.Linq.Model;
 using System.Linq.Expressions;
 using System.Reflection;
 
@@ -282,6 +282,16 @@ internal static class FetchXmlQueryTranslator
                         // Marker only — the join handler reads this via HasWithFirstRow().
                         // Just recurse into the source.
                         TranslateCore(sceCall.Arguments[0], ctx);
+                        return;
+                    case nameof(ServiceClientExtensions.ReturnRecordCount):
+                        TranslateCore(sceCall.Arguments[0], ctx);
+                        ctx.Query.ReturnTotalRecordCount = true;
+                        ctx.Query.OnRecordCount = (Action<RecordCountArguments>)((ConstantExpression)sceCall.Arguments[1]).Value!;
+                        return;
+                    case "ReturnRecordCountAsync":
+                        TranslateCore(sceCall.Arguments[0], ctx);
+                        ctx.Query.ReturnTotalRecordCount = true;
+                        ctx.Query.OnRecordCountAsync = (Func<RecordCountArguments, Task>)((ConstantExpression)sceCall.Arguments[1]).Value!;
                         return;
                     default:
                         throw new NotSupportedException(
@@ -1035,15 +1045,15 @@ internal static class FetchXmlQueryTranslator
         // Build the underscore pattern and determine the like/not-like operator
         var (condOp, suffix) = op switch
         {
-            ConditionOperator.Equal => (ConditionOperator.Like, ""),
-            ConditionOperator.NotEqual => (ConditionOperator.NotLike, ""),
+            ConditionOperator.Equal => (ConditionOperator.Like, string.Empty),
+            ConditionOperator.NotEqual => (ConditionOperator.NotLike, string.Empty),
             ConditionOperator.GreaterThan => (ConditionOperator.Like, "_%"),
             ConditionOperator.GreaterEqual => (ConditionOperator.Like, "%"),
             ConditionOperator.LessThan => (ConditionOperator.NotLike, "%"),
             ConditionOperator.LessEqual => (ConditionOperator.NotLike, "_%"),
             _ => throw new NotSupportedException($"Unsupported operator for string.Length: {op}")
         };
-        var pattern = new string('_', lengthValue) + suffix;
+        var pattern = $"{(new string('_', lengthValue))}{suffix}";
 
         filter.Conditions.Add(new FetchCondition
         {

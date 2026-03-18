@@ -59,6 +59,25 @@ public static partial class ServiceClientExtensions
     }
 
     /// <summary>
+    /// Adds the FetchXml <c>returntotalrecordcount</c> attribute to the query and registers
+    /// an async callback that will be invoked with the total record count after the first page of
+    /// results is retrieved from Dataverse.
+    /// </summary>
+    public static IQueryable<TElement> ReturnRecordCountAsync<TElement>(
+        this IQueryable<TElement> queryable,
+        Func<RecordCountArguments, Task> onRecordCount)
+    {
+        var expression = Expression.Call(
+            typeof(ServiceClientExtensions),
+            nameof(ReturnRecordCountAsync),
+            [typeof(TElement)],
+            queryable.Expression,
+            Expression.Constant(onRecordCount));
+
+        return queryable.Provider.CreateQuery<TElement>(expression);
+    }
+
+    /// <summary>
     /// Asynchronously returns the first element of the sequence.
     /// Throws <see cref="InvalidOperationException"/> if the sequence is empty.
     /// </summary>

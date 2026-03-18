@@ -216,6 +216,25 @@ public static partial class ServiceClientExtensions
     }
 
     /// <summary>
+    /// Adds the FetchXml <c>returntotalrecordcount</c> attribute to the query and registers
+    /// a callback that will be invoked with the total record count after the first page of
+    /// results is retrieved from Dataverse.
+    /// </summary>
+    public static IQueryable<TElement> ReturnRecordCount<TElement>(
+        this IQueryable<TElement> queryable,
+        Action<RecordCountArguments> onRecordCount)
+    {
+        var expression = Expression.Call(
+            typeof(ServiceClientExtensions),
+            nameof(ReturnRecordCount),
+            [typeof(TElement)],
+            queryable.Expression,
+            Expression.Constant(onRecordCount));
+
+        return queryable.Provider.CreateQuery<TElement>(expression);
+    }
+
+    /// <summary>
     /// Counts non-null values of the column projected by a preceding <c>Select</c>.
     /// Translates to FetchXml <c>aggregate="countcolumn"</c>.
     /// Usage: <c>query.Select(x => x.SomeColumn).CountColumn()</c>

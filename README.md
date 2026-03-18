@@ -627,6 +627,7 @@ Configure [FetchXml attributes](https://learn.microsoft.com/en-us/power-apps/dev
 | `.WithUseRawOrderBy()` | `useraworderby` | Sort choice columns by integer value |
 | `.WithFirstRow()` | `matchfirstrowusingcrossapply` | On join inner source: return only the first matching child row |
 | `.WithNoLock()` | `no-lock` | Deprecated, no effect |
+| `.ReturnRecordCount(callback)` | `returntotalrecordcount` | [Total record count](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/fetchxml/count-rows) via callback |
 
 ```csharp
 await service.Queryable<Account>()
@@ -637,6 +638,36 @@ await service.Queryable<Account>()
 ```
 
 Available `SqlQueryHint` values: `ForceOrder`, `DisableRowGoal`, `EnableOptimizerHotfixes`, `LoopJoin`, `MergeJoin`, `HashJoin`, `NoPerformanceSpool`, `EnableHistAmendmentForAscKeys`.
+
+### ReturnRecordCount / ReturnRecordCountAsync
+
+Adds `returntotalrecordcount="true"` to the FetchXml query and invokes a callback with the total record count after the first page of results is retrieved. This is useful when you need to know the total number of matching rows without fetching them all — for example, to display a total count alongside a paged result set.
+
+The callback receives a `RecordCountArguments` record containing `TotalRecordCount` (the total number of matching rows) and `TotalRecordCountLimitExceeded` (whether the count exceeds the 50,000 row limit).
+
+Both methods are chainable and can be combined with any other query operators.
+
+```csharp
+// Sync callback
+RecordCountArguments? countArgs = null;
+var results = service.Queryable<Account>()
+    .Where(a => a.StateCode == 0)
+    .ReturnRecordCount(args => countArgs = args)
+    .ToList();
+
+Console.WriteLine($"Showing {results.Count} of {countArgs!.TotalRecordCount} total records");
+
+// Async callback (.NET 8, .NET 10+)
+RecordCountArguments? countArgs = null;
+var results = await service.Queryable<Account>()
+    .Where(a => a.StateCode == 0)
+    .ReturnRecordCountAsync(async args =>
+    {
+        countArgs = args;
+        await Task.CompletedTask;
+    })
+    .ToListAsync();
+```
 
 ## Inspect Generated FetchXml
 
@@ -671,6 +702,7 @@ All query execution methods have async counterparts. These are only available wh
 | `.Average()` | `.AverageAsync()` |
 | `.CountColumn()` | `.CountColumnAsync()` |
 | `.ForEachPage(action)` | `.ForEachPageAsync(func)` |
+| `.ReturnRecordCount(action)` | `.ReturnRecordCountAsync(func)` |
 
 `SumAsync` and `AverageAsync` have overloads for `int`, `int?`, `decimal`, and `decimal?`. `FirstAsync`, `FirstOrDefaultAsync`, `SingleAsync`, `SingleOrDefaultAsync`, and `CountAsync` have overloads accepting a predicate.
 

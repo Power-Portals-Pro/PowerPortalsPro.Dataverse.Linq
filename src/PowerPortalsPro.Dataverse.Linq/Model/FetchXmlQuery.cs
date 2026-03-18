@@ -43,6 +43,9 @@ internal sealed class FetchXmlQuery
     public int? Page { get; set; }
     public bool Distinct { get; set; }
     public bool Aggregate { get; set; }
+    public bool ReturnTotalRecordCount { get; set; }
+    public Action<RecordCountArguments>? OnRecordCount { get; set; }
+    public Func<RecordCountArguments, Task>? OnRecordCountAsync { get; set; }
 
     /// <summary>
     /// The terminal operator that determines how the result set is returned

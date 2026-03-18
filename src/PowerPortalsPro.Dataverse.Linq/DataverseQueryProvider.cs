@@ -47,7 +47,7 @@ internal class DataverseQueryProvider<T> : IQueryProvider where T : Entity
     {
         var query = FetchXmlQueryTranslator.Translate<T>(expression, Columns, EntityLogicalName, Service);
         var fetchXml = FetchXmlBuilder.Build(query);
-        var entities = RetrieveAll(fetchXml);
+        var entities = RetrieveAll(fetchXml, query.OnRecordCount);
 
         // Aggregate terminal operator (Min, Max, Sum, Average, Count)
         if (query.TerminalOperator.IsAggregate())
@@ -76,7 +76,7 @@ internal class DataverseQueryProvider<T> : IQueryProvider where T : Entity
     {
         var query = FetchXmlQueryTranslator.Translate<T>(expression, Columns, EntityLogicalName, Service);
         var fetchXml = FetchXmlBuilder.Build(query);
-        return RetrieveAll(fetchXml).Select(e => e.ToEntity<T>()).ToList();
+        return RetrieveAll(fetchXml, query.OnRecordCount).Select(e => e.ToEntity<T>()).ToList();
     }
 
     internal void ForEachPage<TElement>(
@@ -103,15 +103,22 @@ internal class DataverseQueryProvider<T> : IQueryProvider where T : Entity
     // Paged retrieval
     // -------------------------------------------------------------------------
 
-    protected List<Entity> RetrieveAll(string baseFetchXml) =>
-        RetrieveWithPaging(baseFetchXml, expr => Service.RetrieveMultiple(expr));
+    protected List<Entity> RetrieveAll(string baseFetchXml, Action<RecordCountArguments>? onRecordCount = null) =>
+        RetrieveWithPaging(baseFetchXml, expr => Service.RetrieveMultiple(expr), onRecordCount);
 
     protected static List<Entity> RetrieveWithPaging(
-        string baseFetchXml, Func<FetchExpression, EntityCollection> retrieve)
+        string baseFetchXml, Func<FetchExpression, EntityCollection> retrieve,
+        Action<RecordCountArguments>? onRecordCount = null)
     {
         var results = new List<Entity>();
+        var recordCountInvoked = false;
         PagedFetch(baseFetchXml, retrieve, (response, _) =>
         {
+            if (onRecordCount != null && !recordCountInvoked)
+            {
+                onRecordCount(new RecordCountArguments(response.TotalRecordCount, response.TotalRecordCountLimitExceeded));
+                recordCountInvoked = true;
+            }
             results.AddRange(response.Entities);
             return response.MoreRecords;
         });
