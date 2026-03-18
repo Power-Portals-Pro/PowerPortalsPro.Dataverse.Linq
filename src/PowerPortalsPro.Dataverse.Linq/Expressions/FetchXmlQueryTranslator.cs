@@ -330,9 +330,11 @@ internal static class FetchXmlQueryTranslator
                 ctx.InnerEntityProperty is not null
                     ? lambda.Parameters[0].Type.GetProperty(ctx.InnerEntityProperty)?.PropertyType
                     : null);
-            ctx.Query.Projector = BuildProjector(lambda, leftJoinResolver);
-            ctx.Query.InnerEntityType = ctx.OuterEntityType; // signals ProjectEntities to use raw Entity
-            ctx.Query.ProjectionType = lambda.ReturnType;
+            // Build materializer (new path)
+            ctx.Query.Materializer = MaterializerBuilder.BuildJoinMaterializer(
+                lambda,
+                expr => leftJoinResolver(expr) is { } r ? (r.LinkAlias, r.EntityType) : null,
+                ctx.PrimaryKeyResolver);
         }
         else
         {
@@ -356,14 +358,15 @@ internal static class FetchXmlQueryTranslator
                 // Rewrite the projector to extract aliased values for CountChildren() calls
                 var rewriter = new CountChildrenRewriter(lambda.Parameters[0]);
                 var rewritten = rewriter.Visit(lambda.Body);
-                ctx.Query.Projector = Expression.Lambda(rewritten, lambda.Parameters).Compile();
+                var compiled = Expression.Lambda(rewritten, lambda.Parameters).Compile();
+                ctx.Query.Materializer = MaterializerBuilder.BuildSimpleMaterializer(
+                    compiled, lambda.ReturnType, ctx.RootEntityType);
             }
             else
             {
-                ctx.Query.Projector = lambda.Compile();
+                ctx.Query.Materializer = MaterializerBuilder.BuildSimpleMaterializer(
+                    lambda.Compile(), lambda.ReturnType, ctx.RootEntityType);
             }
-
-            ctx.Query.ProjectionType = lambda.ReturnType;
         }
     }
 
@@ -429,8 +432,12 @@ internal static class FetchXmlQueryTranslator
             }
         }
 
-        ctx.Query.Projector = BuildProjector(lambda, CreateJoinResolver(ctx.JoinMappings!));
-        ctx.Query.ProjectionType = lambda.ReturnType;
+        // Build materializer (new path)
+        var joinResolver = CreateJoinResolver(ctx.JoinMappings!);
+        ctx.Query.Materializer = MaterializerBuilder.BuildJoinMaterializer(
+            lambda,
+            expr => joinResolver(expr) is { } r ? (r.LinkAlias, r.EntityType) : null,
+            ctx.PrimaryKeyResolver);
     }
 
     /// <summary>
@@ -1409,8 +1416,7 @@ internal static class FetchXmlQueryTranslator
         }
 
         ctx.Query.Aggregate = true;
-        ctx.Query.Projector = null;
-        ctx.Query.ProjectionType = null;
+        ctx.Query.Materializer = null;
     }
 
     // -------------------------------------------------------------------------
@@ -1619,7 +1625,7 @@ internal static class FetchXmlQueryTranslator
                     DateGrouping = keyProp.DateGrouping
                 }, keyProp.EntityAlias);
             }
-            else if (arg is MethodCallExpression mc)
+            else if (arg is MethodCallExpression mc && _aggregateFunctionMap.ContainsKey(mc.Method.Name))
             {
                 var (attrName, aggregateFunc, entityAlias) = ResolveGroupAggregate(mc, ctx);
                 AddGroupAttribute(ctx, new FetchAttribute
@@ -1629,13 +1635,24 @@ internal static class FetchXmlQueryTranslator
                     Aggregate = aggregateFunc
                 }, entityAlias);
             }
+            else if (ContainsAggregate(argExpressions[i]))
+            {
+                // Expression wraps aggregates (e.g. CalculateValue(g.Count()))
+                // — rewrite nested aggregates to ExtractValue calls
+                var rewritten = RewriteNestedAggregates(argExpressions[i], alias, entityParam, extractMethod, ctx);
+                extractArgs.Add(rewritten);
+                continue;
+            }
             else
             {
-                throw new NotSupportedException(
-                    $"Unsupported expression in grouped projection at member '{memberNames[i]}'.");
+                // Purely computed expression (e.g. Guid.NewGuid(), constants)
+                // — pass through to the projector as-is
+                extractArgs.Add(argExpressions[i]);
+                continue;
             }
 
-            // Build projector argument
+            // Build projector argument that extracts from the entity result
+            // (for key, composite key, and aggregate branches that didn't continue)
             extractArgs.Add(
                 Expression.Call(
                     extractMethod.MakeGenericMethod(memberType),
@@ -1682,8 +1699,74 @@ internal static class FetchXmlQueryTranslator
             projectorBody = Expression.New(ne.Constructor!, extractArgs);
         }
 
-        ctx.Query.Projector = Expression.Lambda(projectorBody, entityParam).Compile();
-        ctx.Query.ProjectionType = ne.Type;
+        // Build materializer by walking the projectorBody and replacing ExtractValue calls
+        // with parameter placeholders. Pass-through expressions (Guid.NewGuid(), constants, etc.)
+        // are kept as-is inside the compiled projector.
+        var aliasMap = new Dictionary<string, MaterializerBuilder.GroupedSlotInfo>();
+        CollectExtractValueAliases(projectorBody, entityParam, aliasMap);
+        ctx.Query.Materializer = MaterializerBuilder.BuildGroupedMaterializer(
+            lambda, projectorBody, entityParam, aliasMap);
+    }
+
+    /// <summary>
+    /// Walks an expression tree and collects all alias strings used in
+    /// <c>AggregateProjection.ExtractValue&lt;T&gt;(entity, alias)</c> calls.
+    /// </summary>
+    private static void CollectExtractValueAliases(
+        Expression expr, ParameterExpression entityParam,
+        Dictionary<string, MaterializerBuilder.GroupedSlotInfo> aliasMap)
+    {
+        switch (expr)
+        {
+            case MethodCallExpression mc
+                when mc.Method.IsGenericMethod
+                && mc.Method.GetGenericMethodDefinition() == typeof(AggregateProjection)
+                    .GetMethod(nameof(AggregateProjection.ExtractValue))!
+                && mc.Arguments.Count == 2
+                && mc.Arguments[0] == entityParam
+                && mc.Arguments[1] is ConstantExpression { Value: string alias }:
+                if (!aliasMap.ContainsKey(alias))
+                {
+                    aliasMap[alias] = new MaterializerBuilder.GroupedSlotInfo
+                    {
+                        Alias = alias,
+                        ValueType = mc.Method.GetGenericArguments()[0],
+                    };
+                }
+                break;
+
+            case NewExpression ne:
+                foreach (var arg in ne.Arguments)
+                    CollectExtractValueAliases(arg, entityParam, aliasMap);
+                break;
+
+            case MemberInitExpression init:
+                foreach (var binding in init.Bindings.OfType<MemberAssignment>())
+                    CollectExtractValueAliases(binding.Expression, entityParam, aliasMap);
+                break;
+
+            case UnaryExpression unary:
+                CollectExtractValueAliases(unary.Operand, entityParam, aliasMap);
+                break;
+
+            case BinaryExpression binary:
+                CollectExtractValueAliases(binary.Left, entityParam, aliasMap);
+                CollectExtractValueAliases(binary.Right, entityParam, aliasMap);
+                break;
+
+            case MethodCallExpression mc:
+                if (mc.Object is not null)
+                    CollectExtractValueAliases(mc.Object, entityParam, aliasMap);
+                foreach (var arg in mc.Arguments)
+                    CollectExtractValueAliases(arg, entityParam, aliasMap);
+                break;
+
+            case ConditionalExpression cond:
+                CollectExtractValueAliases(cond.Test, entityParam, aliasMap);
+                CollectExtractValueAliases(cond.IfTrue, entityParam, aliasMap);
+                CollectExtractValueAliases(cond.IfFalse, entityParam, aliasMap);
+                break;
+        }
     }
 
     /// <summary>
@@ -1766,6 +1849,91 @@ internal static class FetchXmlQueryTranslator
     /// <summary>
     /// Routes a FetchOrder to the correct entity or link-entity based on alias.
     /// </summary>
+    /// <summary>
+    /// Returns true if the expression contains any aggregate method calls
+    /// (e.g. <c>CalculateValue(g.Count())</c> contains <c>Count</c>).
+    /// </summary>
+    private static bool ContainsAggregate(Expression expr)
+    {
+        return expr switch
+        {
+            UnaryExpression { Operand: var op } => ContainsAggregate(op),
+            MethodCallExpression mc when _aggregateFunctionMap.ContainsKey(mc.Method.Name) => true,
+            MethodCallExpression mc => mc.Arguments.Any(ContainsAggregate)
+                || (mc.Object is not null && ContainsAggregate(mc.Object)),
+            _ => false
+        };
+    }
+
+    /// <summary>
+    /// Rewrites an expression by replacing any nested aggregate method calls
+    /// (e.g. <c>g.Count()</c>) with <c>ExtractValue</c> calls, and registering
+    /// the aggregates as FetchXml attributes. Non-aggregate expressions are left as-is.
+    /// </summary>
+    private static Expression RewriteNestedAggregates(
+        Expression expr, string baseAlias, ParameterExpression entityParam,
+        MethodInfo extractMethod, TranslationContext ctx)
+    {
+        var rewriter = new AggregateSubExpressionRewriter(baseAlias, entityParam, extractMethod, ctx);
+        return rewriter.Visit(expr);
+    }
+
+    private sealed class AggregateSubExpressionRewriter : ExpressionVisitor
+    {
+        private readonly string _baseAlias;
+        private readonly ParameterExpression _entityParam;
+        private readonly MethodInfo _extractMethod;
+        private readonly TranslationContext _ctx;
+        private int _counter;
+
+        public AggregateSubExpressionRewriter(
+            string baseAlias, ParameterExpression entityParam,
+            MethodInfo extractMethod, TranslationContext ctx)
+        {
+            _baseAlias = baseAlias;
+            _entityParam = entityParam;
+            _extractMethod = extractMethod;
+            _ctx = ctx;
+        }
+
+        protected override Expression VisitMethodCall(MethodCallExpression node)
+        {
+            if (_aggregateFunctionMap.ContainsKey(node.Method.Name))
+            {
+                var subAlias = $"{_baseAlias}_agg{_counter++}";
+                var (attrName, aggregateFunc, entityAlias) = ResolveGroupAggregate(node, _ctx);
+                AddGroupAttribute(_ctx, new FetchAttribute
+                {
+                    Name = attrName,
+                    Alias = subAlias,
+                    Aggregate = aggregateFunc
+                }, entityAlias);
+
+                return Expression.Call(
+                    _extractMethod.MakeGenericMethod(node.Type),
+                    _entityParam,
+                    Expression.Constant(subAlias));
+            }
+
+            return base.VisitMethodCall(node);
+        }
+
+        protected override Expression VisitUnary(UnaryExpression node)
+        {
+            if (node.NodeType == ExpressionType.Convert
+                && node.Operand is MethodCallExpression mc
+                && _aggregateFunctionMap.ContainsKey(mc.Method.Name))
+            {
+                var inner = VisitMethodCall(mc);
+                return inner.Type != node.Type
+                    ? Expression.Convert(inner, node.Type)
+                    : inner;
+            }
+
+            return base.VisitUnary(node);
+        }
+    }
+
     private static void AddGroupOrder(TranslationContext ctx, FetchOrder order, string? entityAlias)
     {
         if (entityAlias is null)
@@ -2000,8 +2168,6 @@ internal static class FetchXmlQueryTranslator
             [resultLambda.Parameters[0].Name!] = new() { EntityType = outerEntityType, LinkAlias = null },
             [resultLambda.Parameters[1].Name!] = new() { EntityType = innerEntityType, LinkAlias = link.Alias }
         };
-        ctx.Query.InnerEntityType = innerEntityType;
-
         if (!resultLambda.IsTransparentIdentifier())
             HandleJoinSelect(resultLambda, ctx);
     }
@@ -2062,7 +2228,6 @@ internal static class FetchXmlQueryTranslator
         };
 
         ctx.JoinMappings = updatedMappings;
-        ctx.Query.InnerEntityType = innerEntityType;
 
         if (!resultLambda.IsTransparentIdentifier())
             HandleJoinSelect(resultLambda, ctx);
@@ -2137,9 +2302,11 @@ internal static class FetchXmlQueryTranslator
             var foldedResolver = CreateFoldedLeftJoinResolver(
                 resultSelector.Parameters[0], outerPath, outerEntityType,
                 innerParam, ctx.Query.Links[^1].Alias!);
-            ctx.Query.Projector = BuildProjector(resultSelector, foldedResolver, innerDirectParam: innerParam);
-            ctx.Query.InnerEntityType = outerEntityType;
-            ctx.Query.ProjectionType = resultSelector.ReturnType;
+            // Build materializer (new path)
+            ctx.Query.Materializer = MaterializerBuilder.BuildJoinMaterializer(
+                resultSelector,
+                expr => foldedResolver(expr) is { } r ? (r.LinkAlias, r.EntityType) : null,
+                innerDirectParam: innerParam);
         }
         else
         {
@@ -2275,7 +2442,7 @@ internal static class FetchXmlQueryTranslator
     }
 
     // -------------------------------------------------------------------------
-    // Unified projector builder
+    // Entity resolution helpers for materializer building
     // -------------------------------------------------------------------------
 
     /// <summary>
@@ -2283,34 +2450,6 @@ internal static class FetchXmlQueryTranslator
     /// <c>LinkAlias</c> is <c>null</c> for the root entity.
     /// </summary>
     private readonly record struct EntityResolution(string? LinkAlias, Type EntityType);
-
-    private static readonly MethodInfo ExtractRootValueMethod =
-        typeof(AggregateProjection).GetMethod(nameof(AggregateProjection.ExtractRootValue))!;
-    private static readonly MethodInfo ExtractValueMethod =
-        typeof(AggregateProjection).GetMethod(nameof(AggregateProjection.ExtractValue))!;
-    private static readonly MethodInfo ExtractLinkedEntityMethod =
-        typeof(AggregateProjection).GetMethod(nameof(AggregateProjection.ExtractLinkedEntity))!;
-    private static readonly MethodInfo ToEntityMethod =
-        typeof(Entity).GetMethod(nameof(Entity.ToEntity))!;
-    private static readonly MethodInfo GetAttributeValueMethod =
-        typeof(Entity).GetMethod(nameof(Entity.GetAttributeValue))!;
-
-    /// <summary>
-    /// Builds a single-parameter <c>(Entity e) => ...</c> projector by rewriting
-    /// entity property accesses using the supplied entity resolution delegate.
-    /// Replaces OuterEntityRewriter, LeftJoinProjectorRewriter,
-    /// FoldedLeftJoinProjectorRewriter, and MultiJoinProjectorRewriter.
-    /// </summary>
-    private static Delegate BuildProjector(
-        LambdaExpression lambda,
-        Func<Expression, EntityResolution?> resolveEntity,
-        ParameterExpression? innerDirectParam = null)
-    {
-        var entityParam = Expression.Parameter(typeof(Entity), "e");
-        var rewriter = new UnifiedProjectorRewriter(entityParam, resolveEntity, innerDirectParam);
-        var newBody = rewriter.Visit(lambda.Body);
-        return Expression.Lambda(newBody, entityParam).Compile();
-    }
 
     /// <summary>
     /// Creates an entity resolver for inner-join scenarios using the JoinMappings dictionary.
@@ -2388,113 +2527,6 @@ internal static class FetchXmlQueryTranslator
 
             return null;
         };
-    }
-
-    /// <summary>
-    /// Unified expression visitor that rewrites entity property accesses using a
-    /// delegate-based entity resolution strategy. Handles:
-    /// <list type="bullet">
-    /// <item>Property access with [AttributeLogicalName] → ExtractRootValue or ExtractValue</item>
-    /// <item>Two-level unwrap (.Id/.Value on navigation property) → same pattern</item>
-    /// <item>Whole entity reference → ToEntity or ExtractLinkedEntity</item>
-    /// <item>Direct inner parameter reference (folded left join) → ExtractLinkedEntity</item>
-    /// </list>
-    /// </summary>
-    private sealed class UnifiedProjectorRewriter(
-        ParameterExpression entityParam,
-        Func<Expression, EntityResolution?> resolveEntity,
-        ParameterExpression? innerDirectParam) : ExpressionVisitor
-    {
-        protected override Expression VisitMember(MemberExpression node)
-        {
-            // 1. Property access with [AttributeLogicalName]: entity.Property
-            if (node.Expression is not null && resolveEntity(node.Expression) is { } res)
-            {
-                var attrName = (node.Member as PropertyInfo)
-                    ?.GetCustomAttribute<AttributeLogicalNameAttribute>()?.LogicalName;
-
-                if (attrName is not null)
-                {
-                    var resultType = (node.Member as PropertyInfo)?.PropertyType ?? node.Type;
-
-                    if (res.LinkAlias is null)
-                    {
-                        return Expression.Call(
-                            ExtractRootValueMethod.MakeGenericMethod(resultType),
-                            entityParam,
-                            Expression.Constant(attrName));
-                    }
-
-                    return Expression.Call(
-                        ExtractValueMethod.MakeGenericMethod(resultType),
-                        entityParam,
-                        Expression.Constant($"{res.LinkAlias}.{attrName}"));
-                }
-            }
-
-            // 2. Two-level unwrap: entity.NavProp.Id/.Value
-            if (node.Member.Name is "Id" or "Value"
-                && node.Expression is MemberExpression parentAccess
-                && parentAccess.Expression is not null
-                && resolveEntity(parentAccess.Expression) is { } res2)
-            {
-                var parentProp = parentAccess.Member as PropertyInfo;
-                var attrName = parentProp?.GetCustomAttribute<AttributeLogicalNameAttribute>()?.LogicalName;
-
-                if (attrName is not null)
-                {
-                    var resultType = (node.Member as PropertyInfo)?.PropertyType ?? node.Type;
-
-                    // Root entity navigation property: use GetAttributeValue + member access
-                    // to preserve the original navigation semantics (e.g. EntityReference.Id)
-                    if (res2.LinkAlias is null)
-                    {
-                        var parentType = parentProp!.PropertyType;
-                        var getParent = Expression.Call(entityParam,
-                            GetAttributeValueMethod.MakeGenericMethod(parentType),
-                            Expression.Constant(attrName));
-                        return Expression.MakeMemberAccess(getParent, node.Member);
-                    }
-
-                    return Expression.Call(
-                        ExtractValueMethod.MakeGenericMethod(resultType),
-                        entityParam,
-                        Expression.Constant($"{res2.LinkAlias}.{attrName}"));
-                }
-            }
-
-            // 3. Whole entity reference (the node itself resolves to an entity)
-            if (node.Expression is not null && resolveEntity(node) is { } wholeRes)
-            {
-                var entityType = (node.Member as PropertyInfo)?.PropertyType ?? node.Type;
-                if (wholeRes.LinkAlias is null)
-                    return Expression.Call(entityParam, ToEntityMethod.MakeGenericMethod(entityType));
-                return Expression.Call(
-                    ExtractLinkedEntityMethod.MakeGenericMethod(entityType),
-                    entityParam,
-                    Expression.Constant(wholeRes.LinkAlias));
-            }
-
-            return base.VisitMember(node);
-        }
-
-        protected override Expression VisitParameter(ParameterExpression node)
-        {
-            // Whole entity as a direct parameter: resolve via the entity resolver
-            if (resolveEntity(node) is { } paramRes)
-            {
-                if (paramRes.LinkAlias is not null)
-                    return Expression.Call(
-                        ExtractLinkedEntityMethod.MakeGenericMethod(node.Type),
-                        entityParam,
-                        Expression.Constant(paramRes.LinkAlias));
-
-                // Root entity
-                return Expression.Call(entityParam, ToEntityMethod.MakeGenericMethod(node.Type));
-            }
-
-            return base.VisitParameter(node);
-        }
     }
 
     // -------------------------------------------------------------------------

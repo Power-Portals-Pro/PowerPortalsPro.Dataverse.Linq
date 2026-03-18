@@ -472,6 +472,29 @@ public partial class GroupByIntegrationTests(ServiceClientFixture fixture) : Int
             r.MostRecent.Should().NotBeNull();
         });
     }
+
+    [Fact]
+    public void GroupBy_MemberInitWithComputedValue_PassesThroughNonAggregate()
+    {
+        var results = (from c in Service.Queryable<CustomContact>()
+                       group c by c.ParentAccount into g
+                       select new GroupByInitWithComputedResult
+                       {
+                           Id = Guid.NewGuid(),
+                           Account = g.Key,
+                           Count = g.Count(),
+                       }).ToList();
+
+        results.Should().NotBeEmpty();
+        results.Should().AllSatisfy(r =>
+        {
+            r.Id.Should().NotBe(Guid.Empty);
+            r.Account.Should().NotBeNull();
+            r.Count.Should().BeGreaterThan(0);
+        });
+        // Each row should have a unique generated Id
+        results.Select(r => r.Id).Distinct().Should().HaveCount(results.Count);
+    }
 }
 
 internal class GroupByInitResult
@@ -486,4 +509,11 @@ internal class GroupByInitWithConvertResult
     public EntityReference? Account { get; set; }
     public int? Count { get; set; }
     public DateTime? MostRecent { get; set; }
+}
+
+internal class GroupByInitWithComputedResult
+{
+    public Guid Id { get; set; }
+    public EntityReference? Account { get; set; }
+    public int Count { get; set; }
 }

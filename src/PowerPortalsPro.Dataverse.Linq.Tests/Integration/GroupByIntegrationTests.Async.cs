@@ -208,6 +208,28 @@ public partial class GroupByIntegrationTests
     }
 
     [Fact]
+    public async Task GroupByAsync_MemberInitWithComputedValue_PassesThroughNonAggregate()
+    {
+        var results = await (from c in Service.Queryable<CustomContact>()
+                             group c by c.ParentAccount into g
+                             select new GroupByInitWithComputedResult
+                             {
+                                 Id = Guid.NewGuid(),
+                                 Account = g.Key,
+                                 Count = g.Count(),
+                             }).ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Should().AllSatisfy(r =>
+        {
+            r.Id.Should().NotBe(Guid.Empty);
+            r.Account.Should().NotBeNull();
+            r.Count.Should().BeGreaterThan(0);
+        });
+        results.Select(r => r.Id).Distinct().Should().HaveCount(results.Count);
+    }
+
+    [Fact]
     public async Task GroupByAsync_MemberInitWithConvertedType_ReturnsTypedResults()
     {
         var results = await (from c in Service.Queryable<CustomContact>()

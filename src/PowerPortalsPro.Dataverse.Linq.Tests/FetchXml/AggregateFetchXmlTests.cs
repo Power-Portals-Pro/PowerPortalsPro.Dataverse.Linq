@@ -984,6 +984,33 @@ public class AggregateFetchXmlTests : FetchXmlTestBase
             </fetch>
             """);
     }
+
+    // -------------------------------------------------------------------------
+    // Non-aggregate expressions in grouped select (e.g. Guid.NewGuid())
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_GroupByMemberInitWithComputedValue_IgnoresNonAggregateExpression()
+    {
+        var fetchXml = (from c in _service.Queryable<CustomContact>()
+                        group c by c.ParentAccount into g
+                        select new GroupInitWithComputedResult
+                        {
+                            Id = Guid.NewGuid(),
+                            Account = g.Key,
+                            Count = g.Count(),
+                        }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="new_customcontact">
+                <attribute name="new_parentaccount" alias="account" groupby="true" />
+                <attribute name="new_customcontactid" alias="count" aggregate="count" />
+              </entity>
+            </fetch>
+            """);
+    }
 }
 
 internal record GroupTestResult(Guid AccountId, int Year, int Month, int Count);
@@ -1003,4 +1030,11 @@ internal class GroupInitWithConvertResult
     public EntityReference? Account { get; set; }
     public int? Count { get; set; }
     public DateTime? MostRecent { get; set; }
+}
+
+internal class GroupInitWithComputedResult
+{
+    public Guid Id { get; set; }
+    public EntityReference? Account { get; set; }
+    public int Count { get; set; }
 }

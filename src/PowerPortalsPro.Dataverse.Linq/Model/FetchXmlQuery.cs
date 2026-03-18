@@ -51,21 +51,9 @@ internal sealed class FetchXmlQuery
     public QueryTerminalOperator TerminalOperator { get; set; } = QueryTerminalOperator.List;
 
     /// <summary>
-    /// Compiled delegate that projects a raw Entity (or join result) into the
-    /// final TElement shape requested by the LINQ query.
-    /// For simple selects and left joins: single-parameter (outer entity → result).
-    /// For inner joins: two-parameter (outer entity, inner entity → result).
+    /// Materializer-based projection. When set, the provider extracts data from
+    /// each raw <c>Entity</c> result according to the materializer's slots and
+    /// calls the compiled projector to produce the final <c>TElement</c>.
     /// </summary>
-    public Delegate? Projector { get; set; }
-
-    /// <summary>
-    /// The CLR type that the projector produces.
-    /// </summary>
-    public Type? ProjectionType { get; set; }
-
-    /// <summary>
-    /// Set for join queries to signal the provider that the <see cref="Projector"/>
-    /// expects a raw <c>Entity</c> with aliased attributes (not a typed entity).
-    /// </summary>
-    public Type? InnerEntityType { get; set; }
+    public MaterializerInfo? Materializer { get; set; }
 }
