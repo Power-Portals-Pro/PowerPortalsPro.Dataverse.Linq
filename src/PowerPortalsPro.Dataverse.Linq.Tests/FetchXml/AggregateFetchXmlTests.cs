@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Microsoft.Xrm.Sdk;
 using PowerPortalsPro.Dataverse.Linq.Tests.Proxies;
 
 namespace PowerPortalsPro.Dataverse.Linq.Tests.FetchXml;
@@ -902,6 +903,64 @@ public class AggregateFetchXmlTests : FetchXmlTestBase
             </fetch>
             """);
     }
+    // -------------------------------------------------------------------------
+    // MemberInitExpression (object initializer) in grouped select
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_GroupByWithMemberInitProjection_GeneratesCorrectFetchXml()
+    {
+        var fetchXml = (from c in _service.Queryable<CustomContact>()
+                        group c by c.ParentAccount into g
+                        select new GroupInitResult
+                        {
+                            Account = g.Key,
+                            Count = g.Count(),
+                        }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="new_customcontact">
+                <attribute name="new_parentaccount" alias="account" groupby="true" />
+                <attribute name="new_customcontactid" alias="count" aggregate="count" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_GroupByWithMemberInitAndOrderBy_GeneratesCorrectFetchXml()
+    {
+        var fetchXml = (from c in _service.Queryable<CustomContact>()
+                        group c by c.ParentAccount into g
+                        orderby g.Count() descending
+                        select new GroupInitResult
+                        {
+                            Account = g.Key,
+                            Count = g.Count(),
+                            MostRecent = g.Max(x => x.CreatedOn),
+                        }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="new_customcontact">
+                <attribute name="new_parentaccount" alias="account" groupby="true" />
+                <attribute name="new_customcontactid" alias="count" aggregate="count" />
+                <attribute name="createdon" alias="mostrecent" aggregate="max" />
+                <order alias="count" descending="true" />
+              </entity>
+            </fetch>
+            """);
+    }
 }
 
 internal record GroupTestResult(Guid AccountId, int Year, int Month, int Count);
+
+internal class GroupInitResult
+{
+    public EntityReference? Account { get; set; }
+    public int Count { get; set; }
+    public DateTime? MostRecent { get; set; }
+}

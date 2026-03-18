@@ -401,4 +401,59 @@ public partial class GroupByIntegrationTests(ServiceClientFixture fixture) : Int
         results.Should().NotBeEmpty();
         results.Select(r => r.MostRecent).Should().BeInAscendingOrder();
     }
+
+    // -------------------------------------------------------------------------
+    // MemberInitExpression (object initializer) in grouped select
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void GroupBy_MemberInitProjection_ReturnsTypedResults()
+    {
+        var results = (from c in Service.Queryable<CustomContact>()
+                       group c by c.ParentAccount into g
+                       select new GroupByInitResult
+                       {
+                           Account = g.Key,
+                           Count = g.Count(),
+                       }).ToList();
+
+        results.Should().NotBeEmpty();
+        results.Should().AllSatisfy(r =>
+        {
+            r.Account.Should().NotBeNull();
+            r.Account!.Id.Should().NotBe(Guid.Empty);
+            r.Count.Should().BeGreaterThan(0);
+        });
+    }
+
+    [Fact]
+    public void GroupBy_MemberInitWithOrderAndMax_ReturnsOrderedTypedResults()
+    {
+        var results = (from c in Service.Queryable<CustomContact>()
+                       group c by c.ParentAccount into g
+                       orderby g.Count() descending
+                       select new GroupByInitResult
+                       {
+                           Account = g.Key,
+                           Count = g.Count(),
+                           MostRecent = g.Max(x => x.CreatedOn),
+                       }).ToList();
+
+        results.Should().NotBeEmpty();
+        results.Select(r => r.Count).Should().BeInDescendingOrder();
+        results.Should().AllSatisfy(r =>
+        {
+            r.Account.Should().NotBeNull();
+            r.Account!.Id.Should().NotBe(Guid.Empty);
+            r.Count.Should().BeGreaterThan(0);
+            r.MostRecent.Should().NotBeNull();
+        });
+    }
+}
+
+internal class GroupByInitResult
+{
+    public EntityReference? Account { get; set; }
+    public int Count { get; set; }
+    public DateTime? MostRecent { get; set; }
 }

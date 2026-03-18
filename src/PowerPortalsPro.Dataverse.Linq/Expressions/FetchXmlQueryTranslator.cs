@@ -1534,37 +1534,55 @@ internal static class FetchXmlQueryTranslator
     {
         var body = lambda.Body;
 
-        if (body is not NewExpression ne)
-            throw new NotSupportedException("Grouped query must project into a new expression.");
+        // Normalize MemberInitExpression to work with the same loop as NewExpression.
+        // Extract member names and argument expressions from either form.
+        NewExpression ne;
+        string[] memberNames;
+        Type[] memberTypes;
+        Expression[] argExpressions;
 
-        var entityParam = Expression.Parameter(typeof(Entity), "e");
-        var extractMethod = typeof(AggregateProjection).GetMethod(nameof(AggregateProjection.ExtractValue))!;
-        var constructorArgs = new List<Expression>();
-        string? groupKeyAlias = null;
-
-        for (var i = 0; i < ne.Arguments.Count; i++)
+        if (body is MemberInitExpression init)
         {
-            var arg = ne.Arguments[i];
-
-            // Determine alias and type from Members (anonymous type) or constructor parameters (named type)
-            string alias;
-            Type memberType;
+            ne = init.NewExpression;
+            var bindings = init.Bindings.OfType<MemberAssignment>().ToList();
+            memberNames = bindings.Select(b => b.Member.Name).ToArray();
+            memberTypes = bindings.Select(b => ((PropertyInfo)b.Member).PropertyType).ToArray();
+            argExpressions = bindings.Select(b => b.Expression).ToArray();
+        }
+        else if (body is NewExpression newExpr)
+        {
+            ne = newExpr;
+            argExpressions = ne.Arguments.ToArray();
             if (ne.Members is not null)
             {
-                var member = ne.Members[i];
-                var memberName = member is MethodInfo { Name: ['g', 'e', 't', '_', ..] } getter
-                    ? getter.Name[4..] : member.Name;
-                alias = memberName.ToLowerInvariant();
-                memberType = member is PropertyInfo pi ? pi.PropertyType
-                    : member is MethodInfo mi ? mi.ReturnType
-                    : throw new NotSupportedException($"Unexpected member type: {member.GetType().Name}");
+                memberNames = ne.Members.Select(m => m is MethodInfo { Name: ['g', 'e', 't', '_', ..] } getter
+                    ? getter.Name[4..] : m.Name).ToArray();
+                memberTypes = ne.Members.Select(m => m is PropertyInfo pi ? pi.PropertyType
+                    : m is MethodInfo mi ? mi.ReturnType
+                    : throw new NotSupportedException($"Unexpected member type: {m.GetType().Name}")).ToArray();
             }
             else
             {
-                var ctorParam = ne.Constructor!.GetParameters()[i];
-                alias = ctorParam.Name!.ToLowerInvariant();
-                memberType = ctorParam.ParameterType;
+                var ctorParams = ne.Constructor!.GetParameters();
+                memberNames = ctorParams.Select(p => p.Name!).ToArray();
+                memberTypes = ctorParams.Select(p => p.ParameterType).ToArray();
             }
+        }
+        else
+        {
+            throw new NotSupportedException("Grouped query must project into a new expression or member initializer.");
+        }
+
+        var entityParam = Expression.Parameter(typeof(Entity), "e");
+        var extractMethod = typeof(AggregateProjection).GetMethod(nameof(AggregateProjection.ExtractValue))!;
+        var extractArgs = new List<Expression>();
+        string? groupKeyAlias = null;
+
+        for (var i = 0; i < argExpressions.Length; i++)
+        {
+            var arg = argExpressions[i];
+            var alias = memberNames[i].ToLowerInvariant();
+            var memberType = memberTypes[i];
 
             if (arg is MemberExpression { Member.Name: "Key" })
             {
@@ -1572,7 +1590,7 @@ internal static class FetchXmlQueryTranslator
                 // inject the constant value directly into the projector
                 if (ctx.GroupKeyAttributeName is null && ctx.GroupKeyProperties is null)
                 {
-                    constructorArgs.Add(Expression.Default(memberType));
+                    extractArgs.Add(Expression.Default(memberType));
                     continue;
                 }
 
@@ -1610,13 +1628,12 @@ internal static class FetchXmlQueryTranslator
             }
             else
             {
-                var argDesc = ne.Members is not null ? $"member '{ne.Members[i].Name}'" : $"parameter {i}";
                 throw new NotSupportedException(
-                    $"Unsupported expression in grouped projection at {argDesc}.");
+                    $"Unsupported expression in grouped projection at member '{memberNames[i]}'.");
             }
 
             // Build projector argument
-            constructorArgs.Add(
+            extractArgs.Add(
                 Expression.Call(
                     extractMethod.MakeGenericMethod(memberType),
                     entityParam,
@@ -1635,7 +1652,7 @@ internal static class FetchXmlQueryTranslator
                 }
                 else if (order.AggregateCall is not null)
                 {
-                    var result = ResolveAggregateOrderAlias(order.AggregateCall, ne, ctx);
+                    var result = ResolveAggregateOrderAlias(order.AggregateCall, argExpressions, memberNames, ctx);
                     if (result is not null)
                     {
                         AddGroupOrder(ctx, new FetchOrder { Alias = result.Value.Alias, Descending = order.Descending },
@@ -1645,11 +1662,24 @@ internal static class FetchXmlQueryTranslator
             }
         }
 
-        // Compile projector: (Entity e) => new Type(ExtractValue<T>(e, "alias"), ...)
-        var newExpr = ne.Members is not null
-            ? Expression.New(ne.Constructor!, constructorArgs, ne.Members)
-            : Expression.New(ne.Constructor!, constructorArgs);
-        ctx.Query.Projector = Expression.Lambda(newExpr, entityParam).Compile();
+        // Compile projector
+        Expression projectorBody;
+        if (body is MemberInitExpression)
+        {
+            var bindings = memberNames.Select((name, i) =>
+                Expression.Bind(ne.Type.GetProperty(name)!, extractArgs[i])).ToArray();
+            projectorBody = Expression.MemberInit(Expression.New(ne.Constructor!), bindings);
+        }
+        else if (ne.Members is not null)
+        {
+            projectorBody = Expression.New(ne.Constructor!, extractArgs, ne.Members);
+        }
+        else
+        {
+            projectorBody = Expression.New(ne.Constructor!, extractArgs);
+        }
+
+        ctx.Query.Projector = Expression.Lambda(projectorBody, entityParam).Compile();
         ctx.Query.ProjectionType = ne.Type;
     }
 
@@ -1692,7 +1722,7 @@ internal static class FetchXmlQueryTranslator
     /// entity alias where the attribute was placed.
     /// </summary>
     private static (string Alias, string? EntityAlias)? ResolveAggregateOrderAlias(
-        MethodCallExpression orderCall, NewExpression selectBody, TranslationContext ctx)
+        MethodCallExpression orderCall, Expression[] selectArgs, string[] selectMemberNames, TranslationContext ctx)
     {
         var orderMethodName = orderCall.Method.Name;
 
@@ -1704,9 +1734,9 @@ internal static class FetchXmlQueryTranslator
             orderAttrName = orderSelector.Body.GetAttributeName(ctx.PrimaryKeyResolver);
         }
 
-        for (var i = 0; i < selectBody.Arguments.Count; i++)
+        for (var i = 0; i < selectArgs.Length; i++)
         {
-            if (selectBody.Arguments[i] is not MethodCallExpression selectMc
+            if (selectArgs[i] is not MethodCallExpression selectMc
                 || selectMc.Method.Name != orderMethodName)
                 continue;
 
@@ -1719,22 +1749,7 @@ internal static class FetchXmlQueryTranslator
                     continue;
             }
 
-            // Found a match — derive the alias from the member name
-            string alias;
-            if (selectBody.Members is not null)
-            {
-                var member = selectBody.Members[i];
-                var memberName = member is MethodInfo { Name: ['g', 'e', 't', '_', ..] } getter
-                    ? getter.Name[4..] : member.Name;
-                alias = memberName.ToLowerInvariant();
-            }
-            else
-            {
-                var ctorParam = selectBody.Constructor!.GetParameters()[i];
-                alias = ctorParam.Name!.ToLowerInvariant();
-            }
-
-            // Determine which entity the aggregate was placed on
+            var alias = selectMemberNames[i].ToLowerInvariant();
             var (_, _, entityAlias) = ResolveGroupAggregate(selectMc, ctx);
             return (alias, entityAlias);
         }

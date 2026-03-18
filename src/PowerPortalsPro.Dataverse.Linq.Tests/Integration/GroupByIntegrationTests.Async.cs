@@ -158,4 +158,52 @@ public partial class GroupByIntegrationTests
         results.Should().NotBeEmpty();
         results.Select(r => r.MostRecent).Should().BeInAscendingOrder();
     }
+
+    // -------------------------------------------------------------------------
+    // MemberInitExpression (object initializer) in grouped select
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task GroupByAsync_MemberInitProjection_ReturnsTypedResults()
+    {
+        var results = await (from c in Service.Queryable<CustomContact>()
+                             group c by c.ParentAccount into g
+                             select new GroupByInitResult
+                             {
+                                 Account = g.Key,
+                                 Count = g.Count(),
+                             }).ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Should().AllSatisfy(r =>
+        {
+            r.Account.Should().NotBeNull();
+            r.Account!.Id.Should().NotBe(Guid.Empty);
+            r.Count.Should().BeGreaterThan(0);
+        });
+    }
+
+    [Fact]
+    public async Task GroupByAsync_MemberInitWithOrderAndMax_ReturnsOrderedTypedResults()
+    {
+        var results = await (from c in Service.Queryable<CustomContact>()
+                             group c by c.ParentAccount into g
+                             orderby g.Count() descending
+                             select new GroupByInitResult
+                             {
+                                 Account = g.Key,
+                                 Count = g.Count(),
+                                 MostRecent = g.Max(x => x.CreatedOn),
+                             }).ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Select(r => r.Count).Should().BeInDescendingOrder();
+        results.Should().AllSatisfy(r =>
+        {
+            r.Account.Should().NotBeNull();
+            r.Account!.Id.Should().NotBe(Guid.Empty);
+            r.Count.Should().BeGreaterThan(0);
+            r.MostRecent.Should().NotBeNull();
+        });
+    }
 }
