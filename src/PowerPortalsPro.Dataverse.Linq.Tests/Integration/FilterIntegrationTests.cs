@@ -62,4 +62,28 @@ public partial class FilterIntegrationTests(ServiceClientFixture fixture) : Inte
 
         act.Should().Throw<Exception>();
     }
+
+    // -------------------------------------------------------------------------
+    // Captured entity property — should evaluate as value, not column reference
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void Where_LookupIdEqualsCapturedEntityProperty_ReturnsResults()
+    {
+        // Retrieve any account to use as a captured variable
+        var account = Service.Queryable<CustomAccount>()
+            .Select(a => new { a.CustomAccountId })
+            .FirstOrDefault();
+
+        if (account is null)
+            return; // Skip if no test data
+
+        // This should generate a value filter, not a column-to-column (valueof) comparison
+        var contacts = Service.Queryable<CustomContact>()
+            .Where(c => c.ParentAccount.Id == account.CustomAccountId)
+            .Select(c => new { c.CustomContactId })
+            .ToList();
+
+        contacts.Should().NotBeNull();
+    }
 }

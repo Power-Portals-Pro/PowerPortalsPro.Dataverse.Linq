@@ -1245,12 +1245,43 @@ internal static class FetchXmlQueryTranslator
                 return leftResult;
         }
 
-        // Simple (non-join) resolution via GetAttributeName (includes Entity.Id when resolver is available)
-        var simple = expr.GetAttributeName(ctx.PrimaryKeyResolver);
-        if (simple is not null)
-            return new ResolvedAttribute(simple, null);
+        // Simple (non-join) resolution — resolve the attribute access and verify the entity
+        // expression traces back to a lambda ParameterExpression (not a captured closure variable).
+        // Without this check, captured entity properties like `capturedEntity.PrimaryKeyId`
+        // would be incorrectly resolved as query attributes instead of constant values.
+        var access = expr.ResolveAttributeAccess(ctx.PrimaryKeyResolver);
+        if (access is not null && IsQueryParameterAccess(access.Value.EntityExpression))
+            return new ResolvedAttribute(access.Value.AttributeName, null);
 
         return null;
+    }
+
+    /// <summary>
+    /// Returns true when the expression traces back to a <see cref="ParameterExpression"/>
+    /// (the lambda parameter representing a query entity), as opposed to a captured closure
+    /// variable which would root at a <see cref="ConstantExpression"/>.
+    /// </summary>
+    private static bool IsQueryParameterAccess(Expression expr)
+    {
+        while (true)
+        {
+            switch (expr)
+            {
+                case ParameterExpression:
+                    return true;
+                case MemberExpression { Expression: not null } m:
+                    expr = m.Expression;
+                    continue;
+                case UnaryExpression { NodeType: ExpressionType.Convert } c:
+                    expr = c.Operand;
+                    continue;
+                case MethodCallExpression { Object: not null } mc:
+                    expr = mc.Object;
+                    continue;
+                default:
+                    return false;
+            }
+        }
     }
 
     /// <summary>

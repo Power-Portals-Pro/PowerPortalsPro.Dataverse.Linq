@@ -1057,4 +1057,50 @@ public class FilterFetchXmlTests : FetchXmlTestBase
             </fetch>
             """);
     }
+
+    // -------------------------------------------------------------------------
+    // Captured entity property — should evaluate as value, not column reference
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_WhereLookupIdEqualsCapturedEntityProperty_GeneratesValueFilter()
+    {
+        var capturedAccount = new CustomAccount { CustomAccountId = Guid.NewGuid() };
+        var fetchXml = _service.Queryable<CustomContact>()
+            .Where(c => c.ParentAccount.Id == capturedAccount.CustomAccountId)
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            $"""
+            <fetch mapping="logical">
+              <entity name="new_customcontact">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_parentaccount" operator="eq" value="{capturedAccount.CustomAccountId}" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WhereAttributeEqualsCapturedEntityProperty_GeneratesValueFilter()
+    {
+        var capturedAccount = new CustomAccount { Name = "Test" };
+        var fetchXml = _service.Queryable<CustomContact>()
+            .Where(c => c.FirstName == capturedAccount.Name)
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customcontact">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_firstname" operator="eq" value="Test" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
 }
