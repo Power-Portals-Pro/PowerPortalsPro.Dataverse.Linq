@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.0.7] - 2026-03-24
+
+- Fixed an issue where columns were not being selected properly.
+
 ## [1.0.6] - 2026-03-24
 
 - Added support for multiple chained left joins.
