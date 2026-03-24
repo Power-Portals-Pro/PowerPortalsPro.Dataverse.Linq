@@ -519,6 +519,40 @@ internal static class FetchXmlQueryTranslator
                 foreach (var element in newArray.Expressions)
                     CollectJoinAttributesByAlias(element, ctx, columnsByAlias);
                 break;
+
+            case ConditionalExpression conditional:
+                CollectJoinAttributesByAlias(conditional.Test, ctx, columnsByAlias);
+                CollectJoinAttributesByAlias(conditional.IfTrue, ctx, columnsByAlias);
+                CollectJoinAttributesByAlias(conditional.IfFalse, ctx, columnsByAlias);
+                break;
+
+            // Leaf nodes that carry no attribute references
+            case ConstantExpression:
+            case ParameterExpression:
+            case DefaultExpression:
+                break;
+
+            // MemberExpression that didn't resolve to an attribute (e.g. closure variable,
+            // non-entity property) — walk into the inner expression if present.
+            case MemberExpression me:
+                if (me.Expression is not null)
+                    CollectJoinAttributesByAlias(me.Expression, ctx, columnsByAlias);
+                break;
+
+            case NewExpression ne:
+                foreach (var arg in ne.Arguments)
+                    CollectJoinAttributesByAlias(arg, ctx, columnsByAlias);
+                break;
+
+            case MemberInitExpression memberInit:
+                foreach (var binding in memberInit.Bindings)
+                    if (binding is MemberAssignment assignment)
+                        CollectJoinAttributesByAlias(assignment.Expression, ctx, columnsByAlias);
+                break;
+
+            default:
+                throw new NotSupportedException(
+                    $"Unsupported expression type '{expr.NodeType}' in join projection.");
         }
     }
 

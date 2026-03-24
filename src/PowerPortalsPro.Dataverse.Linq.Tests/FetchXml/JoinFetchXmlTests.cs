@@ -530,6 +530,41 @@ public class JoinFetchXmlTests : FetchXmlTestBase
             """);
     }
 
+    [Fact]
+    public void ToFetchXml_WithChainedLeftJoinAndTernarySelect_IncludesColumnsFromAllBranches()
+    {
+        // Ternary expressions in the select should include columns from all branches
+        var fetchXml = (from a in _service.Queryable<CustomAccount>()
+                        join c in _service.Queryable<CustomContact>()
+                            on a.CustomAccountId equals c.ParentAccount.Id into contacts
+                        from c in contacts.DefaultIfEmpty()
+                        join o in _service.Queryable<CustomOpportunity>()
+                            on a.PrimaryContact.Id equals o.Contact.Id into opportunities
+                        from o in opportunities.DefaultIfEmpty()
+                        select new
+                        {
+                            a.Name,
+                            ContactName = c != null ? c.FirstName : null,
+                            Detail = o != null ? o.Name : c != null ? c.LastName : null,
+                        }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="outer">
+                  <attribute name="new_firstname" />
+                  <attribute name="new_lastname" />
+                </link-entity>
+                <link-entity name="new_customopportunity" from="new_contact" to="new_primarycontact" alias="o" link-type="outer">
+                  <attribute name="new_name" />
+                </link-entity>
+              </entity>
+            </fetch>
+            """);
+    }
+
     // -------------------------------------------------------------------------
     // WithFirstRow — matchfirstrowusingcrossapply
     // -------------------------------------------------------------------------

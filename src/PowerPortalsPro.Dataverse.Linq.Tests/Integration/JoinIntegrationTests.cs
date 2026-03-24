@@ -150,7 +150,7 @@ public partial class JoinIntegrationTests(ServiceClientFixture fixture) : Integr
     // -------------------------------------------------------------------------
 
     [Fact]
-    public void ChainedLeftJoin_TwoLeftJoins_ReturnsProjectedProperties()
+    public void ChainedLeftJoin_TwoLeftJoins_ReturnsColumnsFromAllEntities()
     {
         var results = (from a in Service.Queryable<CustomAccount>()
                        join c in Service.Queryable<CustomContact>()
@@ -162,11 +162,26 @@ public partial class JoinIntegrationTests(ServiceClientFixture fixture) : Integr
                        select new { a.Name, ContactFirstName = c.FirstName, OpportunityName = o.Name }).ToList();
 
         results.Should().NotBeEmpty();
+
+        // Root entity columns should always be populated
         results.Should().AllSatisfy(r => r.Name.Should().NotBeNullOrEmpty());
+
+        // Contact columns should be populated for matched rows (accounts with contacts)
+        var withContacts = results.Where(r => r.ContactFirstName != null).ToList();
+        withContacts.Should().NotBeEmpty("some accounts have contacts");
+        withContacts.Should().AllSatisfy(r => r.ContactFirstName.Should().NotBeNullOrEmpty());
+
+        // Opportunity columns should be populated for matched rows (contacts with opportunities)
+        var withOpportunities = results.Where(r => r.OpportunityName != null).ToList();
+        withOpportunities.Should().NotBeEmpty("some contacts have opportunities");
+        withOpportunities.Should().AllSatisfy(r => r.OpportunityName.Should().NotBeNullOrEmpty());
+
+        // Some rows should have no contact (left join)
+        results.Should().Contain(r => r.ContactFirstName == null);
     }
 
     [Fact]
-    public void ChainedLeftJoin_MultipleLeftJoinsOnRoot_ReturnsProjectedProperties()
+    public void ChainedLeftJoin_MultipleLeftJoinsOnRoot_ReturnsColumnsFromAllEntities()
     {
         // Two left joins both keyed on the root entity produce sibling link entities
         var results = (from a in Service.Queryable<CustomAccount>()
@@ -179,6 +194,13 @@ public partial class JoinIntegrationTests(ServiceClientFixture fixture) : Integr
                        select new { a.Name, c.FirstName, OpportunityName = o.Name }).ToList();
 
         results.Should().NotBeEmpty();
+
+        // Root entity columns should always be populated
         results.Should().AllSatisfy(r => r.Name.Should().NotBeNullOrEmpty());
+
+        // Contact columns should be populated for accounts that have a primary contact
+        var withContacts = results.Where(r => r.FirstName != null).ToList();
+        withContacts.Should().NotBeEmpty("some accounts have a primary contact");
+        withContacts.Should().AllSatisfy(r => r.FirstName.Should().NotBeNullOrEmpty());
     }
 }
