@@ -144,4 +144,41 @@ public partial class JoinIntegrationTests(ServiceClientFixture fixture) : Integr
             r.Contact.CustomContactId.Should().NotBe(Guid.Empty);
         });
     }
+
+    // -------------------------------------------------------------------------
+    // Chained left joins
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ChainedLeftJoin_TwoLeftJoins_ReturnsProjectedProperties()
+    {
+        var results = (from a in Service.Queryable<CustomAccount>()
+                       join c in Service.Queryable<CustomContact>()
+                           on a.CustomAccountId equals c.ParentAccount.Id into contacts
+                       from c in contacts.DefaultIfEmpty()
+                       join o in Service.Queryable<CustomOpportunity>()
+                           on c.CustomContactId equals o.Contact.Id into opportunities
+                       from o in opportunities.DefaultIfEmpty()
+                       select new { a.Name, ContactFirstName = c.FirstName, OpportunityName = o.Name }).ToList();
+
+        results.Should().NotBeEmpty();
+        results.Should().AllSatisfy(r => r.Name.Should().NotBeNullOrEmpty());
+    }
+
+    [Fact]
+    public void ChainedLeftJoin_MultipleLeftJoinsOnRoot_ReturnsProjectedProperties()
+    {
+        // Two left joins both keyed on the root entity produce sibling link entities
+        var results = (from a in Service.Queryable<CustomAccount>()
+                       join c in Service.Queryable<CustomContact>()
+                           on a.PrimaryContact.Id equals c.CustomContactId into contacts
+                       from c in contacts.DefaultIfEmpty()
+                       join o in Service.Queryable<CustomOpportunity>()
+                           on a.CustomAccountId equals o.Contact.Id into opportunities
+                       from o in opportunities.DefaultIfEmpty()
+                       select new { a.Name, c.FirstName, OpportunityName = o.Name }).ToList();
+
+        results.Should().NotBeEmpty();
+        results.Should().AllSatisfy(r => r.Name.Should().NotBeNullOrEmpty());
+    }
 }

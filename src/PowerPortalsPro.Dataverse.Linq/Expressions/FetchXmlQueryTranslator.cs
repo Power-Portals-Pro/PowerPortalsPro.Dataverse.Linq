@@ -318,14 +318,11 @@ internal static class FetchXmlQueryTranslator
             return;
         }
 
-        if (ctx.JoinMappings is not null)
+        if (ctx.OuterEntityPath is not null)
         {
-            // After an inner join with transparent identifier
-            HandleJoinSelect(lambda, ctx);
-        }
-        else if (ctx.OuterEntityPath is not null)
-        {
-            // After a left join — resolve member accesses through transparent identifiers
+            // After a single left join — resolve member accesses through transparent identifiers.
+            // OuterEntityPath is cleared by HandleChainedLeftJoin, so this path is only
+            // reached for single (non-chained) left joins.
             var outerColumns = lambda.ExtractColumnsViaPath(ctx.OuterEntityPath);
             IReadOnlyList<string>? innerColumns = ctx.InnerEntityProperty is not null
                 ? lambda.ExtractInnerColumnsViaProperty(ctx.InnerEntityProperty)
@@ -345,6 +342,11 @@ internal static class FetchXmlQueryTranslator
                 lambda,
                 expr => leftJoinResolver(expr) is { } r ? (r.LinkAlias, r.EntityType) : null,
                 ctx.PrimaryKeyResolver);
+        }
+        else if (ctx.JoinMappings is not null)
+        {
+            // After an inner join or chained left join with transparent identifier
+            HandleJoinSelect(lambda, ctx);
         }
         else
         {
@@ -2147,7 +2149,14 @@ internal static class FetchXmlQueryTranslator
         // Chained join — the outer source is a prior join's transparent identifier
         if (ctx.JoinMappings is not null)
         {
-            HandleChainedInnerJoin(call, innerLogicalName, innerEntityType, resultLambda, ctx);
+            // Detect WithFirstRow() marker on the inner source
+            var chainedLinkType = HasWithFirstRow(call.Arguments[1])
+                ? "matchfirstrowusingcrossapply"
+                : "inner";
+            HandleChainedJoin(
+                call.Arguments[2], call.Arguments[3],
+                innerLogicalName, innerEntityType, resultLambda,
+                chainedLinkType, ctx);
             return;
         }
 
@@ -2186,16 +2195,19 @@ internal static class FetchXmlQueryTranslator
     /// Handles a join whose outer source is the result of a prior join (transparent identifier).
     /// Resolves the outer key through the TI to determine which link entity to nest under,
     /// then extends JoinMappings with the new entity.
+    /// Used for both chained inner joins and chained left joins.
     /// </summary>
-    private static void HandleChainedInnerJoin(
-        MethodCallExpression call,
+    private static void HandleChainedJoin(
+        Expression outerKeyArg,
+        Expression innerKeyArg,
         string innerLogicalName,
         Type innerEntityType,
         LambdaExpression resultLambda,
+        string linkType,
         TranslationContext ctx)
     {
-        var outerKeyLambda = call.Arguments[2].ExtractLambda();
-        var innerKeyLambda = call.Arguments[3].ExtractLambda();
+        var outerKeyLambda = outerKeyArg.ExtractLambda();
+        var innerKeyLambda = innerKeyArg.ExtractLambda();
 
         var innerKeyAttr = innerKeyLambda.Body.GetAttributeName(ctx.PrimaryKeyResolver)
             ?? throw new NotSupportedException(
@@ -2213,7 +2225,7 @@ internal static class FetchXmlQueryTranslator
             From = innerKeyAttr,
             To = outerKeyResolved.Name,
             Alias = resultLambda.Parameters[1].Name!,
-            LinkType = "inner"
+            LinkType = linkType
         };
 
         // Nest under the parent link entity, or the root if the key belongs to the root entity
@@ -2239,6 +2251,11 @@ internal static class FetchXmlQueryTranslator
 
         ctx.JoinMappings = updatedMappings;
 
+        // Clear single-left-join context — chained joins use JoinMappings exclusively
+        ctx.OuterEntityPath = null;
+        ctx.OuterEntityType = null;
+        ctx.InnerEntityProperty = null;
+
         if (!resultLambda.IsTransparentIdentifier())
             HandleJoinSelect(resultLambda, ctx);
     }
@@ -2259,9 +2276,25 @@ internal static class FetchXmlQueryTranslator
                 "SelectMany is only supported as part of a left join pattern (GroupJoin + SelectMany).");
         }
 
+        // Chained left join: outer source of the GroupJoin is another join result
+        var outerSource = groupJoinCall.Arguments[0];
+        if (outerSource is MethodCallExpression)
+        {
+            TranslateCore(outerSource, ctx);
+            var (innerLogicalName2, innerEntityType2) = groupJoinCall.Arguments[1].GetSourceInfoFromType();
+            var resultSelector2 = call.Arguments[2].ExtractLambda();
+            HandleChainedJoin(
+                groupJoinCall.Arguments[2], groupJoinCall.Arguments[3],
+                innerLogicalName2, innerEntityType2, resultSelector2,
+                "outer", ctx);
+            return;
+        }
+
+        // --- First / single left join ---
+
         // Extract join keys from GroupJoin
-        var (outerLogicalName, outerEntityType) = groupJoinCall.Arguments[0].GetSourceInfoFromType();
-        var (innerLogicalName, _) = groupJoinCall.Arguments[1].GetSourceInfoFromType();
+        var (outerLogicalName, outerEntityType) = outerSource.GetSourceInfoFromType();
+        var (innerLogicalName, innerEntityType) = groupJoinCall.Arguments[1].GetSourceInfoFromType();
         var (outerKeyAttr, innerKeyAttr) = ExtractJoinKeys(groupJoinCall, ctx.PrimaryKeyResolver);
 
         // Root entity
@@ -2336,6 +2369,17 @@ internal static class FetchXmlQueryTranslator
                     break;
                 }
             }
+
+            // Build JoinMappings so that subsequent chained joins can resolve
+            // keys through the transparent identifier. The outer entity name comes
+            // from the GroupJoin result selector's first parameter (e.g. "a" in
+            // (a, contacts) => new { a, contacts }).
+            var groupJoinResultSelector = groupJoinCall.Arguments[4].ExtractLambda();
+            ctx.JoinMappings = new Dictionary<string, JoinEntityInfo>
+            {
+                [groupJoinResultSelector.Parameters[0].Name!] = new() { EntityType = outerEntityType, LinkAlias = null },
+                [resultSelector.Parameters[1].Name!] = new() { EntityType = innerEntityType, LinkAlias = ctx.Query.Links[^1].Alias }
+            };
         }
     }
 

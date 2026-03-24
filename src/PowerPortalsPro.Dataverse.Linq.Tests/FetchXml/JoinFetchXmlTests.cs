@@ -399,6 +399,138 @@ public class JoinFetchXmlTests : FetchXmlTestBase
     }
 
     // -------------------------------------------------------------------------
+    // Chained left joins
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_WithChainedLeftJoin_GeneratesNestedOuterLinkEntities()
+    {
+        var fetchXml = (from a in _service.Queryable<CustomAccount>()
+                        join c in _service.Queryable<CustomContact>()
+                            on a.CustomAccountId equals c.ParentAccount.Id into contacts
+                        from c in contacts.DefaultIfEmpty()
+                        join o in _service.Queryable<CustomOpportunity>()
+                            on c.CustomContactId equals o.Contact.Id into opportunities
+                        from o in opportunities.DefaultIfEmpty()
+                        join a2 in _service.Queryable<CustomAccount>()
+                            on o.CustomOpportunityId equals a2.PrimaryContact.Id into accounts
+                        from a2 in accounts.DefaultIfEmpty()
+                        join c2 in _service.Queryable<CustomContact>()
+                            on a2.CustomAccountId equals c2.ParentAccount.Id into contacts2
+                        from c2 in contacts2.DefaultIfEmpty()
+                        select new { AccountName = a.Name, c.FirstName, OpportunityName = o.Name, a2.Website, c2.LastName }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="outer">
+                  <attribute name="new_firstname" />
+                  <link-entity name="new_customopportunity" from="new_contact" to="new_customcontactid" alias="o" link-type="outer">
+                    <attribute name="new_name" />
+                    <link-entity name="new_customaccount" from="new_primarycontact" to="new_customopportunityid" alias="a2" link-type="outer">
+                      <attribute name="new_website" />
+                      <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c2" link-type="outer">
+                        <attribute name="new_lastname" />
+                      </link-entity>
+                    </link-entity>
+                  </link-entity>
+                </link-entity>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WithMultipleLeftJoinsOnRoot_GeneratesSiblingOuterLinkEntities()
+    {
+        // Four left joins all keyed on the root entity produce sibling link entities
+        var fetchXml = (from a in _service.Queryable<CustomAccount>()
+                        join c in _service.Queryable<CustomContact>()
+                            on a.PrimaryContact.Id equals c.CustomContactId into contacts
+                        from c in contacts.DefaultIfEmpty()
+                        join o in _service.Queryable<CustomOpportunity>()
+                            on a.CustomAccountId equals o.Contact.Id into opportunities
+                        from o in opportunities.DefaultIfEmpty()
+                        join a2 in _service.Queryable<CustomAccount>()
+                            on a.ParentAccount.Id equals a2.CustomAccountId into parentAccounts
+                        from a2 in parentAccounts.DefaultIfEmpty()
+                        join c2 in _service.Queryable<CustomContact>()
+                            on a.CustomAccountId equals c2.ParentAccount.Id into moreContacts
+                        from c2 in moreContacts.DefaultIfEmpty()
+                        select new { a.Name, c.FirstName, OpportunityName = o.Name, ParentName = a2.Name, c2.LastName }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+                <link-entity name="new_customcontact" from="new_customcontactid" to="new_primarycontact" alias="c" link-type="outer">
+                  <attribute name="new_firstname" />
+                </link-entity>
+                <link-entity name="new_customopportunity" from="new_contact" to="new_customaccountid" alias="o" link-type="outer">
+                  <attribute name="new_name" />
+                </link-entity>
+                <link-entity name="new_customaccount" from="new_customaccountid" to="new_parentaccount" alias="a2" link-type="outer">
+                  <attribute name="new_name" />
+                </link-entity>
+                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c2" link-type="outer">
+                  <attribute name="new_lastname" />
+                </link-entity>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WithFiveChainedLeftJoins_GeneratesMixedNestedAndSiblingOuterLinkEntities()
+    {
+        // Five left joins: nested chain (Account → Contact → Opportunity) plus siblings on root and on Contact
+        var fetchXml = (from a in _service.Queryable<CustomAccount>()
+                        join c in _service.Queryable<CustomContact>()
+                            on a.CustomAccountId equals c.ParentAccount.Id into contacts
+                        from c in contacts.DefaultIfEmpty()
+                        join o in _service.Queryable<CustomOpportunity>()
+                            on c.CustomContactId equals o.Contact.Id into opportunities
+                        from o in opportunities.DefaultIfEmpty()
+                        join a2 in _service.Queryable<CustomAccount>()
+                            on a.ParentAccount.Id equals a2.CustomAccountId into parentAccounts
+                        from a2 in parentAccounts.DefaultIfEmpty()
+                        join c2 in _service.Queryable<CustomContact>()
+                            on c.CustomContactId equals c2.ParentAccount.Id into subContacts
+                        from c2 in subContacts.DefaultIfEmpty()
+                        join o2 in _service.Queryable<CustomOpportunity>()
+                            on a2.CustomAccountId equals o2.Contact.Id into parentOpportunities
+                        from o2 in parentOpportunities.DefaultIfEmpty()
+                        select new { a.Name, c.FirstName, OpportunityName = o.Name, ParentAccountName = a2.Name, c2.LastName, ParentOppName = o2.Name }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="outer">
+                  <attribute name="new_firstname" />
+                  <link-entity name="new_customopportunity" from="new_contact" to="new_customcontactid" alias="o" link-type="outer">
+                    <attribute name="new_name" />
+                  </link-entity>
+                  <link-entity name="new_customcontact" from="new_parentaccount" to="new_customcontactid" alias="c2" link-type="outer">
+                    <attribute name="new_lastname" />
+                  </link-entity>
+                </link-entity>
+                <link-entity name="new_customaccount" from="new_customaccountid" to="new_parentaccount" alias="a2" link-type="outer">
+                  <attribute name="new_name" />
+                  <link-entity name="new_customopportunity" from="new_contact" to="new_customaccountid" alias="o2" link-type="outer">
+                    <attribute name="new_name" />
+                  </link-entity>
+                </link-entity>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    // -------------------------------------------------------------------------
     // WithFirstRow — matchfirstrowusingcrossapply
     // -------------------------------------------------------------------------
 
