@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.0.5] - 2026-03-18
+
+- Added the 'ReturnRecordCount' and 'ReturnRecordCountAsync' extension methods.
+- Updates to publish action and readme.
+
 ## [1.0.4] - 2026-03-18
 
 - Refactor selection materializer logic to support more scenarios.
