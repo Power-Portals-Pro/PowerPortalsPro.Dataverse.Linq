@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.0.6] - 2026-03-24
+
+- Added support for multiple chained left joins.
+
 ## [1.0.5] - 2026-03-18
 
 - Added the 'ReturnRecordCount' and 'ReturnRecordCountAsync' extension methods.
