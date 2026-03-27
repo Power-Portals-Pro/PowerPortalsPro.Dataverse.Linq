@@ -2507,6 +2507,9 @@ internal static class FetchXmlQueryTranslator
         if (expr is MemberExpression me && me.Expression is ParameterExpression mp && mp == param) return true;
         if (expr is NewExpression or MemberInitExpression)
             return expr.GetProjectionArguments().Any(a => ReferencesParameter(a, param));
+        if (expr is ConditionalExpression conditional)
+            return ReferencesParameter(conditional.IfTrue, param)
+                || ReferencesParameter(conditional.IfFalse, param);
         return false;
     }
 
@@ -2530,6 +2533,11 @@ internal static class FetchXmlQueryTranslator
             else if (arg is NewExpression or MemberInitExpression)
             {
                 columns.AddRange(ExtractColumnsFromParameter(arg, param));
+            }
+            else if (arg is ConditionalExpression conditional)
+            {
+                columns.AddRange(ExtractColumnsFromParameter(conditional.IfTrue, param));
+                columns.AddRange(ExtractColumnsFromParameter(conditional.IfFalse, param));
             }
         }
         return columns;

@@ -108,6 +108,11 @@ internal static class ProjectionExtensions
                 columns.Add(name);
             else if (arg is NewExpression or MemberInitExpression)
                 CollectColumns(arg, matcher, columns);
+            else if (arg is ConditionalExpression conditional)
+            {
+                CollectColumns(conditional.IfTrue, matcher, columns);
+                CollectColumns(conditional.IfFalse, matcher, columns);
+            }
         }
     }
 
@@ -119,6 +124,10 @@ internal static class ProjectionExtensions
                 return true;
             if (arg is NewExpression or MemberInitExpression
                 && MatchesProjectionArgument(arg, predicate))
+                return true;
+            if (arg is ConditionalExpression conditional
+                && (MatchesProjectionArgument(conditional.IfTrue, predicate)
+                    || MatchesProjectionArgument(conditional.IfFalse, predicate)))
                 return true;
         }
         return false;

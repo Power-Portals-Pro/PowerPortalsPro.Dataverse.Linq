@@ -203,4 +203,25 @@ public partial class JoinIntegrationTests(ServiceClientFixture fixture) : Integr
         withContacts.Should().NotBeEmpty("some accounts have a primary contact");
         withContacts.Should().AllSatisfy(r => r.FirstName.Should().NotBeNullOrEmpty());
     }
+
+    [Fact]
+    public void LeftJoin_TernarySelectOnInner_IncludesInnerColumns()
+    {
+        var results = (from a in Service.Queryable<CustomAccount>()
+                       join c in Service.Queryable<CustomContact>()
+                           on a.CustomAccountId equals c.ParentAccount.Id into contacts
+                       from c in contacts.DefaultIfEmpty()
+                       select new
+                       {
+                           a.Name,
+                           ContactName = c != null ? c.FirstName : null
+                       }).ToList();
+
+        results.Should().NotBeEmpty();
+        results.Should().AllSatisfy(r => r.Name.Should().NotBeNullOrEmpty());
+
+        var withContacts = results.Where(r => r.ContactName != null).ToList();
+        withContacts.Should().NotBeEmpty("some accounts have contacts");
+        withContacts.Should().AllSatisfy(r => r.ContactName.Should().NotBeNullOrEmpty());
+    }
 }

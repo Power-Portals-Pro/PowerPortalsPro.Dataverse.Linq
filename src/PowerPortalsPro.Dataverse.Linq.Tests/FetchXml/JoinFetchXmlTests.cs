@@ -238,6 +238,61 @@ public class JoinFetchXmlTests : FetchXmlTestBase
             """);
     }
 
+    [Fact]
+    public void ToFetchXml_WithLeftJoin_TernarySelectOnInner_IncludesInnerColumns()
+    {
+        var fetchXml = (from a in _service.Queryable<CustomAccount>()
+                        join c in _service.Queryable<CustomContact>()
+                            on a.CustomAccountId equals c.ParentAccount.Id into contacts
+                        from c in contacts.DefaultIfEmpty()
+                        select new
+                        {
+                            a.Name,
+                            ContactName = c != null ? c.FirstName : null
+                        }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="outer">
+                  <attribute name="new_firstname" />
+                </link-entity>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WithLeftJoin_TernarySelectWithNewObject_IncludesInnerColumns()
+    {
+        var fetchXml = (from a in _service.Queryable<CustomAccount>()
+                        join c in _service.Queryable<CustomContact>()
+                            on a.CustomAccountId equals c.ParentAccount.Id into contacts
+                        from c in contacts.DefaultIfEmpty()
+                        select new
+                        {
+                            a.Name,
+                            Contact = c != null
+                                ? new { c.FirstName, c.LastName }
+                                : null
+                        }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="outer">
+                  <attribute name="new_firstname" />
+                  <attribute name="new_lastname" />
+                </link-entity>
+              </entity>
+            </fetch>
+            """);
+    }
+
     // -------------------------------------------------------------------------
     // Complex queries — join + where + orderby + select
     // -------------------------------------------------------------------------
