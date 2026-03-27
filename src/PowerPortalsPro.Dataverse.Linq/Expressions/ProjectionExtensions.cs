@@ -113,6 +113,12 @@ internal static class ProjectionExtensions
                 CollectColumns(conditional.IfTrue, matcher, columns);
                 CollectColumns(conditional.IfFalse, matcher, columns);
             }
+            else if (arg is UnaryExpression { NodeType: ExpressionType.Convert } unary)
+                CollectColumns(unary.Operand, matcher, columns);
+            else if (arg is not (ConstantExpression or DefaultExpression or MemberExpression or ParameterExpression))
+                throw new NotSupportedException(
+                    $"Unsupported expression type '{arg.NodeType}' in projection. " +
+                    $"Column references inside '{arg.NodeType}' expressions cannot be extracted.");
         }
     }
 
@@ -122,13 +128,29 @@ internal static class ProjectionExtensions
         {
             if (predicate(arg))
                 return true;
-            if (arg is NewExpression or MemberInitExpression
-                && MatchesProjectionArgument(arg, predicate))
-                return true;
-            if (arg is ConditionalExpression conditional
-                && (MatchesProjectionArgument(conditional.IfTrue, predicate)
-                    || MatchesProjectionArgument(conditional.IfFalse, predicate)))
-                return true;
+
+            if (arg is NewExpression or MemberInitExpression)
+            {
+                if (MatchesProjectionArgument(arg, predicate))
+                    return true;
+            }
+            else if (arg is ConditionalExpression conditional)
+            {
+                if (MatchesProjectionArgument(conditional.IfTrue, predicate)
+                    || MatchesProjectionArgument(conditional.IfFalse, predicate))
+                    return true;
+            }
+            else if (arg is UnaryExpression { NodeType: ExpressionType.Convert } unary)
+            {
+                if (MatchesProjectionArgument(unary.Operand, predicate))
+                    return true;
+            }
+            else if (arg is not (ConstantExpression or DefaultExpression or MemberExpression or ParameterExpression))
+            {
+                throw new NotSupportedException(
+                    $"Unsupported expression type '{arg.NodeType}' in projection. " +
+                    $"Column references inside '{arg.NodeType}' expressions cannot be extracted.");
+            }
         }
         return false;
     }

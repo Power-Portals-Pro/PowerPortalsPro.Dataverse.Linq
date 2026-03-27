@@ -2510,7 +2510,13 @@ internal static class FetchXmlQueryTranslator
         if (expr is ConditionalExpression conditional)
             return ReferencesParameter(conditional.IfTrue, param)
                 || ReferencesParameter(conditional.IfFalse, param);
-        return false;
+        if (expr is UnaryExpression { NodeType: ExpressionType.Convert } unary)
+            return ReferencesParameter(unary.Operand, param);
+        if (expr is ConstantExpression or DefaultExpression or MemberExpression or ParameterExpression)
+            return false;
+        throw new NotSupportedException(
+            $"Unsupported expression type '{expr.NodeType}' in projection. " +
+            $"Column references inside '{expr.NodeType}' expressions cannot be extracted.");
     }
 
     /// <summary>
@@ -2538,6 +2544,16 @@ internal static class FetchXmlQueryTranslator
             {
                 columns.AddRange(ExtractColumnsFromParameter(conditional.IfTrue, param));
                 columns.AddRange(ExtractColumnsFromParameter(conditional.IfFalse, param));
+            }
+            else if (arg is UnaryExpression { NodeType: ExpressionType.Convert } unary)
+            {
+                columns.AddRange(ExtractColumnsFromParameter(unary.Operand, param));
+            }
+            else if (arg is not (ConstantExpression or DefaultExpression or MemberExpression or ParameterExpression))
+            {
+                throw new NotSupportedException(
+                    $"Unsupported expression type '{arg.NodeType}' in projection. " +
+                    $"Column references inside '{arg.NodeType}' expressions cannot be extracted.");
             }
         }
         return columns;
