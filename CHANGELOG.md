@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.0.10] - 2026-05-07
+
+- Fix NotSupportedException when projection uses GetAttributeValue inside a constructor.
+
 ## [1.0.9] - 2026-03-27
 
 - Added logic to guard against unsupported expressions.
