@@ -2512,6 +2512,12 @@ internal static class FetchXmlQueryTranslator
                 || ReferencesParameter(conditional.IfFalse, param);
         if (expr is UnaryExpression { NodeType: ExpressionType.Convert } unary)
             return ReferencesParameter(unary.Operand, param);
+        if (expr is MethodCallExpression mc)
+        {
+            if (mc.Object is not null && ReferencesParameter(mc.Object, param))
+                return true;
+            return mc.Arguments.Any(a => ReferencesParameter(a, param));
+        }
         if (expr is ConstantExpression or DefaultExpression or MemberExpression or ParameterExpression)
             return false;
         throw new NotSupportedException(
@@ -2521,42 +2527,65 @@ internal static class FetchXmlQueryTranslator
 
     /// <summary>
     /// Extracts attribute logical names from direct property accesses on a parameter
-    /// (e.g. <c>d.FirstName</c> where <c>d</c> is the inner entity parameter).
-    /// Recurses into nested projections.
+    /// (e.g. <c>d.FirstName</c> where <c>d</c> is the inner entity parameter), as well
+    /// as <c>d.GetAttributeValue&lt;T&gt;("name")</c> calls. Recurses into nested projections.
     /// </summary>
     private static List<string> ExtractColumnsFromParameter(Expression body, ParameterExpression param)
     {
         var columns = new List<string>();
         foreach (var arg in body.GetProjectionArguments())
+            ExtractFromExpr(arg, param, columns);
+        return columns;
+    }
+
+    private static void ExtractFromExpr(Expression arg, ParameterExpression param, List<string> columns)
+    {
+        if (arg is MemberExpression { Member: PropertyInfo prop, Expression: ParameterExpression p }
+            && p == param)
         {
-            if (arg is MemberExpression { Member: PropertyInfo prop, Expression: ParameterExpression p }
-                && p == param)
+            var name = prop.GetCustomAttribute<AttributeLogicalNameAttribute>()?.LogicalName;
+            if (name is not null)
+                columns.Add(name);
+            return;
+        }
+
+        if (arg is MethodCallExpression
             {
-                var name = prop.GetCustomAttribute<AttributeLogicalNameAttribute>()?.LogicalName;
-                if (name is not null)
-                    columns.Add(name);
+                Method.Name: nameof(Entity.GetAttributeValue),
+                Arguments: [ConstantExpression { Value: string attrName }],
+                Object: ParameterExpression op
             }
-            else if (arg is NewExpression or MemberInitExpression)
-            {
+            && op == param)
+        {
+            columns.Add(attrName);
+            return;
+        }
+
+        switch (arg)
+        {
+            case NewExpression or MemberInitExpression:
                 columns.AddRange(ExtractColumnsFromParameter(arg, param));
-            }
-            else if (arg is ConditionalExpression conditional)
-            {
-                columns.AddRange(ExtractColumnsFromParameter(conditional.IfTrue, param));
-                columns.AddRange(ExtractColumnsFromParameter(conditional.IfFalse, param));
-            }
-            else if (arg is UnaryExpression { NodeType: ExpressionType.Convert } unary)
-            {
-                columns.AddRange(ExtractColumnsFromParameter(unary.Operand, param));
-            }
-            else if (arg is not (ConstantExpression or DefaultExpression or MemberExpression or ParameterExpression))
-            {
+                break;
+            case ConditionalExpression conditional:
+                ExtractFromExpr(conditional.IfTrue, param, columns);
+                ExtractFromExpr(conditional.IfFalse, param, columns);
+                break;
+            case UnaryExpression { NodeType: ExpressionType.Convert } unary:
+                ExtractFromExpr(unary.Operand, param, columns);
+                break;
+            case MethodCallExpression mc:
+                if (mc.Object is not null)
+                    ExtractFromExpr(mc.Object, param, columns);
+                foreach (var ca in mc.Arguments)
+                    ExtractFromExpr(ca, param, columns);
+                break;
+            case ConstantExpression or DefaultExpression or MemberExpression or ParameterExpression:
+                break;
+            default:
                 throw new NotSupportedException(
                     $"Unsupported expression type '{arg.NodeType}' in projection. " +
                     $"Column references inside '{arg.NodeType}' expressions cannot be extracted.");
-            }
         }
-        return columns;
     }
 
     /// <summary>

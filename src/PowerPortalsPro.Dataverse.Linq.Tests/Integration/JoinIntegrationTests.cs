@@ -224,4 +224,65 @@ public partial class JoinIntegrationTests(ServiceClientFixture fixture) : Integr
         withContacts.Should().NotBeEmpty("some accounts have contacts");
         withContacts.Should().AllSatisfy(r => r.ContactName.Should().NotBeNullOrEmpty());
     }
+
+    [Fact]
+    public void LeftJoin_GetAttributeValueOnInner_IncludesInnerColumns()
+    {
+        var results = (from a in Service.Queryable<CustomAccount>()
+                       join c in Service.Queryable<CustomContact>()
+                           on a.CustomAccountId equals c.ParentAccount.Id into contacts
+                       from c in contacts.DefaultIfEmpty()
+                       select new
+                       {
+                           a.Name,
+                           FirstName = c.GetAttributeValue<string>("new_firstname"),
+                           LastName = c.GetAttributeValue<string>("new_lastname"),
+                       }).ToList();
+
+        results.Should().NotBeEmpty();
+        results.Should().AllSatisfy(r => r.Name.Should().NotBeNullOrEmpty());
+
+        var withContacts = results.Where(r => r.FirstName != null).ToList();
+        withContacts.Should().NotBeEmpty("some accounts have contacts");
+        withContacts.Should().AllSatisfy(r =>
+        {
+            r.FirstName.Should().NotBeNullOrEmpty();
+            r.LastName.Should().NotBeNullOrEmpty();
+        });
+    }
+
+    [Fact]
+    public void LeftJoin_TernaryGetAttributeValueInConstructor_IncludesInnerColumns()
+    {
+        // Mirrors the user-reported pattern: a constructor invocation with
+        // GetAttributeValue arguments inside the IfTrue branch of a ternary.
+        var results = (from e in Service.Queryable("new_customaccount")
+                       join dl in Service.Queryable("new_customcontact")
+                           on e.Id equals dl.GetAttributeValue<EntityReference>("new_parentaccount").Id into contacts
+                       from dl in contacts.DefaultIfEmpty()
+                       select new EntityDocumentLocation(e)
+                       {
+                           DocumentLocationInfo = dl != null
+                               ? new DocumentLocationInfo(
+                                   dl.GetAttributeValue<Guid>("new_customcontactid"),
+                                   dl.GetAttributeValue<string>("new_firstname"))
+                               : null
+                       }).ToList();
+
+        results.Should().NotBeEmpty();
+
+        var matched = results.Where(r => r.DocumentLocationInfo is not null).ToList();
+        matched.Should().NotBeEmpty("some accounts have contacts");
+        matched.Should().AllSatisfy(r =>
+        {
+            r.DocumentLocationInfo!.Id.Should().NotBe(Guid.Empty);
+            r.DocumentLocationInfo.RelativeUrl.Should().NotBeNullOrEmpty();
+        });
+    }
+
+    private sealed record DocumentLocationInfo(Guid Id, string? RelativeUrl);
+    private sealed record EntityDocumentLocation(Entity Source)
+    {
+        public DocumentLocationInfo? DocumentLocationInfo { get; init; }
+    }
 }

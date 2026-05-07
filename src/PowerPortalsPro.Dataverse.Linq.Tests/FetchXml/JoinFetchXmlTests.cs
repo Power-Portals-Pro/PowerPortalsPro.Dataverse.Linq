@@ -1,10 +1,18 @@
 using FluentAssertions;
+using Microsoft.Xrm.Sdk;
 using PowerPortalsPro.Dataverse.Linq.Tests.Proxies;
 
 namespace PowerPortalsPro.Dataverse.Linq.Tests.FetchXml;
 
 public class JoinFetchXmlTests : FetchXmlTestBase
 {
+    private sealed record DocumentLocationInfo(Guid Id, string? RelativeUrl);
+    private sealed record EntityDocumentLocation(Entity Source)
+    {
+        public DocumentLocationInfo? DocumentLocationInfo { get; init; }
+    }
+
+
     // -------------------------------------------------------------------------
     // Inner join
     // -------------------------------------------------------------------------
@@ -287,6 +295,93 @@ public class JoinFetchXmlTests : FetchXmlTestBase
                 <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="outer">
                   <attribute name="new_firstname" />
                   <attribute name="new_lastname" />
+                </link-entity>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WithLeftJoin_GetAttributeValueOnInner_IncludesInnerColumns()
+    {
+        var fetchXml = (from a in _service.Queryable<CustomAccount>()
+                        join c in _service.Queryable<CustomContact>()
+                            on a.CustomAccountId equals c.ParentAccount.Id into contacts
+                        from c in contacts.DefaultIfEmpty()
+                        select new
+                        {
+                            a.Name,
+                            FirstName = c.GetAttributeValue<string>("new_firstname"),
+                            LastName = c.GetAttributeValue<string>("new_lastname"),
+                        }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="outer">
+                  <attribute name="new_firstname" />
+                  <attribute name="new_lastname" />
+                </link-entity>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WithLeftJoin_TernaryGetAttributeValueInConstructor_IncludesInnerColumns()
+    {
+        var fetchXml = (from e in _service.Queryable("new_customaccount")
+                        join dl in _service.Queryable("new_customcontact")
+                            on e.Id equals dl.GetAttributeValue<EntityReference>("new_parentaccount").Id into documentLocation
+                        from dl in documentLocation.DefaultIfEmpty()
+                        select new EntityDocumentLocation(e)
+                        {
+                            DocumentLocationInfo = dl != null
+                                ? new DocumentLocationInfo(
+                                    dl.GetAttributeValue<Guid>("new_customcontactid"),
+                                    dl.GetAttributeValue<string>("new_firstname"))
+                                : null
+                        }).ToFetchXml();
+
+        // The select projects e (the whole outer entity) into EntityDocumentLocation's
+        // constructor, so all outer attributes are retained. The inner link entity gets
+        // only the columns referenced via the GetAttributeValue calls.
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="dl" link-type="outer">
+                  <attribute name="new_customcontactid" />
+                  <attribute name="new_firstname" />
+                </link-entity>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_WithLeftJoin_GetAttributeValueOnOuterAndInner_IncludesAllColumns()
+    {
+        var fetchXml = (from a in _service.Queryable("new_customaccount")
+                        join c in _service.Queryable("new_customcontact")
+                            on a.GetAttributeValue<Guid>("new_customaccountid") equals c.GetAttributeValue<EntityReference>("new_parentaccount").Id into contacts
+                        from c in contacts.DefaultIfEmpty()
+                        select new
+                        {
+                            AccountName = a.GetAttributeValue<string>("new_name"),
+                            ContactName = c.GetAttributeValue<string>("new_firstname"),
+                        }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="outer">
+                  <attribute name="new_firstname" />
                 </link-entity>
               </entity>
             </fetch>

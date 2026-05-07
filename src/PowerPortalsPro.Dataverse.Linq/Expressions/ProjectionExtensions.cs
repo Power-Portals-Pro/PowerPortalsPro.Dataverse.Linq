@@ -53,12 +53,21 @@ internal static class ProjectionExtensions
     {
         var param = lambda.Parameters[0];
         var columns = new List<string>();
-        CollectColumns(lambda.Body, arg =>
-            arg is MemberExpression { Member: PropertyInfo prop, Expression: { } attrExpr }
-            && attrExpr.IsOuterEntityAccess(outerPath, param)
-                ? prop.GetCustomAttribute<AttributeLogicalNameAttribute>()?.LogicalName
-                : null,
-            columns);
+        CollectColumns(lambda.Body, arg => arg switch
+        {
+            MemberExpression { Member: PropertyInfo prop, Expression: { } attrExpr }
+                when attrExpr.IsOuterEntityAccess(outerPath, param)
+                => prop.GetCustomAttribute<AttributeLogicalNameAttribute>()?.LogicalName,
+            MethodCallExpression
+            {
+                Method.Name: nameof(Microsoft.Xrm.Sdk.Entity.GetAttributeValue),
+                Arguments: [ConstantExpression { Value: string attrName }],
+                Object: { } obj
+            }
+                when obj.IsOuterEntityAccess(outerPath, param)
+                => attrName,
+            _ => null
+        }, columns);
         return columns.Count > 0 ? columns : null;
     }
 
@@ -85,37 +94,68 @@ internal static class ProjectionExtensions
     {
         var param = lambda.Parameters[0];
         var columns = new List<string>();
-        CollectColumns(lambda.Body, arg =>
-            arg is MemberExpression { Member: PropertyInfo prop, Expression: MemberExpression inner }
-            && inner.Member.Name == innerPropertyName
-            && inner.Expression is ParameterExpression p && p == param
-                ? prop.GetCustomAttribute<AttributeLogicalNameAttribute>()?.LogicalName
-                : null,
-            columns);
+        CollectColumns(lambda.Body, arg => arg switch
+        {
+            MemberExpression { Member: PropertyInfo prop, Expression: MemberExpression inner }
+                when inner.Member.Name == innerPropertyName
+                && inner.Expression is ParameterExpression p && p == param
+                => prop.GetCustomAttribute<AttributeLogicalNameAttribute>()?.LogicalName,
+            MethodCallExpression
+            {
+                Method.Name: nameof(Microsoft.Xrm.Sdk.Entity.GetAttributeValue),
+                Arguments: [ConstantExpression { Value: string attrName }],
+                Object: MemberExpression inner
+            }
+                when inner.Member.Name == innerPropertyName
+                && inner.Expression is ParameterExpression p && p == param
+                => attrName,
+            _ => null
+        }, columns);
         return columns.Count > 0 ? columns : null;
     }
 
     /// <summary>
     /// Recursively walks projection arguments and collects column names using the provided
-    /// matcher. Descends into nested <see cref="NewExpression"/> and <see cref="MemberInitExpression"/>.
+    /// matcher. Descends into nested <see cref="NewExpression"/>, <see cref="MemberInitExpression"/>,
+    /// <see cref="ConditionalExpression"/>, conversion <see cref="UnaryExpression"/>, and
+    /// <see cref="MethodCallExpression"/> arguments.
     /// </summary>
     private static void CollectColumns(Expression body, Func<Expression, string?> matcher, List<string> columns)
     {
         foreach (var arg in body.GetProjectionArguments())
+            CollectColumnsFromExpr(arg, matcher, columns);
+    }
+
+    private static void CollectColumnsFromExpr(Expression arg, Func<Expression, string?> matcher, List<string> columns)
+    {
+        var name = matcher(arg);
+        if (name is not null)
         {
-            var name = matcher(arg);
-            if (name is not null)
-                columns.Add(name);
-            else if (arg is NewExpression or MemberInitExpression)
+            columns.Add(name);
+            return;
+        }
+
+        switch (arg)
+        {
+            case NewExpression or MemberInitExpression:
                 CollectColumns(arg, matcher, columns);
-            else if (arg is ConditionalExpression conditional)
-            {
-                CollectColumns(conditional.IfTrue, matcher, columns);
-                CollectColumns(conditional.IfFalse, matcher, columns);
-            }
-            else if (arg is UnaryExpression { NodeType: ExpressionType.Convert } unary)
-                CollectColumns(unary.Operand, matcher, columns);
-            else if (arg is not (ConstantExpression or DefaultExpression or MemberExpression or ParameterExpression))
+                break;
+            case ConditionalExpression conditional:
+                CollectColumnsFromExpr(conditional.IfTrue, matcher, columns);
+                CollectColumnsFromExpr(conditional.IfFalse, matcher, columns);
+                break;
+            case UnaryExpression { NodeType: ExpressionType.Convert } unary:
+                CollectColumnsFromExpr(unary.Operand, matcher, columns);
+                break;
+            case MethodCallExpression mc:
+                if (mc.Object is not null)
+                    CollectColumnsFromExpr(mc.Object, matcher, columns);
+                foreach (var ca in mc.Arguments)
+                    CollectColumnsFromExpr(ca, matcher, columns);
+                break;
+            case ConstantExpression or DefaultExpression or MemberExpression or ParameterExpression:
+                break;
+            default:
                 throw new NotSupportedException(
                     $"Unsupported expression type '{arg.NodeType}' in projection. " +
                     $"Column references inside '{arg.NodeType}' expressions cannot be extracted.");
@@ -126,33 +166,42 @@ internal static class ProjectionExtensions
     {
         foreach (var arg in body.GetProjectionArguments())
         {
-            if (predicate(arg))
+            if (MatchesExpr(arg, predicate))
                 return true;
+        }
+        return false;
+    }
 
-            if (arg is NewExpression or MemberInitExpression)
-            {
-                if (MatchesProjectionArgument(arg, predicate))
+    private static bool MatchesExpr(Expression arg, Func<Expression, bool> predicate)
+    {
+        if (predicate(arg))
+            return true;
+
+        switch (arg)
+        {
+            case NewExpression or MemberInitExpression:
+                return MatchesProjectionArgument(arg, predicate);
+            case ConditionalExpression conditional:
+                return MatchesExpr(conditional.IfTrue, predicate)
+                    || MatchesExpr(conditional.IfFalse, predicate);
+            case UnaryExpression { NodeType: ExpressionType.Convert } unary:
+                return MatchesExpr(unary.Operand, predicate);
+            case MethodCallExpression mc:
+                if (mc.Object is not null && MatchesExpr(mc.Object, predicate))
                     return true;
-            }
-            else if (arg is ConditionalExpression conditional)
-            {
-                if (MatchesProjectionArgument(conditional.IfTrue, predicate)
-                    || MatchesProjectionArgument(conditional.IfFalse, predicate))
-                    return true;
-            }
-            else if (arg is UnaryExpression { NodeType: ExpressionType.Convert } unary)
-            {
-                if (MatchesProjectionArgument(unary.Operand, predicate))
-                    return true;
-            }
-            else if (arg is not (ConstantExpression or DefaultExpression or MemberExpression or ParameterExpression))
-            {
+                foreach (var ca in mc.Arguments)
+                {
+                    if (MatchesExpr(ca, predicate))
+                        return true;
+                }
+                return false;
+            case ConstantExpression or DefaultExpression or MemberExpression or ParameterExpression:
+                return false;
+            default:
                 throw new NotSupportedException(
                     $"Unsupported expression type '{arg.NodeType}' in projection. " +
                     $"Column references inside '{arg.NodeType}' expressions cannot be extracted.");
-            }
         }
-        return false;
     }
 
     internal static IReadOnlyList<RowAggregateInfo>? ExtractRowAggregates(this Expression body)
