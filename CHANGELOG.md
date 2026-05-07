@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.0.9] - 2026-03-27
+
+- Added logic to guard against unsupported expressions.
+- Fix for columns not being picked up for the resulting select statement.
+
 ## [1.0.8] - 2026-03-24
 
 - Fixed an issue where it was not correctly determining the column logical name.
