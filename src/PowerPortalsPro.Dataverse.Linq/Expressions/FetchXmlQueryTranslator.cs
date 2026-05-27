@@ -1494,6 +1494,27 @@ internal static class FetchXmlQueryTranslator
 
         ctx.Query.Aggregate = true;
         ctx.Query.Materializer = null;
+
+        // See ClearLinkProjectedColumns call in HandleGroupBy: a composed source may
+        // have projected whole link entities, which is invalid in an aggregate query.
+        ClearLinkProjectedColumns(ctx.Query.Links);
+    }
+
+    /// <summary>
+    /// Recursively clears projected columns (<see cref="FetchLinkEntity.Attributes"/>
+    /// and <see cref="FetchLinkEntity.AllAttributes"/>) from the given link entities.
+    /// Join keys, filters, orders, and nested link structure are preserved. Used when a
+    /// query transitions to aggregate mode so that link entities carry only the
+    /// groupby/aggregate attributes added afterward.
+    /// </summary>
+    private static void ClearLinkProjectedColumns(List<FetchLinkEntity> links)
+    {
+        foreach (var link in links)
+        {
+            link.AllAttributes = false;
+            link.Attributes.Clear();
+            ClearLinkProjectedColumns(link.Links);
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -1512,6 +1533,15 @@ internal static class FetchXmlQueryTranslator
         ctx.Query.Aggregate = true;
         ctx.Query.AllAttributes = false;
         ctx.Query.Attributes.Clear();
+
+        // Query composition: an intermediate whole-entity projection in the source
+        // (e.g. the result selector (cip2, user) => cip2 produced by joining onto an
+        // already-projected query) may have set AllAttributes / projected columns on
+        // link entities. An aggregate query may only carry groupby/aggregate attributes,
+        // and a link's AllAttributes would otherwise suppress the groupby attribute the
+        // grouped Select adds below. Clear projected columns from all links so only the
+        // group/aggregate attributes survive.
+        ClearLinkProjectedColumns(ctx.Query.Links);
 
         // Constant key (e.g. GroupBy(a => 1)) — aggregate-only query, no groupby attribute
         if (keySelector.Body is ConstantExpression)
