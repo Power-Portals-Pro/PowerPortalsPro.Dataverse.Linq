@@ -403,6 +403,104 @@ public partial class GroupByIntegrationTests(ServiceClientFixture fixture) : Int
     }
 
     // -------------------------------------------------------------------------
+    // GroupBy — query composition
+    //
+    // A query that projects a whole link entity (e.g. `select c` after a join) and is
+    // then composed into a further GroupBy must produce the same results as the
+    // equivalent monolithic query. Regression test for the link entity retaining
+    // AllAttributes from the intermediate projection, which suppressed the groupby
+    // attribute and produced invalid aggregate FetchXml.
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ComposedProjectedJoinThenGroupBy_MatchesMonolithicQuery()
+    {
+        // The where clause forces a standalone projecting Select(ti => ti.c), the shape
+        // that previously left AllAttributes on the link entity and produced invalid
+        // aggregate FetchXml (Dataverse would throw). Composing a GroupBy on top must
+        // match the equivalent monolithic query.
+        var contacts = from a in Service.Queryable<CustomAccount>()
+                       join c in Service.Queryable<CustomContact>()
+                           on a.CustomAccountId equals c.ParentAccount.Id
+                       where c.FirstName != null
+                       select c;
+
+        var composed = (from c in contacts
+                        group c by c.ParentAccount into g
+                        select new
+                        {
+                            Account = g.Key,
+                            Count = g.Count(),
+                            MostRecent = g.Max(x => x.CreatedOn),
+                        }).ToList();
+
+        // Monolithic equivalent: join + where + group in a single query expression.
+        var monolithic = (from a in Service.Queryable<CustomAccount>()
+                          join c in Service.Queryable<CustomContact>()
+                              on a.CustomAccountId equals c.ParentAccount.Id
+                          where c.FirstName != null
+                          group c by c.ParentAccount into g
+                          select new
+                          {
+                              Account = g.Key,
+                              Count = g.Count(),
+                              MostRecent = g.Max(x => x.CreatedOn),
+                          }).ToList();
+
+        composed.Should().NotBeEmpty();
+        composed.Should().AllSatisfy(r =>
+        {
+            r.Account.Should().NotBeNull();
+            r.Account!.Id.Should().NotBe(Guid.Empty);
+            r.Count.Should().BeGreaterThan(0);
+        });
+        composed.Should().BeEquivalentTo(monolithic);
+    }
+
+    [Fact]
+    public void ComposedTwoStepJoinAndGroupBy_MatchesMonolithicQuery()
+    {
+        // Mirrors incremental query building: project the inner entity, compose a
+        // further join, then group — the shape from the original bug report.
+        var coContacts =
+            from a in Service.Queryable<CustomAccount>()
+            join c in Service.Queryable<CustomContact>()
+                on a.CustomAccountId equals c.ParentAccount.Id
+            where c.FirstName != null
+            select c;
+
+        coContacts =
+            from c in coContacts
+            join o in Service.Queryable<CustomOpportunity>()
+                on c.CustomContactId equals o.Contact.Id
+            select c;
+
+        var composed = (from c in coContacts
+                        group c by c.ParentAccount into g
+                        select new
+                        {
+                            Account = g.Key,
+                            Count = g.Count(),
+                        }).ToList();
+
+        var monolithic = (from a in Service.Queryable<CustomAccount>()
+                          join c in Service.Queryable<CustomContact>()
+                              on a.CustomAccountId equals c.ParentAccount.Id
+                          join o in Service.Queryable<CustomOpportunity>()
+                              on c.CustomContactId equals o.Contact.Id
+                          where c.FirstName != null
+                          group c by c.ParentAccount into g
+                          select new
+                          {
+                              Account = g.Key,
+                              Count = g.Count(),
+                          }).ToList();
+
+        composed.Should().NotBeEmpty();
+        composed.Should().BeEquivalentTo(monolithic);
+    }
+
+    // -------------------------------------------------------------------------
     // MemberInitExpression (object initializer) in grouped select
     // -------------------------------------------------------------------------
 

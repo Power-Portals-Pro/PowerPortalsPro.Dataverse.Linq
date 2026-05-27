@@ -476,6 +476,149 @@ public class AggregateFetchXmlTests : FetchXmlTestBase
     }
 
     // -------------------------------------------------------------------------
+    // GroupBy — query composition
+    //
+    // When a query that projects a whole link entity (e.g. `select c` after a join)
+    // is composed into a further GroupBy, the link entity carries AllAttributes from
+    // the intermediate projection. The aggregate transition must clear those projected
+    // columns so the groupby attribute on the link is emitted (and not suppressed by
+    // <all-attributes/>), matching the equivalent monolithic query.
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_ComposedProjectedJoinThenGroupBy_PlacesGroupByOnLinkEntity()
+    {
+        // Intermediate query projects the whole inner (link) entity. The where clause
+        // forces a standalone Select(ti => ti.c) — the projection shape that marks the
+        // link entity with AllAttributes (a bare `select c` is folded into the join and
+        // does not). Without the aggregate reset, that AllAttributes would suppress the
+        // groupby attribute added below.
+        var contacts = from a in _service.Queryable<CustomAccount>()
+                       join c in _service.Queryable<CustomContact>()
+                           on a.CustomAccountId equals c.ParentAccount.Id
+                       where c.FirstName != null
+                       select c;
+
+        // Compose: group the projected query by an attribute on the link entity.
+        var fetchXml = (from c in contacts
+                        group c by c.ParentAccount into g
+                        select new
+                        {
+                            Account = g.Key,
+                            Count = g.Count(),
+                        }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="new_customaccount">
+                <attribute name="new_customaccountid" alias="count" aggregate="count" />
+                <filter type="and">
+                  <condition entityname="c" attribute="new_firstname" operator="not-null" />
+                </filter>
+                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="inner">
+                  <attribute name="new_parentaccount" alias="account" groupby="true" />
+                </link-entity>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_ComposedJoinAndGroupBy_MatchesMonolithicQuery()
+    {
+        var participantId = Guid.NewGuid();
+        var start = new DateTime(2024, 1, 1);
+        var end = new DateTime(2024, 2, 1);
+
+        // Monolithic: all joins, where, and group in a single query expression.
+        var monolithic = (from c1 in _service.Queryable<CustomContact>()
+                          join a in _service.Queryable<CustomAccount>()
+                              on c1.ParentAccount.Id equals a.CustomAccountId
+                          join c2 in _service.Queryable<CustomContact>()
+                              on a.CustomAccountId equals c2.ParentAccount.Id
+                          join o in _service.Queryable<CustomOpportunity>()
+                              on c2.Owner.Id equals o.CustomOpportunityId
+                          where c1.Owner.Id == participantId
+                              && c2.Owner.Id != participantId
+                              && c2.CreatedOn >= start
+                              && c2.CreatedOn < end
+                          group c2 by c2.Owner into g
+                          select new
+                          {
+                              Owner = g.Key,
+                              Count = g.Count(),
+                              MostRecent = g.Max(x => x.CreatedOn),
+                          }).ToFetchXml();
+
+        // Composed: build the join + where, project to the inner entity, then compose
+        // a further join and a GroupBy on top — mirroring incremental query building.
+        var coParticipants =
+            from c1 in _service.Queryable<CustomContact>()
+            join a in _service.Queryable<CustomAccount>()
+                on c1.ParentAccount.Id equals a.CustomAccountId
+            join c2 in _service.Queryable<CustomContact>()
+                on a.CustomAccountId equals c2.ParentAccount.Id
+            where c1.Owner.Id == participantId
+                && c2.Owner.Id != participantId
+                && c2.CreatedOn >= start
+                && c2.CreatedOn < end
+            select c2;
+
+        coParticipants =
+            from c2 in coParticipants
+            join o in _service.Queryable<CustomOpportunity>()
+                on c2.Owner.Id equals o.CustomOpportunityId
+            select c2;
+
+        var composed = (from c2 in coParticipants
+                        group c2 by c2.Owner into g
+                        select new
+                        {
+                            Owner = g.Key,
+                            Count = g.Count(),
+                            MostRecent = g.Max(x => x.CreatedOn),
+                        }).ToFetchXml();
+
+        composed.Should().Be(monolithic);
+    }
+
+    [Fact]
+    public void ToFetchXml_ComposedProjectedJoinThenCount_ClearsLinkAllAttributes()
+    {
+        // Intermediate query projects the whole inner (link) entity via a standalone
+        // Select (forced by the where clause), marking the link with AllAttributes.
+        var contacts = from a in _service.Queryable<CustomAccount>()
+                       join c in _service.Queryable<CustomContact>()
+                           on a.CustomAccountId equals c.ParentAccount.Id
+                       where c.FirstName != null
+                       select c;
+
+        // Compose a non-grouped Count() on top (terminal, so build the call manually).
+        var expr = System.Linq.Expressions.Expression.Call(
+            typeof(Queryable), nameof(Queryable.Count),
+            [typeof(CustomContact)],
+            contacts.Expression);
+
+        var fetchXml = TranslateToFetchXml<CustomContact>(expr);
+
+        // The link must not retain <all-attributes/> — an aggregate query may only
+        // carry aggregate/groupby attributes.
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="new_customaccount">
+                <attribute name="new_customaccountid" alias="count" aggregate="count" />
+                <filter type="and">
+                  <condition entityname="c" attribute="new_firstname" operator="not-null" />
+                </filter>
+                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="inner" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    // -------------------------------------------------------------------------
     // RowAggregate — CountChildren
     // -------------------------------------------------------------------------
 

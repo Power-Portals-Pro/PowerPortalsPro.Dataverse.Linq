@@ -47,7 +47,7 @@ internal class DataverseQueryProvider<T> : IQueryProvider where T : Entity
     {
         var query = FetchXmlQueryTranslator.Translate<T>(expression, Columns, EntityLogicalName, Service);
         var fetchXml = FetchXmlBuilder.Build(query);
-        var entities = RetrieveAll(fetchXml, query.OnRecordCount);
+        var entities = RetrieveAll(fetchXml, query.OnRecordCount, BuildFetchXmlNotifier(query));
 
         // Aggregate terminal operator (Min, Max, Sum, Average, Count)
         if (query.TerminalOperator.IsAggregate())
@@ -76,7 +76,8 @@ internal class DataverseQueryProvider<T> : IQueryProvider where T : Entity
     {
         var query = FetchXmlQueryTranslator.Translate<T>(expression, Columns, EntityLogicalName, Service);
         var fetchXml = FetchXmlBuilder.Build(query);
-        return RetrieveAll(fetchXml, query.OnRecordCount).Select(e => e.ToEntity<T>()).ToList();
+        return RetrieveAll(fetchXml, query.OnRecordCount, BuildFetchXmlNotifier(query))
+            .Select(e => e.ToEntity<T>()).ToList();
     }
 
     internal void ForEachPage<TElement>(
@@ -90,7 +91,7 @@ internal class DataverseQueryProvider<T> : IQueryProvider where T : Entity
         {
             onPage(ProjectEntities<TElement>(response.Entities.ToList(), query));
             return response.MoreRecords;
-        });
+        }, BuildFetchXmlNotifier(query));
     }
 
     internal string GenerateFetchXml(Expression expression)
@@ -103,12 +104,16 @@ internal class DataverseQueryProvider<T> : IQueryProvider where T : Entity
     // Paged retrieval
     // -------------------------------------------------------------------------
 
-    protected List<Entity> RetrieveAll(string baseFetchXml, Action<RecordCountArguments>? onRecordCount = null) =>
-        RetrieveWithPaging(baseFetchXml, expr => Service.RetrieveMultiple(expr), onRecordCount);
+    protected List<Entity> RetrieveAll(
+        string baseFetchXml,
+        Action<RecordCountArguments>? onRecordCount = null,
+        Action<string>? onFetchXml = null) =>
+        RetrieveWithPaging(baseFetchXml, expr => Service.RetrieveMultiple(expr), onRecordCount, onFetchXml);
 
     protected static List<Entity> RetrieveWithPaging(
         string baseFetchXml, Func<FetchExpression, EntityCollection> retrieve,
-        Action<RecordCountArguments>? onRecordCount = null)
+        Action<RecordCountArguments>? onRecordCount = null,
+        Action<string>? onFetchXml = null)
     {
         var results = new List<Entity>();
         var recordCountInvoked = false;
@@ -121,19 +126,41 @@ internal class DataverseQueryProvider<T> : IQueryProvider where T : Entity
             }
             results.AddRange(response.Entities);
             return response.MoreRecords;
-        });
+        }, onFetchXml);
         return results;
+    }
+
+    /// <summary>
+    /// Builds the notifier invoked with each request's FetchXml just before it is sent,
+    /// combining the per-query <see cref="FetchXmlQuery.OnFetchXml"/> callback with the
+    /// global <see cref="DataverseQueryDiagnostics.FetchXmlRequested"/> hook. Returns
+    /// <c>null</c> when nothing is listening so the paging loop can skip notification.
+    /// </summary>
+    protected static Action<string>? BuildFetchXmlNotifier(FetchXmlQuery query)
+    {
+        var perQuery = query.OnFetchXml;
+        if (perQuery is null && !DataverseQueryDiagnostics.HasFetchXmlSubscribers)
+            return null;
+
+        return fetchXml =>
+        {
+            perQuery?.Invoke(fetchXml);
+            DataverseQueryDiagnostics.RaiseFetchXmlRequested(fetchXml);
+        };
     }
 
     /// <summary>
     /// Core paging loop shared by all retrieval methods. Calls <paramref name="retrieve"/>
     /// for each page and passes the response to <paramref name="onPage"/>. The callback
-    /// returns <c>true</c> to continue paging or <c>false</c> to stop.
+    /// returns <c>true</c> to continue paging or <c>false</c> to stop. When supplied,
+    /// <paramref name="onFetchXml"/> is invoked with each page's FetchXml just before the
+    /// request is sent.
     /// </summary>
     protected static void PagedFetch(
         string baseFetchXml,
         Func<FetchExpression, EntityCollection> retrieve,
-        Func<EntityCollection, int, bool> onPage)
+        Func<EntityCollection, int, bool> onPage,
+        Action<string>? onFetchXml = null)
     {
         var fetchDocument = XDocument.Parse(baseFetchXml);
         var explicitPage = fetchDocument.Root!.Attribute("page") != null;
@@ -148,7 +175,10 @@ internal class DataverseQueryProvider<T> : IQueryProvider where T : Entity
                 fetchDocument.Root!.SetAttributeValue("page", pageNumber);
             }
 
-            var response = retrieve(new FetchExpression(fetchDocument.ToString()));
+            var requestFetchXml = fetchDocument.ToString();
+            onFetchXml?.Invoke(requestFetchXml);
+
+            var response = retrieve(new FetchExpression(requestFetchXml));
             var shouldContinue = onPage(response, pageNumber);
 
             if (explicitPage || !shouldContinue || !response.MoreRecords) break;
@@ -211,10 +241,59 @@ internal class DataverseQueryProvider<T> : IQueryProvider where T : Entity
     /// </summary>
     protected List<TElement> ProjectEntities<TElement>(List<Entity> entities, FetchXmlQuery query)
     {
+        NormalizeCrossApplyAliases(entities, query);
+
         if (query.Materializer is not null)
             return entities.Select(e => (TElement)query.Materializer.Invoke(e)).ToList();
 
         return entities.Select(e => (TElement)(object)e.ToEntity<T>()).ToList();
+    }
+
+    /// <summary>
+    /// A <c>matchfirstrowusingcrossapply</c> link returns its columns merged into the root
+    /// row as <see cref="AliasedValue"/>s keyed by the column's <i>schema</i> name (e.g.
+    /// <c>new_ParentAccount</c>), rather than the <c>{alias}.{logicalname}</c> aliasing a
+    /// normal link uses. The materializer reads <c>{alias}.{logicalname}</c>, so without
+    /// this normalization those columns resolve to null. For each cross-apply link, re-key
+    /// its returned values to <c>{alias}.{attributelogicalname}</c> using the
+    /// <see cref="AliasedValue"/> metadata.
+    /// </summary>
+    protected static void NormalizeCrossApplyAliases(List<Entity> entities, FetchXmlQuery query)
+    {
+        var crossApplyLinks = new List<FetchLinkEntity>();
+        CollectCrossApplyLinks(query.Links, crossApplyLinks);
+        if (crossApplyLinks.Count == 0)
+            return;
+
+        foreach (var entity in entities)
+        {
+            // Snapshot first: we add keys while iterating.
+            var schemaNamedAliasedValues = entity.Attributes
+                .Where(kvp => kvp.Value is AliasedValue && !kvp.Key.Contains('.'))
+                .ToList();
+
+            foreach (var kvp in schemaNamedAliasedValues)
+            {
+                var av = (AliasedValue)kvp.Value;
+                var link = crossApplyLinks.FirstOrDefault(l => l.Name == av.EntityLogicalName);
+                if (link is null)
+                    continue;
+
+                var normalizedKey = $"{link.Alias}.{av.AttributeLogicalName}";
+                if (!entity.Attributes.ContainsKey(normalizedKey))
+                    entity[normalizedKey] = av;
+            }
+        }
+    }
+
+    private static void CollectCrossApplyLinks(List<FetchLinkEntity> links, List<FetchLinkEntity> result)
+    {
+        foreach (var link in links)
+        {
+            if (link.LinkType == "matchfirstrowusingcrossapply")
+                result.Add(link);
+            CollectCrossApplyLinks(link.Links, result);
+        }
     }
 
     protected static MethodInfo GetPrivateMethod(string name) =>

@@ -160,6 +160,51 @@ public partial class GroupByIntegrationTests
     }
 
     // -------------------------------------------------------------------------
+    // GroupBy — query composition
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ComposedProjectedJoinThenGroupByAsync_MatchesMonolithicQuery()
+    {
+        // The where clause forces a standalone projecting Select(ti => ti.c), the shape
+        // that previously left AllAttributes on the link entity and produced invalid
+        // aggregate FetchXml. Composing a GroupBy on top must match the monolithic query.
+        var contacts = from a in Service.Queryable<CustomAccount>()
+                       join c in Service.Queryable<CustomContact>()
+                           on a.CustomAccountId equals c.ParentAccount.Id
+                       where c.FirstName != null
+                       select c;
+
+        var composed = await (from c in contacts
+                              group c by c.ParentAccount into g
+                              select new
+                              {
+                                  Account = g.Key,
+                                  Count = g.Count(),
+                              }).ToListAsync();
+
+        var monolithic = await (from a in Service.Queryable<CustomAccount>()
+                                join c in Service.Queryable<CustomContact>()
+                                    on a.CustomAccountId equals c.ParentAccount.Id
+                                where c.FirstName != null
+                                group c by c.ParentAccount into g
+                                select new
+                                {
+                                    Account = g.Key,
+                                    Count = g.Count(),
+                                }).ToListAsync();
+
+        composed.Should().NotBeEmpty();
+        composed.Should().AllSatisfy(r =>
+        {
+            r.Account.Should().NotBeNull();
+            r.Account!.Id.Should().NotBe(Guid.Empty);
+            r.Count.Should().BeGreaterThan(0);
+        });
+        composed.Should().BeEquivalentTo(monolithic);
+    }
+
+    // -------------------------------------------------------------------------
     // MemberInitExpression (object initializer) in grouped select
     // -------------------------------------------------------------------------
 

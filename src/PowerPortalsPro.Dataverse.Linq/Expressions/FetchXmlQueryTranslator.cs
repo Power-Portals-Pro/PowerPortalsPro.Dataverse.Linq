@@ -283,6 +283,10 @@ internal static class FetchXmlQueryTranslator
                         // Just recurse into the source.
                         TranslateCore(sceCall.Arguments[0], ctx);
                         return;
+                    case nameof(ServiceClientExtensions.CaptureFetchXml):
+                        TranslateCore(sceCall.Arguments[0], ctx);
+                        ctx.Query.OnFetchXml = (Action<string>)((ConstantExpression)sceCall.Arguments[1]).Value!;
+                        return;
                     case nameof(ServiceClientExtensions.ReturnRecordCount):
                         TranslateCore(sceCall.Arguments[0], ctx);
                         ctx.Query.ReturnTotalRecordCount = true;
@@ -384,11 +388,27 @@ internal static class FetchXmlQueryTranslator
 
     private static void HandleJoinSelect(LambdaExpression lambda, TranslationContext ctx)
     {
+        // A Select fully (re)defines the projection. When this query was composed on top
+        // of an earlier projection (e.g. a prior `select c` that set AllAttributes on a
+        // link), that earlier projection must not leak through — otherwise a link's
+        // AllAttributes would suppress the narrower columns this Select requests. Clear
+        // link projections up front; the loop below repopulates them from this lambda.
+        // (In a single-pass query this runs once on links that have no columns yet, so
+        // it is a no-op there.)
+        ClearLinkProjectedColumns(ctx.Query.Links);
+
         // Collect columns keyed by entity alias ("" = root entity)
         var columnsByAlias = new Dictionary<string, List<string>>();
         var wholeEntityAliases = new HashSet<string>();
 
-        foreach (var arg in lambda.Body.GetProjectionArguments())
+        // A bare-parameter body (e.g. the folded result selector (c, o) => c) projects a
+        // whole entity but yields no projection arguments. Treat the body itself as the
+        // single argument so the whole-entity reference below is detected.
+        var projectionArgs = lambda.Body.GetProjectionArguments().ToList();
+        if (projectionArgs.Count == 0)
+            projectionArgs.Add(lambda.Body);
+
+        foreach (var arg in projectionArgs)
         {
             // Try attribute resolution first — if it succeeds, it's a property access
             var resolved = ResolveAttribute(arg, ctx);
@@ -1494,6 +1514,27 @@ internal static class FetchXmlQueryTranslator
 
         ctx.Query.Aggregate = true;
         ctx.Query.Materializer = null;
+
+        // See ClearLinkProjectedColumns call in HandleGroupBy: a composed source may
+        // have projected whole link entities, which is invalid in an aggregate query.
+        ClearLinkProjectedColumns(ctx.Query.Links);
+    }
+
+    /// <summary>
+    /// Recursively clears projected columns (<see cref="FetchLinkEntity.Attributes"/>
+    /// and <see cref="FetchLinkEntity.AllAttributes"/>) from the given link entities.
+    /// Join keys, filters, orders, and nested link structure are preserved. Used when a
+    /// query transitions to aggregate mode so that link entities carry only the
+    /// groupby/aggregate attributes added afterward.
+    /// </summary>
+    private static void ClearLinkProjectedColumns(List<FetchLinkEntity> links)
+    {
+        foreach (var link in links)
+        {
+            link.AllAttributes = false;
+            link.Attributes.Clear();
+            ClearLinkProjectedColumns(link.Links);
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -1512,6 +1553,15 @@ internal static class FetchXmlQueryTranslator
         ctx.Query.Aggregate = true;
         ctx.Query.AllAttributes = false;
         ctx.Query.Attributes.Clear();
+
+        // Query composition: an intermediate whole-entity projection in the source
+        // (e.g. the result selector (cip2, user) => cip2 produced by joining onto an
+        // already-projected query) may have set AllAttributes / projected columns on
+        // link entities. An aggregate query may only carry groupby/aggregate attributes,
+        // and a link's AllAttributes would otherwise suppress the groupby attribute the
+        // grouped Select adds below. Clear projected columns from all links so only the
+        // group/aggregate attributes survive.
+        ClearLinkProjectedColumns(ctx.Query.Links);
 
         // Constant key (e.g. GroupBy(a => 1)) — aggregate-only query, no groupby attribute
         if (keySelector.Body is ConstantExpression)
@@ -2202,6 +2252,45 @@ internal static class FetchXmlQueryTranslator
         return false;
     }
 
+    /// <summary>
+    /// Extracts <c>OrderBy</c>/<c>ThenBy</c> operators applied to a join's inner source
+    /// (e.g. <c>Queryable&lt;T&gt;().OrderByDescending(x => x.Date).WithFirstRow()</c>) and
+    /// returns them as orders in source order, each qualified with the link
+    /// <paramref name="linkAlias"/>. The orders are placed at the fetch (root) level with
+    /// <c>entityname</c> — the same shape as ordering by a joined column, and the only
+    /// placement <c>matchfirstrowusingcrossapply</c> accepts (it rejects an order clause
+    /// inside the link entity). Without this the inner ordering is silently dropped, which
+    /// notably defeats <c>WithFirstRow()</c>, whose "first row" is defined by that ordering.
+    /// </summary>
+    private static List<FetchOrder> ExtractInnerOrders(
+        Expression innerSource, string linkAlias, Func<string, string>? primaryKeyResolver)
+    {
+        var orders = new List<FetchOrder>();
+        var current = innerSource;
+        while (current is MethodCallExpression mc && mc.Arguments.Count > 0)
+        {
+            if (mc.Method.DeclaringType == typeof(Queryable)
+                && mc.Method.Name is nameof(Queryable.OrderBy) or nameof(Queryable.OrderByDescending)
+                    or nameof(Queryable.ThenBy) or nameof(Queryable.ThenByDescending))
+            {
+                var attr = mc.Arguments[1].ExtractLambda().Body.GetAttributeName(primaryKeyResolver);
+                if (attr is not null)
+                {
+                    var descending = mc.Method.Name is nameof(Queryable.OrderByDescending)
+                        or nameof(Queryable.ThenByDescending);
+                    orders.Add(new FetchOrder { Attribute = attr, Descending = descending, EntityAlias = linkAlias });
+                }
+            }
+
+            current = mc.Arguments[0];
+        }
+
+        // The chain is walked outermost-first (ThenBy before OrderBy); reverse to
+        // restore source order so the primary sort key is emitted first.
+        orders.Reverse();
+        return orders;
+    }
+
     private static void HandleInnerJoin(MethodCallExpression call, TranslationContext ctx)
     {
         // Recurse into the outer source first — for chained joins this processes
@@ -2221,7 +2310,7 @@ internal static class FetchXmlQueryTranslator
             HandleChainedJoin(
                 call.Arguments[2], call.Arguments[3],
                 innerLogicalName, innerEntityType, resultLambda,
-                chainedLinkType, ctx);
+                chainedLinkType, ctx, call.Arguments[1]);
             return;
         }
 
@@ -2246,6 +2335,7 @@ internal static class FetchXmlQueryTranslator
             LinkType = linkType
         };
         ctx.Query.Links.Add(link);
+        ctx.Query.Orders.AddRange(ExtractInnerOrders(call.Arguments[1], link.Alias, ctx.PrimaryKeyResolver));
 
         ctx.JoinMappings = new Dictionary<string, JoinEntityInfo>
         {
@@ -2269,7 +2359,8 @@ internal static class FetchXmlQueryTranslator
         Type innerEntityType,
         LambdaExpression resultLambda,
         string linkType,
-        TranslationContext ctx)
+        TranslationContext ctx,
+        Expression? innerSource = null)
     {
         var outerKeyLambda = outerKeyArg.ExtractLambda();
         var innerKeyLambda = innerKeyArg.ExtractLambda();
@@ -2292,6 +2383,8 @@ internal static class FetchXmlQueryTranslator
             Alias = resultLambda.Parameters[1].Name!,
             LinkType = linkType
         };
+        if (innerSource is not null)
+            ctx.Query.Orders.AddRange(ExtractInnerOrders(innerSource, link.Alias, ctx.PrimaryKeyResolver));
 
         // Nest under the parent link entity, or the root if the key belongs to the root entity
         if (outerKeyResolved.EntityAlias is null)
