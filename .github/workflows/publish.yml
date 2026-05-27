@@ -32,25 +32,28 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Version: $VERSION"
 
-      - name: Collect commit messages since last release
-        id: changes
+      - name: Extract release notes from CHANGELOG
+        id: notes
+        shell: bash
         run: |
-          # Find the most recent release tag
-          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          # Use the hand-written notes under the "## [Unreleased]" heading (everything up
+          # to the next version heading). Fails early — before publishing — if empty, so a
+          # release can't go out without notes.
+          NOTES=$(awk '
+            /^## \[Unreleased\]/ { capture = 1; next }
+            /^## \[/            { capture = 0 }
+            capture
+          ' CHANGELOG.md | sed '/./,$!d')
 
-          if [ -n "$LAST_TAG" ]; then
-            echo "Last release tag: $LAST_TAG"
-            COMMITS=$(git log "${LAST_TAG}..HEAD" --format="- %s" --no-merges)
-          else
-            echo "No previous release tag found, using all commits"
-            COMMITS=$(git log --format="- %s" --no-merges)
+          if [ -z "$(printf '%s' "$NOTES" | tr -d '[:space:]')" ]; then
+            echo "::error::No release notes found under '## [Unreleased]' in CHANGELOG.md. Add them before running this workflow."
+            exit 1
           fi
 
-          # Write to output using delimiter to handle multiline
           {
-            echo "commits<<COMMITSEOF"
-            echo "$COMMITS"
-            echo "COMMITSEOF"
+            echo "notes<<NOTESEOF"
+            echo "$NOTES"
+            echo "NOTESEOF"
           } >> "$GITHUB_OUTPUT"
 
       - name: Build
@@ -62,26 +65,20 @@ jobs:
       - name: Push to NuGet.org
         run: dotnet nuget push ./nupkg/PowerPortalsPro.Dataverse.Linq.${{ steps.version.outputs.version }}.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate --no-symbols
 
-      - name: Update CHANGELOG
+      - name: Stamp CHANGELOG with released version
         shell: bash
         run: |
           DATE=$(date +%Y-%m-%d)
           VERSION=${{ steps.version.outputs.version }}
 
-          COMMITS=$(cat <<'COMMITSEOF'
-          ${{ steps.changes.outputs.commits }}
-          COMMITSEOF
-          )
-
-          # Build the new entry as a temp file to avoid sed escaping issues
+          # Promote the hand-written [Unreleased] notes to a versioned section by inserting
+          # a version heading directly beneath [Unreleased], which leaves the existing notes
+          # under the new version and resets [Unreleased] to empty.
           {
             echo ""
             echo "## [$VERSION] - $DATE"
-            echo ""
-            echo "$COMMITS"
           } > /tmp/changelog_entry.txt
 
-          # Insert after [Unreleased] line
           sed -i '/## \[Unreleased\]/r /tmp/changelog_entry.txt' CHANGELOG.md
 
       - name: Commit CHANGELOG
@@ -97,5 +94,5 @@ jobs:
         with:
           tag_name: v${{ steps.version.outputs.version }}
           name: v${{ steps.version.outputs.version }}
-          body: ${{ steps.changes.outputs.commits }}
+          body: ${{ steps.notes.outputs.notes }}
           files: ./nupkg/PowerPortalsPro.Dataverse.Linq.${{ steps.version.outputs.version }}.nupkg
