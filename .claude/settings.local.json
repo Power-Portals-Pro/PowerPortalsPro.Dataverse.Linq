@@ -19,7 +19,8 @@
       "WebFetch(domain:www.gnu.org)",
       "Bash(curl:*)",
       "Bash(cd /d D:\\\\Code\\\\PowerPortalsPro.Dataverse.Linq)",
-      "Bash(dir /b)"
+      "Bash(dir /b)",
+      "Bash(echo \"exit: $?\")"
     ]
   }
 }
