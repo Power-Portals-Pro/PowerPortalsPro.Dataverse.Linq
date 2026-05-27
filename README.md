@@ -671,7 +671,11 @@ var results = await service.Queryable<Account>()
 
 ## Inspect Generated FetchXml
 
-Use `ToFetchXml()` to see the generated FetchXml without executing the query:
+There are several ways to see the FetchXml the provider produces — two that translate the query without executing it, and two callback-based hooks that capture the exact FetchXml of each request as the query runs.
+
+### `ToFetchXml()` — collection queries
+
+Use `ToFetchXml()` on any `IQueryable<T>` to translate a query to FetchXml without executing it:
 
 ```csharp
 var fetchXml = service.Queryable<Account>()
@@ -682,6 +686,58 @@ var fetchXml = service.Queryable<Account>()
 
 Console.WriteLine(fetchXml);
 ```
+
+### `ToFetchXml(terminal)` — aggregates and element operators
+
+Aggregates (`Count`, `Sum`, `Min`, `Max`, `Average`, `CountColumn`) and element operators (`First`, `Single`, …) are *terminal* — they execute immediately and return a scalar or single element, so there is no `IQueryable<T>` left to call `.ToFetchXml()` on. This overload takes a delegate describing the terminal call and captures its FetchXml **without executing it**:
+
+```csharp
+var countFetchXml = service.Queryable<Account>()
+    .ToFetchXml(q => q.Count());
+
+var maxFetchXml = service.Queryable<Account>()
+    .ToFetchXml(q => q.Max(a => a.Revenue));
+
+var firstFetchXml = service.Queryable<Account>()
+    .Where(a => a.Name != null)
+    .ToFetchXml(q => q.FirstOrDefault());
+
+// Operators inside the delegate are translated too
+var fetchXml = service.Queryable<Account>()
+    .ToFetchXml(q => q.Where(a => a.NumberOfEmployees > 5).Count());
+```
+
+### `CaptureFetchXml(callback)` — capture during execution
+
+`CaptureFetchXml` registers a callback that receives the exact FetchXml of each request immediately **before it is sent** to Dataverse, then returns the query for further composition or execution. Unlike `ToFetchXml()`, it captures **every** execution path — collection queries, aggregates, element operators, and async — as the query actually runs. For multi-page queries the callback fires once per page, with the page number and paging-cookie embedded in the captured FetchXml.
+
+It is chainable and works with both sync and async execution:
+
+```csharp
+// Aggregate — there's no IQueryable to inspect, but the callback still fires
+var count = service.Queryable<Account>()
+    .CaptureFetchXml(xml => logger.LogDebug("FetchXml: {FetchXml}", xml))
+    .Count();
+
+// Multi-page query — callback fires once per page as each is retrieved
+var accounts = await service.Queryable<Account>()
+    .Where(a => a.StateCode == 0)
+    .WithPageSize(100)
+    .CaptureFetchXml(xml => logger.LogDebug("Requesting page: {FetchXml}", xml))
+    .ToListAsync();
+```
+
+### Global diagnostics hook
+
+`DataverseQueryDiagnostics.FetchXmlRequested` is a process-wide event raised with the FetchXml of every request, for every query executed by the provider — useful for blanket logging or telemetry without instrumenting each query. Like `CaptureFetchXml`, it fires once per page for multi-page queries.
+
+```csharp
+// Register once at startup
+DataverseQueryDiagnostics.FetchXmlRequested += xml =>
+    logger.LogTrace("Dataverse FetchXml: {FetchXml}", xml);
+```
+
+> Handlers run inline on the thread issuing the request, so keep them fast and exception-free. Use `CaptureFetchXml(...)` when you need to scope capture to a single query.
 
 ## Async Operations (.NET 8, .NET 10+)
 

@@ -316,6 +316,75 @@ public static partial class ServiceClientExtensions
             "ToFetchXml can only be used with Dataverse queryables created via Queryable<T>().");
     }
 
+    /// <summary>
+    /// Translates a query terminated by an operator that does not return an
+    /// <see cref="IQueryable{T}"/> — an aggregate (<c>Count</c>, <c>Sum</c>, <c>Min</c>,
+    /// <c>Max</c>, <c>Average</c>, <c>CountColumn</c>) or an element operator (<c>First</c>,
+    /// <c>Single</c>, …) — into its FetchXml representation <b>without executing it</b>.
+    /// The <paramref name="terminal"/> delegate describes the terminal call; it is run
+    /// against a capturing queryable that records the expression instead of querying
+    /// Dataverse.
+    /// </summary>
+    /// <example>
+    /// <code>
+    /// var fetchXml = query.ToFetchXml(q => q.Count());
+    /// var fetchXml = query.ToFetchXml(q => q.Max(x => x.Revenue));
+    /// var fetchXml = query.ToFetchXml(q => q.First());
+    /// </code>
+    /// </example>
+    public static string ToFetchXml<TElement, TResult>(
+        this IQueryable<TElement> queryable,
+        Func<IQueryable<TElement>, TResult> terminal)
+    {
+        if (!IsDataverseProvider(queryable.Provider.GetType()))
+            throw new InvalidOperationException(
+                "ToFetchXml can only be used with Dataverse queryables created via Queryable<T>().");
+
+        var capture = new FetchXmlCaptureProvider(queryable.Provider);
+        var capturingQueryable = new FetchXmlCaptureQueryable<TElement>(capture, queryable.Expression);
+
+        // Running the terminal builds the LINQ expression and routes execution into the
+        // capturing provider, which records the expression rather than querying Dataverse.
+        terminal(capturingQueryable);
+
+        if (capture.CapturedExpression is null)
+            throw new InvalidOperationException(
+                "The terminal delegate did not produce a query to translate.");
+
+        return capture.GenerateFetchXml();
+    }
+
+    /// <summary>
+    /// Registers a callback invoked with the exact FetchXml of each request immediately
+    /// before it is sent to Dataverse, then returns the query for further composition or
+    /// execution. Unlike <see cref="ToFetchXml{TElement}(IQueryable{TElement})"/>, this
+    /// captures the FetchXml of <i>every</i> execution path — including aggregates,
+    /// element operators, and paged retrieval — as the query runs. For multi-page
+    /// queries the callback fires once per page, with the page number and paging-cookie
+    /// embedded in the captured FetchXml.
+    /// </summary>
+    /// <example>
+    /// <code>
+    /// var count = query.CaptureFetchXml(xml => _logger.LogDebug(xml)).Count();
+    /// </code>
+    /// </example>
+    public static IQueryable<TElement> CaptureFetchXml<TElement>(
+        this IQueryable<TElement> queryable,
+        Action<string> onFetchXml)
+    {
+        if (onFetchXml is null)
+            throw new ArgumentNullException(nameof(onFetchXml));
+
+        var expression = Expression.Call(
+            typeof(ServiceClientExtensions),
+            nameof(CaptureFetchXml),
+            [typeof(TElement)],
+            queryable.Expression,
+            Expression.Constant(onFetchXml));
+
+        return queryable.Provider.CreateQuery<TElement>(expression);
+    }
+
     internal static bool IsDataverseProvider(Type providerType)
     {
         var type = providerType;

@@ -72,7 +72,8 @@ internal class DataverseQueryProviderAsync<T> : DataverseQueryProvider<T>, IAsyn
                 cancellationToken.ThrowIfCancellationRequested();
                 await onPage(ProjectEntities<TElement>(response.Entities.ToList(), query));
                 return response.MoreRecords;
-            });
+            },
+            BuildFetchXmlNotifier(query));
     }
 
     // -------------------------------------------------------------------------
@@ -120,7 +121,8 @@ internal class DataverseQueryProviderAsync<T> : DataverseQueryProvider<T>, IAsyn
                 }
                 results.AddRange(response.Entities);
                 return response.MoreRecords;
-            });
+            },
+            BuildFetchXmlNotifier(query));
 
         return results;
     }
@@ -132,20 +134,23 @@ internal class DataverseQueryProviderAsync<T> : DataverseQueryProvider<T>, IAsyn
     private static Task PagedFetchAsync(
         string baseFetchXml,
         Func<FetchExpression, Task<EntityCollection>> retrieve,
-        Func<EntityCollection, int, Task<bool>> onPage) =>
-        PagedFetchAsyncCore(baseFetchXml, retrieve, onPage);
+        Func<EntityCollection, int, Task<bool>> onPage,
+        Action<string>? onFetchXml = null) =>
+        PagedFetchAsyncCore(baseFetchXml, retrieve, onPage, onFetchXml);
 
     private static Task PagedFetchAsync(
         string baseFetchXml,
         Func<FetchExpression, Task<EntityCollection>> retrieve,
-        Func<EntityCollection, int, bool> onPage) =>
+        Func<EntityCollection, int, bool> onPage,
+        Action<string>? onFetchXml = null) =>
         PagedFetchAsyncCore(baseFetchXml, retrieve,
-            (response, page) => Task.FromResult(onPage(response, page)));
+            (response, page) => Task.FromResult(onPage(response, page)), onFetchXml);
 
     private static async Task PagedFetchAsyncCore(
         string baseFetchXml,
         Func<FetchExpression, Task<EntityCollection>> retrieve,
-        Func<EntityCollection, int, Task<bool>> onPage)
+        Func<EntityCollection, int, Task<bool>> onPage,
+        Action<string>? onFetchXml = null)
     {
         var fetchDocument = XDocument.Parse(baseFetchXml);
         var explicitPage = fetchDocument.Root!.Attribute("page") != null;
@@ -160,7 +165,10 @@ internal class DataverseQueryProviderAsync<T> : DataverseQueryProvider<T>, IAsyn
                 fetchDocument.Root!.SetAttributeValue("page", pageNumber);
             }
 
-            var response = await retrieve(new FetchExpression(fetchDocument.ToString()));
+            var requestFetchXml = fetchDocument.ToString();
+            onFetchXml?.Invoke(requestFetchXml);
+
+            var response = await retrieve(new FetchExpression(requestFetchXml));
             var shouldContinue = await onPage(response, pageNumber);
 
             if (explicitPage || !shouldContinue || !response.MoreRecords) break;

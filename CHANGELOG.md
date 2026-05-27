@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+- Added the 'CaptureFetchXml' extension method to capture the FetchXml of every request as a query executes, including once per page for multi-page queries.
+- Added a 'ToFetchXml' overload that returns the FetchXml for aggregate and element operators (Count, Sum, Min, Max, Average, CountColumn, First, Single, etc.) without executing the query.
+- Added the global 'DataverseQueryDiagnostics.FetchXmlRequested' hook, raised with the FetchXml of every request for process-wide logging or telemetry.
+- Fixed invalid aggregate FetchXml when a GroupBy or aggregate was composed on top of a query that projected a whole linked entity (the link emitted all-attributes instead of the groupby/aggregate attributes).
+- Improved query composition support: a re-projecting Select now narrows previously projected link columns, and projecting a whole linked entity now retrieves its columns.
+
 ## [1.0.9] - 2026-03-27
 
 - Added logic to guard against unsupported expressions.

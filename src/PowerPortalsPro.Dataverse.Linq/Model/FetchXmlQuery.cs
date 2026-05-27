@@ -48,6 +48,14 @@ internal sealed class FetchXmlQuery
     public Func<RecordCountArguments, Task>? OnRecordCountAsync { get; set; }
 
     /// <summary>
+    /// Per-query callback invoked with the exact FetchXml of each request immediately
+    /// before it is sent to Dataverse. Fires once per page for multi-page queries, with
+    /// the page number and paging-cookie embedded in the captured FetchXml. Registered
+    /// via <c>CaptureFetchXml(...)</c>.
+    /// </summary>
+    public Action<string>? OnFetchXml { get; set; }
+
+    /// <summary>
     /// The terminal operator that determines how the result set is returned
     /// (e.g. First, Single). Defaults to <see cref="QueryTerminalOperator.List"/>.
     /// </summary>

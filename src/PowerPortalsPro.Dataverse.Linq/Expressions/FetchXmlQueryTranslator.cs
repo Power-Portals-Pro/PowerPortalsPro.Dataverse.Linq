@@ -283,6 +283,10 @@ internal static class FetchXmlQueryTranslator
                         // Just recurse into the source.
                         TranslateCore(sceCall.Arguments[0], ctx);
                         return;
+                    case nameof(ServiceClientExtensions.CaptureFetchXml):
+                        TranslateCore(sceCall.Arguments[0], ctx);
+                        ctx.Query.OnFetchXml = (Action<string>)((ConstantExpression)sceCall.Arguments[1]).Value!;
+                        return;
                     case nameof(ServiceClientExtensions.ReturnRecordCount):
                         TranslateCore(sceCall.Arguments[0], ctx);
                         ctx.Query.ReturnTotalRecordCount = true;
