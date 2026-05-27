@@ -241,10 +241,59 @@ internal class DataverseQueryProvider<T> : IQueryProvider where T : Entity
     /// </summary>
     protected List<TElement> ProjectEntities<TElement>(List<Entity> entities, FetchXmlQuery query)
     {
+        NormalizeCrossApplyAliases(entities, query);
+
         if (query.Materializer is not null)
             return entities.Select(e => (TElement)query.Materializer.Invoke(e)).ToList();
 
         return entities.Select(e => (TElement)(object)e.ToEntity<T>()).ToList();
+    }
+
+    /// <summary>
+    /// A <c>matchfirstrowusingcrossapply</c> link returns its columns merged into the root
+    /// row as <see cref="AliasedValue"/>s keyed by the column's <i>schema</i> name (e.g.
+    /// <c>new_ParentAccount</c>), rather than the <c>{alias}.{logicalname}</c> aliasing a
+    /// normal link uses. The materializer reads <c>{alias}.{logicalname}</c>, so without
+    /// this normalization those columns resolve to null. For each cross-apply link, re-key
+    /// its returned values to <c>{alias}.{attributelogicalname}</c> using the
+    /// <see cref="AliasedValue"/> metadata.
+    /// </summary>
+    protected static void NormalizeCrossApplyAliases(List<Entity> entities, FetchXmlQuery query)
+    {
+        var crossApplyLinks = new List<FetchLinkEntity>();
+        CollectCrossApplyLinks(query.Links, crossApplyLinks);
+        if (crossApplyLinks.Count == 0)
+            return;
+
+        foreach (var entity in entities)
+        {
+            // Snapshot first: we add keys while iterating.
+            var schemaNamedAliasedValues = entity.Attributes
+                .Where(kvp => kvp.Value is AliasedValue && !kvp.Key.Contains('.'))
+                .ToList();
+
+            foreach (var kvp in schemaNamedAliasedValues)
+            {
+                var av = (AliasedValue)kvp.Value;
+                var link = crossApplyLinks.FirstOrDefault(l => l.Name == av.EntityLogicalName);
+                if (link is null)
+                    continue;
+
+                var normalizedKey = $"{link.Alias}.{av.AttributeLogicalName}";
+                if (!entity.Attributes.ContainsKey(normalizedKey))
+                    entity[normalizedKey] = av;
+            }
+        }
+    }
+
+    private static void CollectCrossApplyLinks(List<FetchLinkEntity> links, List<FetchLinkEntity> result)
+    {
+        foreach (var link in links)
+        {
+            if (link.LinkType == "matchfirstrowusingcrossapply")
+                result.Add(link);
+            CollectCrossApplyLinks(link.Links, result);
+        }
     }
 
     protected static MethodInfo GetPrivateMethod(string name) =>

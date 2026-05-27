@@ -766,4 +766,91 @@ public class JoinFetchXmlTests : FetchXmlTestBase
             </fetch>
             """);
     }
+
+    [Fact]
+    public void ToFetchXml_WithFirstRowAndOrderByDescending_EmitsRootOrderQualifiedByLink()
+    {
+        // The inner OrderByDescending defines which row WithFirstRow keeps. It must be
+        // emitted as a root-level <order> qualified by the link alias — cross-apply
+        // rejects an <order> inside the link entity.
+        var fetchXml = (from a in _service.Queryable<CustomAccount>()
+                        join c in _service.Queryable<CustomContact>()
+                                       .OrderByDescending(p => p.CreatedOn)
+                                       .WithFirstRow()
+                            on a.CustomAccountId equals c.ParentAccount.Id
+                        select new
+                        {
+                            ParticipantId = c.ParentAccount,
+                            LastInteractionOn = c.CreatedOn,
+                        }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <order attribute="createdon" descending="true" entityname="c" />
+                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="matchfirstrowusingcrossapply">
+                  <attribute name="new_parentaccount" />
+                  <attribute name="createdon" />
+                </link-entity>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_InnerJoinWithInnerOrderBy_EmitsRootOrderQualifiedByLink()
+    {
+        // An OrderBy on a (non-cross-apply) join inner source is also emitted at the root
+        // level with entityname — the same shape as ordering by a joined column.
+        var fetchXml = (from a in _service.Queryable<CustomAccount>()
+                        join c in _service.Queryable<CustomContact>()
+                                       .OrderBy(p => p.LastName)
+                                       .ThenByDescending(p => p.FirstName)
+                            on a.CustomAccountId equals c.ParentAccount.Id
+                        select new { a.Name, c.LastName }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+                <order attribute="new_lastname" descending="false" entityname="c" />
+                <order attribute="new_firstname" descending="true" entityname="c" />
+                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="inner">
+                  <attribute name="new_lastname" />
+                </link-entity>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_JoinProjectingLookup_SelectsLookupAttribute()
+    {
+        // Projecting a lookup (EntityReference) column from the joined entity selects the
+        // lookup attribute on the link entity.
+        var fetchXml = (from a in _service.Queryable<CustomAccount>()
+                        join c in _service.Queryable<CustomContact>()
+                            on a.CustomAccountId equals c.ParentAccount.Id
+                        select new
+                        {
+                            ParticipantId = c.ParentAccount,
+                            Owner = c.Owner,
+                        }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="inner">
+                  <attribute name="new_parentaccount" />
+                  <attribute name="ownerid" />
+                </link-entity>
+              </entity>
+            </fetch>
+            """);
+    }
 }

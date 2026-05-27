@@ -2252,6 +2252,45 @@ internal static class FetchXmlQueryTranslator
         return false;
     }
 
+    /// <summary>
+    /// Extracts <c>OrderBy</c>/<c>ThenBy</c> operators applied to a join's inner source
+    /// (e.g. <c>Queryable&lt;T&gt;().OrderByDescending(x => x.Date).WithFirstRow()</c>) and
+    /// returns them as orders in source order, each qualified with the link
+    /// <paramref name="linkAlias"/>. The orders are placed at the fetch (root) level with
+    /// <c>entityname</c> — the same shape as ordering by a joined column, and the only
+    /// placement <c>matchfirstrowusingcrossapply</c> accepts (it rejects an order clause
+    /// inside the link entity). Without this the inner ordering is silently dropped, which
+    /// notably defeats <c>WithFirstRow()</c>, whose "first row" is defined by that ordering.
+    /// </summary>
+    private static List<FetchOrder> ExtractInnerOrders(
+        Expression innerSource, string linkAlias, Func<string, string>? primaryKeyResolver)
+    {
+        var orders = new List<FetchOrder>();
+        var current = innerSource;
+        while (current is MethodCallExpression mc && mc.Arguments.Count > 0)
+        {
+            if (mc.Method.DeclaringType == typeof(Queryable)
+                && mc.Method.Name is nameof(Queryable.OrderBy) or nameof(Queryable.OrderByDescending)
+                    or nameof(Queryable.ThenBy) or nameof(Queryable.ThenByDescending))
+            {
+                var attr = mc.Arguments[1].ExtractLambda().Body.GetAttributeName(primaryKeyResolver);
+                if (attr is not null)
+                {
+                    var descending = mc.Method.Name is nameof(Queryable.OrderByDescending)
+                        or nameof(Queryable.ThenByDescending);
+                    orders.Add(new FetchOrder { Attribute = attr, Descending = descending, EntityAlias = linkAlias });
+                }
+            }
+
+            current = mc.Arguments[0];
+        }
+
+        // The chain is walked outermost-first (ThenBy before OrderBy); reverse to
+        // restore source order so the primary sort key is emitted first.
+        orders.Reverse();
+        return orders;
+    }
+
     private static void HandleInnerJoin(MethodCallExpression call, TranslationContext ctx)
     {
         // Recurse into the outer source first — for chained joins this processes
@@ -2271,7 +2310,7 @@ internal static class FetchXmlQueryTranslator
             HandleChainedJoin(
                 call.Arguments[2], call.Arguments[3],
                 innerLogicalName, innerEntityType, resultLambda,
-                chainedLinkType, ctx);
+                chainedLinkType, ctx, call.Arguments[1]);
             return;
         }
 
@@ -2296,6 +2335,7 @@ internal static class FetchXmlQueryTranslator
             LinkType = linkType
         };
         ctx.Query.Links.Add(link);
+        ctx.Query.Orders.AddRange(ExtractInnerOrders(call.Arguments[1], link.Alias, ctx.PrimaryKeyResolver));
 
         ctx.JoinMappings = new Dictionary<string, JoinEntityInfo>
         {
@@ -2319,7 +2359,8 @@ internal static class FetchXmlQueryTranslator
         Type innerEntityType,
         LambdaExpression resultLambda,
         string linkType,
-        TranslationContext ctx)
+        TranslationContext ctx,
+        Expression? innerSource = null)
     {
         var outerKeyLambda = outerKeyArg.ExtractLambda();
         var innerKeyLambda = innerKeyArg.ExtractLambda();
@@ -2342,6 +2383,8 @@ internal static class FetchXmlQueryTranslator
             Alias = resultLambda.Parameters[1].Name!,
             LinkType = linkType
         };
+        if (innerSource is not null)
+            ctx.Query.Orders.AddRange(ExtractInnerOrders(innerSource, link.Alias, ctx.PrimaryKeyResolver));
 
         // Nest under the parent link entity, or the root if the key belongs to the root entity
         if (outerKeyResolved.EntityAlias is null)

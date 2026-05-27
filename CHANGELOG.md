@@ -11,6 +11,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Added the global 'DataverseQueryDiagnostics.FetchXmlRequested' hook, raised with the FetchXml of every request for process-wide logging or telemetry.
 - Fixed invalid aggregate FetchXml when a GroupBy or aggregate was composed on top of a query that projected a whole linked entity (the link emitted all-attributes instead of the groupby/aggregate attributes).
 - Improved query composition support: a re-projecting Select now narrows previously projected link columns, and projecting a whole linked entity now retrieves its columns.
+- Fixed projected columns (especially lookups/EntityReferences) coming back null from a WithFirstRow (matchfirstrowusingcrossapply) join, which returns its columns keyed by schema name rather than the alias-prefixed name the materializer expected.
+- Fixed an OrderBy on a join's inner source being dropped; it is now emitted as a root-level order qualified by the link alias (the only placement cross-apply accepts), so WithFirstRow keeps the row defined by that ordering.
 
 ## [1.0.9] - 2026-03-27
 
