@@ -14,6 +14,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Fixed projected columns (especially lookups/EntityReferences) coming back null from a WithFirstRow (matchfirstrowusingcrossapply) join, which returns its columns keyed by schema name rather than the alias-prefixed name the materializer expected.
 - Fixed an OrderBy on a join's inner source being dropped; it is now emitted as a root-level order qualified by the link alias (the only placement cross-apply accepts), so WithFirstRow keeps the row defined by that ordering.
 
+## [1.0.10] - 2026-05-07
+
+- Fix NotSupportedException when projection uses GetAttributeValue inside a constructor.
+
 ## [1.0.9] - 2026-03-27
 
 - Added logic to guard against unsupported expressions.
