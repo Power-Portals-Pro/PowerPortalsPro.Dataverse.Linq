@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.0.11] - 2026-05-27
+
 - Added the 'CaptureFetchXml' extension method to capture the FetchXml of every request as a query executes, including once per page for multi-page queries.
 - Added a 'ToFetchXml' overload that returns the FetchXml for aggregate and element operators (Count, Sum, Min, Max, Average, CountColumn, First, Single, etc.) without executing the query.
 - Added the global 'DataverseQueryDiagnostics.FetchXmlRequested' hook, raised with the FetchXml of every request for process-wide logging or telemetry.
