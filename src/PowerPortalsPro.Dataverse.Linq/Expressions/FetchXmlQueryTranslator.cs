@@ -384,11 +384,27 @@ internal static class FetchXmlQueryTranslator
 
     private static void HandleJoinSelect(LambdaExpression lambda, TranslationContext ctx)
     {
+        // A Select fully (re)defines the projection. When this query was composed on top
+        // of an earlier projection (e.g. a prior `select c` that set AllAttributes on a
+        // link), that earlier projection must not leak through — otherwise a link's
+        // AllAttributes would suppress the narrower columns this Select requests. Clear
+        // link projections up front; the loop below repopulates them from this lambda.
+        // (In a single-pass query this runs once on links that have no columns yet, so
+        // it is a no-op there.)
+        ClearLinkProjectedColumns(ctx.Query.Links);
+
         // Collect columns keyed by entity alias ("" = root entity)
         var columnsByAlias = new Dictionary<string, List<string>>();
         var wholeEntityAliases = new HashSet<string>();
 
-        foreach (var arg in lambda.Body.GetProjectionArguments())
+        // A bare-parameter body (e.g. the folded result selector (c, o) => c) projects a
+        // whole entity but yields no projection arguments. Treat the body itself as the
+        // single argument so the whole-entity reference below is detected.
+        var projectionArgs = lambda.Body.GetProjectionArguments().ToList();
+        if (projectionArgs.Count == 0)
+            projectionArgs.Add(lambda.Body);
+
+        foreach (var arg in projectionArgs)
         {
             // Try attribute resolution first — if it succeeds, it's a property access
             var resolved = ResolveAttribute(arg, ctx);
