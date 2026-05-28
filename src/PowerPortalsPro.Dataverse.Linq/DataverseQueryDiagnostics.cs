@@ -1,3 +1,5 @@
+using Microsoft.Xrm.Sdk;
+
 namespace PowerPortalsPro.Dataverse.Linq;
 
 /// <summary>
@@ -29,4 +31,34 @@ public static class DataverseQueryDiagnostics
     /// notification string when nothing is listening.
     /// </summary>
     internal static bool HasFetchXmlSubscribers => FetchXmlRequested is not null;
+
+    /// <summary>
+    /// Process-wide transform applied to every raw <see cref="Entity"/> row before it is
+    /// materialized, for every query. Returns the entity to materialize (mutated or
+    /// replaced), or <c>null</c> to leave the row unchanged.
+    /// </summary>
+    /// <remarks>
+    /// Unlike <see cref="FetchXmlRequested"/> (an observe-only multicast event), this is a
+    /// transform pipeline stage, so it is a single delegate — assign a composed delegate
+    /// if you need to run several. It runs <i>before</i> any per-query
+    /// <c>OnBeforeMaterialize</c>, so the per-query hook runs last and takes precedence.
+    /// Handlers run inline on the materializing thread; keep them fast and exception-free.
+    /// </remarks>
+    public static Func<Entity, Entity?>? BeforeMaterialize { get; set; }
+
+    /// <summary>
+    /// Process-wide transform applied to every materialized result, for every query,
+    /// receiving the source <see cref="Entity"/> and the materialized object. Returns a
+    /// replacement object, or <c>null</c> to leave the result unchanged. It runs
+    /// <i>before</i> any per-query <c>OnAfterMaterialize</c>, so the per-query hook runs
+    /// last and takes precedence. Single delegate; see <see cref="BeforeMaterialize"/>
+    /// remarks.
+    /// </summary>
+    public static Func<Entity, object?, object?>? AfterMaterialize { get; set; }
+
+    internal static Entity? RaiseBeforeMaterialize(Entity entity) =>
+        BeforeMaterialize?.Invoke(entity);
+
+    internal static object? RaiseAfterMaterialize(Entity source, object? result) =>
+        AfterMaterialize?.Invoke(source, result);
 }

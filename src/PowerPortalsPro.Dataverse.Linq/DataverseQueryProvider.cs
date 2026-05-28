@@ -76,8 +76,8 @@ internal class DataverseQueryProvider<T> : IQueryProvider where T : Entity
     {
         var query = FetchXmlQueryTranslator.Translate<T>(expression, Columns, EntityLogicalName, Service);
         var fetchXml = FetchXmlBuilder.Build(query);
-        return RetrieveAll(fetchXml, query.OnRecordCount, BuildFetchXmlNotifier(query))
-            .Select(e => e.ToEntity<T>()).ToList();
+        var entities = RetrieveAll(fetchXml, query.OnRecordCount, BuildFetchXmlNotifier(query));
+        return ProjectEntities<T>(entities, query);
     }
 
     internal void ForEachPage<TElement>(
@@ -238,15 +238,45 @@ internal class DataverseQueryProvider<T> : IQueryProvider where T : Entity
     /// <summary>
     /// Projects raw Dataverse entity rows into <typeparamref name="TElement"/> based
     /// on the query model: materializer-based projection or plain typed entity cast.
+    /// Applies the before/after materialization hooks (per-query and global) per row.
     /// </summary>
     protected List<TElement> ProjectEntities<TElement>(List<Entity> entities, FetchXmlQuery query)
     {
         NormalizeCrossApplyAliases(entities, query);
 
-        if (query.Materializer is not null)
-            return entities.Select(e => (TElement)query.Materializer.Invoke(e)).ToList();
+        var results = new List<TElement>(entities.Count);
+        foreach (var entity in entities)
+            results.Add(MaterializeRow<TElement>(entity, query));
+        return results;
+    }
 
-        return entities.Select(e => (TElement)(object)e.ToEntity<T>()).ToList();
+    /// <summary>
+    /// Materializes a single raw row into <typeparamref name="TElement"/>, applying the
+    /// before/after materialization transforms. In both phases the global hook runs first
+    /// and the per-query hook runs after it, so the per-query hook always gets the final
+    /// say (global before → query before → materialize → global after → query after). A
+    /// transform that returns <c>null</c> leaves its input unchanged.
+    /// </summary>
+    private TElement MaterializeRow<TElement>(Entity entity, FetchXmlQuery query)
+    {
+        var source = DataverseQueryDiagnostics.RaiseBeforeMaterialize(entity) ?? entity;
+        if (query.OnBeforeMaterialize is { } beforeQuery)
+            source = beforeQuery(source) ?? source;
+
+        object materialized = query.Materializer is not null
+            ? query.Materializer.Invoke(source)
+            : source.ToEntity<T>();
+
+        materialized = DataverseQueryDiagnostics.RaiseAfterMaterialize(source, materialized) ?? materialized;
+
+        if (query.OnAfterMaterialize is Func<Entity, TElement, TElement?> afterQuery)
+        {
+            var transformed = afterQuery(source, (TElement)materialized);
+            if (transformed is not null)
+                materialized = transformed;
+        }
+
+        return (TElement)materialized;
     }
 
     /// <summary>

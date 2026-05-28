@@ -20,7 +20,9 @@
       "Bash(curl:*)",
       "Bash(cd /d D:\\\\Code\\\\PowerPortalsPro.Dataverse.Linq)",
       "Bash(dir /b)",
-      "Bash(echo \"exit: $?\")"
+      "Bash(echo \"exit: $?\")",
+      "Bash(rm -rf \"D:/Code/PowerPortalsPro.Dataverse.Linq.Tests\")",
+      "Read(//d/Code/**)"
     ]
   }
 }

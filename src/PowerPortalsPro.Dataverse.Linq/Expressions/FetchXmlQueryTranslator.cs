@@ -287,6 +287,14 @@ internal static class FetchXmlQueryTranslator
                         TranslateCore(sceCall.Arguments[0], ctx);
                         ctx.Query.OnFetchXml = (Action<string>)((ConstantExpression)sceCall.Arguments[1]).Value!;
                         return;
+                    case nameof(ServiceClientExtensions.OnBeforeMaterialize):
+                        TranslateCore(sceCall.Arguments[0], ctx);
+                        ctx.Query.OnBeforeMaterialize = (Func<Entity, Entity?>)((ConstantExpression)sceCall.Arguments[1]).Value!;
+                        return;
+                    case nameof(ServiceClientExtensions.OnAfterMaterialize):
+                        TranslateCore(sceCall.Arguments[0], ctx);
+                        ctx.Query.OnAfterMaterialize = (Delegate)((ConstantExpression)sceCall.Arguments[1]).Value!;
+                        return;
                     case nameof(ServiceClientExtensions.ReturnRecordCount):
                         TranslateCore(sceCall.Arguments[0], ctx);
                         ctx.Query.ReturnTotalRecordCount = true;
@@ -1604,6 +1612,20 @@ internal static class FetchXmlQueryTranslator
             var elementSelector = call.Arguments[2].ExtractLambda();
             ctx.GroupElementMappings = AnalyzeGroupElement(elementSelector, ctx.JoinMappings);
         }
+        else if (ctx.JoinMappings is not null)
+        {
+            // Two-arg GroupBy over a joined source (e.g. composing `group c by c.Key` onto a
+            // query that already projected the inner entity `c`): there is no element
+            // selector, so the group element is the range variable itself. Map it to its
+            // join entity so aggregates (Count, Max, …) target the correct link entity
+            // rather than defaulting to the root.
+            var elementParam = keySelector.Parameters[0];
+            if (ctx.JoinMappings.TryGetValue(elementParam.Name!, out var elementMapping))
+                ctx.GroupElementMappings = new Dictionary<string, JoinEntityInfo>
+                {
+                    [string.Empty] = elementMapping
+                };
+        }
 
         // Clear join mappings — subsequent Select/OrderBy operate on IGrouping, not TI
         ctx.JoinMappings = null;
@@ -1650,8 +1672,11 @@ internal static class FetchXmlQueryTranslator
         var current = expr;
         while (current is MemberExpression me)
         {
-            if (me.Expression is ParameterExpression
-                && joinMappings.TryGetValue(me.Member.Name, out var mapping))
+            // Match the range-variable name anywhere in the member chain. Chained joins
+            // produce nested transparent identifiers (e.g. ti.ti1.c2), so the entity
+            // member's parent is not necessarily the parameter itself — consistent with
+            // how ResolveJoinAttribute / ResolveWholeJoinEntity walk the chain.
+            if (joinMappings.TryGetValue(me.Member.Name, out var mapping))
                 return mapping;
             current = me.Expression;
         }
