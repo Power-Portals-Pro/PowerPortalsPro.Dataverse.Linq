@@ -739,6 +739,58 @@ DataverseQueryDiagnostics.FetchXmlRequested += xml =>
 
 > Handlers run inline on the thread issuing the request, so keep them fast and exception-free. Use `CaptureFetchXml(...)` when you need to scope capture to a single query.
 
+## Materialization Hooks
+
+Transform hooks let you intercept each row as it is turned from a raw Dataverse `Entity` into your result type. `OnBeforeMaterialize` runs on the raw `Entity` before projection; `OnAfterMaterialize` runs on the materialized result, with access to the source `Entity`. Both can mutate in place or return a replacement, and both are available per query (inline) and process-wide (global) — paralleling the FetchXml hooks above.
+
+They fire for every row-materializing path — `ToList`/`ToListAsync`, `First`/`Single`, projections, and `ForEachPage` — but not for scalar aggregates (`Count`, `Sum`, etc.), where there is no row-to-object step.
+
+### Per-query (inline)
+
+```csharp
+// OnBeforeMaterialize — adjust or replace the raw row before projection.
+// Return the entity to materialize, or null to leave it unchanged.
+var rows = await service.Queryable<Account>()
+    .OnBeforeMaterialize(e =>
+    {
+        e["computed"] = Derive(e);   // Entity is mutable
+        return e;
+    })
+    .Select(a => new { a.Name, Computed = a.GetAttributeValue<string>("computed") })
+    .ToListAsync();
+
+// OnAfterMaterialize — enrich or replace the materialized result using the source row.
+// Return the result to use, or null to leave it unchanged.
+var contacts = await service.Queryable<Contact>()
+    .OnAfterMaterialize((source, c) =>
+    {
+        c.FullName = $"{c.FirstName} {c.LastName}";
+        return c;
+    })
+    .ToListAsync();
+```
+
+### Global
+
+```csharp
+// Register once at startup. Applies to every query in the process.
+DataverseQueryDiagnostics.BeforeMaterialize = entity => entity;            // Func<Entity, Entity?>
+DataverseQueryDiagnostics.AfterMaterialize  = (source, result) => result;  // Func<Entity, object?, object?>
+```
+
+The global handlers are single delegates (not multicast events like `FetchXmlRequested`) because a transform pipeline needs a single return value — assign a composed delegate if you need to run several.
+
+### Ordering
+
+For both phases the global hook runs first and the per-query hook runs after it, so the per-query hook always has the final say:
+
+```
+global OnBeforeMaterialize → query OnBeforeMaterialize → (materialize)
+    → global OnAfterMaterialize → query OnAfterMaterialize
+```
+
+> Returning `null` from any hook leaves its input unchanged. Hooks run inline on the materializing thread; keep them fast and exception-free.
+
 ## Async Operations (.NET 8, .NET 10+)
 
 All query execution methods have async counterparts. These are only available when targeting .NET 10+.

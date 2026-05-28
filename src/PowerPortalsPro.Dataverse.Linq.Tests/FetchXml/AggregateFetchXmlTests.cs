@@ -512,12 +512,12 @@ public class AggregateFetchXmlTests : FetchXmlTestBase
             """
             <fetch mapping="logical" aggregate="true">
               <entity name="new_customaccount">
-                <attribute name="new_customaccountid" alias="count" aggregate="count" />
                 <filter type="and">
                   <condition entityname="c" attribute="new_firstname" operator="not-null" />
                 </filter>
                 <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="inner">
                   <attribute name="new_parentaccount" alias="account" groupby="true" />
+                  <attribute name="new_customcontactid" alias="count" aggregate="count" />
                 </link-entity>
               </entity>
             </fetch>

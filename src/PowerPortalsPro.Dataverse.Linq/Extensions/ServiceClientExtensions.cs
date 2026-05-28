@@ -385,6 +385,68 @@ public static partial class ServiceClientExtensions
         return queryable.Provider.CreateQuery<TElement>(expression);
     }
 
+    /// <summary>
+    /// Registers a per-query transform invoked with each raw <see cref="Entity"/> row
+    /// immediately before it is materialized into the result type. Return the entity to
+    /// materialize (the same instance — <see cref="Entity"/> is mutable — or a
+    /// replacement), or <c>null</c> to leave the row unchanged. Runs after (and therefore
+    /// takes precedence over) the global
+    /// <see cref="DataverseQueryDiagnostics.BeforeMaterialize"/> hook.
+    /// </summary>
+    /// <example>
+    /// <code>
+    /// var rows = query
+    ///     .OnBeforeMaterialize(e => { e["computed"] = Derive(e); return e; })
+    ///     .ToList();
+    /// </code>
+    /// </example>
+    public static IQueryable<TElement> OnBeforeMaterialize<TElement>(
+        this IQueryable<TElement> queryable,
+        Func<Entity, Entity?> onBeforeMaterialize)
+    {
+        if (onBeforeMaterialize is null)
+            throw new ArgumentNullException(nameof(onBeforeMaterialize));
+
+        var expression = Expression.Call(
+            typeof(ServiceClientExtensions),
+            nameof(OnBeforeMaterialize),
+            [typeof(TElement)],
+            queryable.Expression,
+            Expression.Constant(onBeforeMaterialize));
+
+        return queryable.Provider.CreateQuery<TElement>(expression);
+    }
+
+    /// <summary>
+    /// Registers a per-query transform invoked with the source <see cref="Entity"/> and
+    /// the materialized result. Return the result to use (the same instance, mutated, or a
+    /// replacement), or <c>null</c> to leave it unchanged. Runs after (and therefore takes
+    /// precedence over) the global <see cref="DataverseQueryDiagnostics.AfterMaterialize"/> hook.
+    /// </summary>
+    /// <example>
+    /// <code>
+    /// var contacts = query
+    ///     .OnAfterMaterialize((source, c) => { c.FullName = $"{c.FirstName} {c.LastName}"; return c; })
+    ///     .ToList();
+    /// </code>
+    /// </example>
+    public static IQueryable<TElement> OnAfterMaterialize<TElement>(
+        this IQueryable<TElement> queryable,
+        Func<Entity, TElement, TElement?> onAfterMaterialize)
+    {
+        if (onAfterMaterialize is null)
+            throw new ArgumentNullException(nameof(onAfterMaterialize));
+
+        var expression = Expression.Call(
+            typeof(ServiceClientExtensions),
+            nameof(OnAfterMaterialize),
+            [typeof(TElement)],
+            queryable.Expression,
+            Expression.Constant(onAfterMaterialize, typeof(Func<Entity, TElement, TElement?>)));
+
+        return queryable.Provider.CreateQuery<TElement>(expression);
+    }
+
     internal static bool IsDataverseProvider(Type providerType)
     {
         var type = providerType;

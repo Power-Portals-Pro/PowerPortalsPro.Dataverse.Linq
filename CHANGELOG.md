@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+- Added 'OnBeforeMaterialize' and 'OnAfterMaterialize' transform hooks, available both inline per query and globally via 'DataverseQueryDiagnostics.BeforeMaterialize'/'AfterMaterialize'. OnBeforeMaterialize can adjust or replace the raw row before projection; OnAfterMaterialize can enrich or replace the materialized result using the source row. The global hook runs first and the per-query hook runs after it, so the per-query hook takes precedence.
+- Fixed grouped aggregates (Count, Max, etc.) being computed on the wrong entity in some joined GroupBy queries: a GroupBy composed over an already-joined query, and a GroupBy across chained joins, now place their aggregate attributes on the grouped element's entity instead of defaulting to the root entity.
+
 ## [1.0.11] - 2026-05-27
 
 - Added the 'CaptureFetchXml' extension method to capture the FetchXml of every request as a query executes, including once per page for multi-page queries.

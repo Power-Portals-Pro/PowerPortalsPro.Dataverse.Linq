@@ -56,6 +56,23 @@ internal sealed class FetchXmlQuery
     public Action<string>? OnFetchXml { get; set; }
 
     /// <summary>
+    /// Per-query transform invoked with each raw <see cref="Microsoft.Xrm.Sdk.Entity"/>
+    /// row before it is materialized into the result type. Returns the entity to
+    /// materialize (the same instance, mutated, or a replacement); returning <c>null</c>
+    /// leaves the row unchanged. Registered via <c>OnBeforeMaterialize(...)</c>.
+    /// </summary>
+    public Func<Microsoft.Xrm.Sdk.Entity, Microsoft.Xrm.Sdk.Entity?>? OnBeforeMaterialize { get; set; }
+
+    /// <summary>
+    /// Per-query transform invoked with the source <see cref="Microsoft.Xrm.Sdk.Entity"/>
+    /// and the materialized result. Stored as a <see cref="Delegate"/> of type
+    /// <c>Func&lt;Entity, TElement, TElement&gt;</c> (the element type is not known to this
+    /// non-generic model) and cast back by the provider during materialization. Returning
+    /// <c>null</c> leaves the result unchanged. Registered via <c>OnAfterMaterialize(...)</c>.
+    /// </summary>
+    public Delegate? OnAfterMaterialize { get; set; }
+
+    /// <summary>
     /// The terminal operator that determines how the result set is returned
     /// (e.g. First, Single). Defaults to <see cref="QueryTerminalOperator.List"/>.
     /// </summary>
