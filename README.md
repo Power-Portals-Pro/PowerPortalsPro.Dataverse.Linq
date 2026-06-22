@@ -1,5 +1,8 @@
 # PowerPortalsPro.Dataverse.Linq
 
+[![NuGet](https://img.shields.io/nuget/v/PowerPortalsPro.Dataverse.Linq.svg)](https://www.nuget.org/packages/PowerPortalsPro.Dataverse.Linq)
+[![NuGet Downloads](https://img.shields.io/nuget/dt/PowerPortalsPro.Dataverse.Linq.svg)](https://www.nuget.org/packages/PowerPortalsPro.Dataverse.Linq)
+
 A strongly-typed LINQ query provider for Microsoft Dataverse (Dynamics 365 / Power Platform) that translates standard LINQ expressions into [FetchXml](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/fetchxml/overview) and executes them against the Dataverse API. Write queries using familiar C# syntax instead of hand-crafting FetchXml strings.
 
 ## Installation
@@ -7,6 +10,8 @@ A strongly-typed LINQ query provider for Microsoft Dataverse (Dynamics 365 / Pow
 ```
 dotnet add package PowerPortalsPro.Dataverse.Linq
 ```
+
+Available on [NuGet](https://www.nuget.org/packages/PowerPortalsPro.Dataverse.Linq).
 
 Supports **.NET 8, .NET 10+** (with full async support) and **.NET Framework 4.6.2+** (sync only).
 
