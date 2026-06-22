@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.0.13] - 2026-06-22
+
 - Fixed 'Entity.Id' not resolving in queries over unbound entities (e.g. `Queryable("logicalname").Where(x => x.Id == id)`). The primary key attribute is now resolved from entity metadata using the query's known logical name when the parameter is the base 'Entity' type, so predicates, ordering, and projections referencing 'x.Id' work for unbound queries as they already do for typed ones.
 
 ## [1.0.12] - 2026-05-28
