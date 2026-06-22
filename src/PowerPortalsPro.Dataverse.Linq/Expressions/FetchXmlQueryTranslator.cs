@@ -1277,7 +1277,7 @@ internal static class FetchXmlQueryTranslator
         // expression traces back to a lambda ParameterExpression (not a captured closure variable).
         // Without this check, captured entity properties like `capturedEntity.PrimaryKeyId`
         // would be incorrectly resolved as query attributes instead of constant values.
-        var access = expr.ResolveAttributeAccess(ctx.PrimaryKeyResolver);
+        var access = expr.ResolveAttributeAccess(ctx.PrimaryKeyResolver, ctx.Query.EntityLogicalName);
         if (access is not null && IsQueryParameterAccess(access.Value.EntityExpression))
             return new ResolvedAttribute(access.Value.AttributeName, null);
 
@@ -1320,7 +1320,7 @@ internal static class FetchXmlQueryTranslator
     /// </summary>
     private static ResolvedAttribute? ResolveLeftJoinAttribute(Expression expr, TranslationContext ctx)
     {
-        var access = expr.ResolveAttributeAccess(ctx.PrimaryKeyResolver);
+        var access = expr.ResolveAttributeAccess(ctx.PrimaryKeyResolver, ctx.Query.EntityLogicalName);
         if (access is null)
             return null;
 
@@ -1493,7 +1493,7 @@ internal static class FetchXmlQueryTranslator
         {
             // Min(selector), Max(selector), etc. — extract the attribute from the selector
             var lambda = call.Arguments[1].ExtractLambda();
-            var attrName = lambda.Body.GetAttributeName(ctx.PrimaryKeyResolver)
+            var attrName = lambda.Body.GetAttributeName(ctx.PrimaryKeyResolver, ctx.Query.EntityLogicalName)
                 ?? throw new NotSupportedException(
                     $"Could not resolve attribute for '{methodName}'.");
 
@@ -1969,7 +1969,7 @@ internal static class FetchXmlQueryTranslator
         if (orderCall.Arguments.Count == 2)
         {
             var orderSelector = orderCall.Arguments[1].ExtractLambda();
-            orderAttrName = orderSelector.Body.GetAttributeName(ctx.PrimaryKeyResolver);
+            orderAttrName = orderSelector.Body.GetAttributeName(ctx.PrimaryKeyResolver, ctx.Query.EntityLogicalName);
         }
 
         for (var i = 0; i < selectArgs.Length; i++)
@@ -1985,7 +1985,7 @@ internal static class FetchXmlQueryTranslator
             if (orderAttrName is not null && selectMc.Arguments.Count == 2)
             {
                 var selectSelector = selectMc.Arguments[1].ExtractLambda();
-                var selectAttrName = selectSelector.Body.GetAttributeName(ctx.PrimaryKeyResolver);
+                var selectAttrName = selectSelector.Body.GetAttributeName(ctx.PrimaryKeyResolver, ctx.Query.EntityLogicalName);
                 if (selectAttrName != orderAttrName)
                     continue;
             }
@@ -2202,7 +2202,7 @@ internal static class FetchXmlQueryTranslator
                 return (resolved.Value.Name, aggregateFunc, resolved.Value.EntityAlias);
         }
 
-        var attrName = selectorLambda.Body.GetAttributeName(ctx.PrimaryKeyResolver)
+        var attrName = selectorLambda.Body.GetAttributeName(ctx.PrimaryKeyResolver, ctx.Query.EntityLogicalName)
             ?? throw new NotSupportedException(
                 $"Could not resolve attribute for grouped {methodName}.");
 

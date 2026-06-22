@@ -131,6 +131,33 @@ public class UnboundEntityFetchXmlTests : FetchXmlTestBase
     }
 
     // -------------------------------------------------------------------------
+    // Where — Entity.Id (unbound, resolved via primary key metadata)
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_UnboundEntity_WhereIdEquals_ResolvesPrimaryKeyAttribute()
+    {
+        var id = Guid.NewGuid();
+
+        var fetchXml = _service.Queryable("curo_sharepointmigrationjob", "curo_batch", "curo_jobstatus")
+            .Where(x => x.Id == id)
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            $"""
+            <fetch mapping="logical">
+              <entity name="curo_sharepointmigrationjob">
+                <attribute name="curo_batch" />
+                <attribute name="curo_jobstatus" />
+                <filter type="and">
+                  <condition attribute="curo_sharepointmigrationjobid" operator="eq" value="{id}" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    // -------------------------------------------------------------------------
     // Unbound entity join
     // -------------------------------------------------------------------------
 

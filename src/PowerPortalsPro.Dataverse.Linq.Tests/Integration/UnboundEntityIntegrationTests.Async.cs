@@ -157,6 +157,33 @@ public partial class UnboundEntityIntegrationTests
     }
 
     // -------------------------------------------------------------------------
+    // Where — unbound entity filtered by Entity.Id (primary key)
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task FirstOrDefaultAsync_UnboundEntity_WhereIdEquals_ReturnsMatchingRecord()
+    {
+        var existing = await Service.Queryable("new_customaccount", "new_name").FirstOrDefaultAsync();
+        existing.Should().NotBeNull();
+
+        var result = await Service.Queryable("new_customaccount", "new_name")
+            .FirstOrDefaultAsync(x => x.Id == existing!.Id);
+
+        result.Should().NotBeNull();
+        result!.Id.Should().Be(existing!.Id);
+        result.GetAttributeValue<string>("new_name").Should().Be(existing.GetAttributeValue<string>("new_name"));
+    }
+
+    [Fact]
+    public async Task FirstOrDefaultAsync_UnboundEntity_WhereIdEqualsMissing_ReturnsNull()
+    {
+        var result = await Service.Queryable("new_customaccount", "new_name")
+            .FirstOrDefaultAsync(x => x.Id == Guid.NewGuid());
+
+        result.Should().BeNull();
+    }
+
+    // -------------------------------------------------------------------------
     // Unbound entity join
     // -------------------------------------------------------------------------
 

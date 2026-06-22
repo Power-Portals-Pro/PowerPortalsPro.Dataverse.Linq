@@ -22,7 +22,9 @@
       "Bash(dir /b)",
       "Bash(echo \"exit: $?\")",
       "Bash(rm -rf \"D:/Code/PowerPortalsPro.Dataverse.Linq.Tests\")",
-      "Read(//d/Code/**)"
+      "Read(//d/Code/**)",
+      "PowerShell(dotnet build *)",
+      "PowerShell(dotnet test *)"
     ]
   }
 }

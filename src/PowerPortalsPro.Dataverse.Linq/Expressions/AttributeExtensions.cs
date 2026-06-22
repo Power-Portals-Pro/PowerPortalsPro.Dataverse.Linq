@@ -16,8 +16,14 @@ internal static class AttributeExtensions
     /// Handles direct property access, EntityReference.Id, Money.Value, OptionSetValue.Value,
     /// and <see cref="Entity.GetAttributeValue{T}"/> calls with a string-constant argument.
     /// </summary>
+    /// <param name="rootEntityLogicalName">
+    /// Fallback logical name used to resolve <see cref="Entity.Id"/> when the entity expression's
+    /// CLR type is the base <see cref="Entity"/> (e.g. an unbound <c>Queryable("logicalname")</c>
+    /// query) and therefore has no <see cref="EntityLogicalNameAttribute"/> to read.
+    /// </param>
     internal static (string AttributeName, Expression EntityExpression)? ResolveAttributeAccess(
-        this Expression expr, Func<string, string>? primaryKeyResolver = null)
+        this Expression expr, Func<string, string>? primaryKeyResolver = null,
+        string? rootEntityLogicalName = null)
     {
         if (expr is UnaryExpression { NodeType: ExpressionType.Convert } convert)
             expr = convert.Operand;
@@ -79,7 +85,8 @@ internal static class AttributeExtensions
             && primaryKeyResolver is not null)
         {
             var entityLogicalName = memberExpr.Expression.Type
-                .GetCustomAttribute<EntityLogicalNameAttribute>()?.LogicalName;
+                .GetCustomAttribute<EntityLogicalNameAttribute>()?.LogicalName
+                ?? rootEntityLogicalName;
 
             if (entityLogicalName is not null)
             {
@@ -94,8 +101,9 @@ internal static class AttributeExtensions
     internal static string? GetAttributeName(this Expression expr) =>
         expr.ResolveAttributeAccess()?.AttributeName;
 
-    internal static string? GetAttributeName(this Expression expr, Func<string, string>? primaryKeyResolver) =>
-        expr.ResolveAttributeAccess(primaryKeyResolver)?.AttributeName;
+    internal static string? GetAttributeName(this Expression expr, Func<string, string>? primaryKeyResolver,
+        string? rootEntityLogicalName = null) =>
+        expr.ResolveAttributeAccess(primaryKeyResolver, rootEntityLogicalName)?.AttributeName;
 
     internal static string GetEntityLogicalName(this Type entityType) =>
         entityType.GetCustomAttribute<EntityLogicalNameAttribute>()?.LogicalName
