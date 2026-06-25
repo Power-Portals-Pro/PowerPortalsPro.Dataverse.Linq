@@ -10,7 +10,7 @@ namespace PowerPortalsPro.Dataverse.Linq.Tests.Integration;
 
 public partial class GroupByIntegrationTests(ServiceClientFixture fixture) : IntegrationTestBase(fixture)
 {
-    #if !NETFRAMEWORK
+#if !NETFRAMEWORK
     private IOrganizationServiceAsync Service => ServiceProvider.GetRequiredService<IOrganizationServiceAsync>();
 #else
     private IOrganizationService Service => ServiceProvider.GetRequiredService<IOrganizationService>();
@@ -71,6 +71,53 @@ public partial class GroupByIntegrationTests(ServiceClientFixture fixture) : Int
             r.Count.Should().BeGreaterThan(0);
         });
         results.Sum(r => r.Count).Should().Be(totalWithRating);
+    }
+
+    [Fact]
+    public void GroupBy_DistinctCount_MatchesClientSideComputation()
+    {
+        // g.Select(x => x.Lookup).Distinct().Count() must translate to a
+        // countcolumn/distinct aggregate and produce the same per-group distinct
+        // counts as computing them client-side from the raw rows.
+        //
+        // Count distinct *accounts* (not contacts): each opportunity has a unique
+        // contact, so distinct-counting contacts would never collapse a duplicate and
+        // wouldn't exercise the distinct behavior. Five contacts share each account,
+        // and opportunities cycle through statuses, so several opportunities in the
+        // same status group resolve to the same parent account — distinctness matters.
+        var server = (from o in Service.Queryable<CustomOpportunity>()
+                      join c in Service.Queryable<CustomContact>()
+                          on o.Contact.Id equals c.CustomContactId
+                      group new { o, c } by o.StatusReason_OptionSetValue.Value into g
+                      select new
+                      {
+                          Status = g.Key,
+                          DistinctAccounts = g.Select(x => x.c.ParentAccount).Distinct().Count(),
+                          Total = g.Count(),
+                      }).ToList();
+
+        var raw = (from o in Service.Queryable<CustomOpportunity>()
+                   join c in Service.Queryable<CustomContact>()
+                       on o.Contact.Id equals c.CustomContactId
+                   select new { o.StatusReason_OptionSetValue, c.ParentAccount }).ToList();
+
+        var expected = raw
+            .GroupBy(o => o.StatusReason_OptionSetValue.Value)
+            .ToDictionary(g => g.Key, g => g.Select(x => x.ParentAccount.Id).Distinct().Count());
+
+        server.Should().NotBeEmpty();
+        server.Should().AllSatisfy(r =>
+        {
+            // A distinct count can never exceed the group's row count.
+            r.DistinctAccounts.Should().BeLessThanOrEqualTo(r.Total);
+            expected.Should().ContainKey(r.Status);
+            r.DistinctAccounts.Should().Be(expected[r.Status]);
+        });
+
+        // Sanity check that distinctness is actually being exercised: across all
+        // groups, distinct accounts must be strictly fewer than total rows, otherwise
+        // this test would pass even if 'distinct' were ignored.
+        server.Sum(r => r.DistinctAccounts).Should().BeLessThan(server.Sum(r => r.Total));
     }
 
     [Fact]

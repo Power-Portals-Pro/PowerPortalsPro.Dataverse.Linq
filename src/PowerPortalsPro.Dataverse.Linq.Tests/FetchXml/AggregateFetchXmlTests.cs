@@ -357,6 +357,115 @@ public class AggregateFetchXmlTests : FetchXmlTestBase
     }
 
     [Fact]
+    public void ToFetchXml_GroupByWithDistinctCount_GeneratesCountColumnDistinct()
+    {
+        var fetchXml = (from o in _service.Queryable<CustomOpportunity>()
+                        group o by o.Status into g
+                        select new
+                        {
+                            Status = g.Key,
+                            DistinctContacts = g.Select(x => x.Contact).Distinct().Count(),
+                            Recent = g.Max(x => x.CreatedOn),
+                        }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="new_customopportunity">
+                <attribute name="statecode" alias="status" groupby="true" />
+                <attribute name="new_contact" alias="distinctcontacts" aggregate="countcolumn" distinct="true" />
+                <attribute name="createdon" alias="recent" aggregate="max" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_GroupByWithDistinctCountOnLookupId_GeneratesCountColumnDistinct()
+    {
+        // g.Select(x => x.Contact.Id).Distinct().Count() resolves to the same lookup
+        // attribute as g.Select(x => x.Contact).Distinct().Count().
+        var fetchXml = (from o in _service.Queryable<CustomOpportunity>()
+                        group o by o.Status into g
+                        select new
+                        {
+                            Status = g.Key,
+                            DistinctContacts = g.Select(x => x.Contact.Id).Distinct().Count(),
+                        }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="new_customopportunity">
+                <attribute name="statecode" alias="status" groupby="true" />
+                <attribute name="new_contact" alias="distinctcontacts" aggregate="countcolumn" distinct="true" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_JoinGroupByWithDistinctCount_PlacesCountColumnDistinctOnRoot()
+    {
+        // Mirrors the real-world shape: join + group the root entity, then take a
+        // distinct count of a root-entity lookup alongside a Max aggregate.
+        var fetchXml = (from o in _service.Queryable<CustomOpportunity>()
+                        join c in _service.Queryable<CustomContact>()
+                            on o.Contact.Id equals c.CustomContactId
+                        group o by o.Status into g
+                        select new
+                        {
+                            Status = g.Key,
+                            DistinctContacts = g.Select(x => x.Contact).Distinct().Count(),
+                            Recent = g.Max(x => x.CreatedOn),
+                        }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="new_customopportunity">
+                <attribute name="statecode" alias="status" groupby="true" />
+                <attribute name="new_contact" alias="distinctcontacts" aggregate="countcolumn" distinct="true" />
+                <attribute name="createdon" alias="recent" aggregate="max" />
+                <link-entity name="new_customcontact" from="new_customcontactid" to="new_contact" alias="c" link-type="inner" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_JoinGroupByWithDistinctCountOnLinkEntity_PlacesCountColumnDistinctOnLink()
+    {
+        // Composite group element { o, c }: the distinct count selector targets the
+        // linked contact's lookup, so the countcolumn/distinct attribute belongs on the
+        // contact link-entity, not the root. (g.Count() also resolves to the link, since
+        // a composite element prefers link entities for its primary-key count.)
+        var fetchXml = (from o in _service.Queryable<CustomOpportunity>()
+                        join c in _service.Queryable<CustomContact>()
+                            on o.Contact.Id equals c.CustomContactId
+                        group new { o, c } by o.Status into g
+                        select new
+                        {
+                            Status = g.Key,
+                            DistinctAccounts = g.Select(x => x.c.ParentAccount).Distinct().Count(),
+                            Total = g.Count(),
+                        }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="new_customopportunity">
+                <attribute name="statecode" alias="status" groupby="true" />
+                <link-entity name="new_customcontact" from="new_customcontactid" to="new_contact" alias="c" link-type="inner">
+                  <attribute name="new_parentaccount" alias="distinctaccounts" aggregate="countcolumn" distinct="true" />
+                  <attribute name="new_customcontactid" alias="total" aggregate="count" />
+                </link-entity>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
     public void ToFetchXml_GroupByConstant_GeneratesAggregateWithoutGroupBy()
     {
         var fetchXml = (from a in _service.Queryable<CustomAccount>()

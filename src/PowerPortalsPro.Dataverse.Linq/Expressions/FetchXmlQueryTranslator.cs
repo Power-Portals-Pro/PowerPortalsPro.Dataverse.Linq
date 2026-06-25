@@ -1779,12 +1779,13 @@ internal static class FetchXmlQueryTranslator
             }
             else if (arg is MethodCallExpression mc && _aggregateFunctionMap.ContainsKey(mc.Method.Name))
             {
-                var (attrName, aggregateFunc, entityAlias) = ResolveGroupAggregate(mc, ctx);
+                var (attrName, aggregateFunc, entityAlias, distinct) = ResolveGroupAggregate(mc, ctx);
                 AddGroupAttribute(ctx, new FetchAttribute
                 {
                     Name = attrName,
                     Alias = alias,
-                    Aggregate = aggregateFunc
+                    Aggregate = aggregateFunc,
+                    Distinct = distinct
                 }, entityAlias);
             }
             else if (ContainsAggregate(argExpressions[i]))
@@ -1991,7 +1992,7 @@ internal static class FetchXmlQueryTranslator
             }
 
             var alias = selectMemberNames[i].ToLowerInvariant();
-            var (_, _, entityAlias) = ResolveGroupAggregate(selectMc, ctx);
+            var (_, _, entityAlias, _) = ResolveGroupAggregate(selectMc, ctx);
             return (alias, entityAlias);
         }
 
@@ -2053,12 +2054,13 @@ internal static class FetchXmlQueryTranslator
             if (_aggregateFunctionMap.ContainsKey(node.Method.Name))
             {
                 var subAlias = $"{_baseAlias}_agg{_counter++}";
-                var (attrName, aggregateFunc, entityAlias) = ResolveGroupAggregate(node, _ctx);
+                var (attrName, aggregateFunc, entityAlias, distinct) = ResolveGroupAggregate(node, _ctx);
                 AddGroupAttribute(_ctx, new FetchAttribute
                 {
                     Name = attrName,
                     Alias = subAlias,
-                    Aggregate = aggregateFunc
+                    Aggregate = aggregateFunc,
+                    Distinct = distinct
                 }, entityAlias);
 
                 return Expression.Call(
@@ -2171,12 +2173,23 @@ internal static class FetchXmlQueryTranslator
     /// <c>g.Sum(x =&gt; x.Revenue)</c>) to an attribute name, FetchXml aggregate function,
     /// and the entity alias where the attribute should be placed.
     /// </summary>
-    private static (string AttrName, string AggregateFunc, string? EntityAlias) ResolveGroupAggregate(
+    private static (string AttrName, string AggregateFunc, string? EntityAlias, bool Distinct) ResolveGroupAggregate(
         MethodCallExpression mc, TranslationContext ctx)
     {
         var methodName = mc.Method.Name;
         if (!_aggregateFunctionMap.TryGetValue(methodName, out var aggregateFunc))
             throw new NotSupportedException($"Unsupported group aggregate '{methodName}'.");
+
+        // Distinct column count: g.Select(x => x.Attr).Distinct().Count()
+        // → aggregate="countcolumn" distinct="true" over the selected attribute.
+        if (methodName is "Count" or "LongCount" && mc.Arguments.Count == 1
+            && TryUnwrapDistinctSelectCount(mc.Arguments[0], out var distinctSelector))
+        {
+            var resolved = ResolveAggregateSelectorAttribute(distinctSelector, ctx)
+                ?? throw new NotSupportedException(
+                    $"Could not resolve attribute for distinct grouped {methodName}.");
+            return (resolved.Name, "countcolumn", resolved.EntityAlias, true);
+        }
 
         // Count() / LongCount() with no selector — use element entity primary key
         if (methodName is "Count" or "LongCount" && mc.Arguments.Count == 1)
@@ -2185,28 +2198,58 @@ internal static class FetchXmlQueryTranslator
             if (elementInfo is not null)
             {
                 var entityName = elementInfo.EntityType.GetEntityLogicalName();
-                return ($"{entityName}id", aggregateFunc, elementInfo.LinkAlias);
+                return ($"{entityName}id", aggregateFunc, elementInfo.LinkAlias, false);
             }
 
-            return ($"{ctx.Query.EntityLogicalName}id", aggregateFunc, null);
+            return ($"{ctx.Query.EntityLogicalName}id", aggregateFunc, null, false);
         }
 
         // Aggregate with selector — extract attribute from the lambda
         var selectorLambda = mc.Arguments[1].ExtractLambda();
 
-        // Resolve through group element mappings for join + GroupBy
+        var selectorResolved = ResolveAggregateSelectorAttribute(selectorLambda, ctx)
+            ?? throw new NotSupportedException(
+                $"Could not resolve attribute for grouped {methodName}.");
+
+        return (selectorResolved.Name, aggregateFunc, selectorResolved.EntityAlias, false);
+    }
+
+    /// <summary>
+    /// Resolves an aggregate selector lambda (e.g. <c>x =&gt; x.Revenue</c>) to its attribute
+    /// name and owning entity alias, routing through group element mappings (for join +
+    /// GroupBy) when present and falling back to direct attribute resolution.
+    /// </summary>
+    private static (string Name, string? EntityAlias)? ResolveAggregateSelectorAttribute(
+        LambdaExpression selectorLambda, TranslationContext ctx)
+    {
         if (ctx.GroupElementMappings is not null)
         {
             var resolved = ResolveGroupElementAttribute(selectorLambda, ctx.GroupElementMappings, ctx.PrimaryKeyResolver);
             if (resolved is not null)
-                return (resolved.Value.Name, aggregateFunc, resolved.Value.EntityAlias);
+                return (resolved.Value.Name, resolved.Value.EntityAlias);
         }
 
-        var attrName = selectorLambda.Body.GetAttributeName(ctx.PrimaryKeyResolver, ctx.Query.EntityLogicalName)
-            ?? throw new NotSupportedException(
-                $"Could not resolve attribute for grouped {methodName}.");
+        var attrName = selectorLambda.Body.GetAttributeName(ctx.PrimaryKeyResolver, ctx.Query.EntityLogicalName);
+        return attrName is null ? null : (attrName, (string?)null);
+    }
 
-        return (attrName, aggregateFunc, null);
+    /// <summary>
+    /// Recognizes the <c>g.Select(x =&gt; x.Attr).Distinct().Count()</c> shape by unwrapping the
+    /// <c>Distinct</c> → <c>Select</c> chain, returning the inner projection selector. Returns
+    /// <c>false</c> for any other expression.
+    /// </summary>
+    private static bool TryUnwrapDistinctSelectCount(Expression countSource, out LambdaExpression selector)
+    {
+        selector = null!;
+        if (countSource is MethodCallExpression { Method.Name: "Distinct" } distinct
+            && distinct.Arguments.Count >= 1
+            && distinct.Arguments[0] is MethodCallExpression { Method.Name: "Select" } select
+            && select.Arguments.Count == 2)
+        {
+            selector = select.Arguments[1].ExtractLambda();
+            return true;
+        }
+        return false;
     }
 
     /// <summary>

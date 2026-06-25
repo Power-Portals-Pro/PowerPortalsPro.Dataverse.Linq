@@ -8,6 +8,7 @@ internal sealed class FetchAttribute
     public string Name { get; set; } = null!;
     public string? Alias { get; set; }
     public string? Aggregate { get; set; }
+    public bool Distinct { get; set; }
     public bool GroupBy { get; set; }
     public string? DateGrouping { get; set; }
     public string? RowAggregate { get; set; }

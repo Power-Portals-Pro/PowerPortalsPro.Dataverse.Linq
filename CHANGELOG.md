@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+- Added support for distinct column counts in grouped aggregates: `g.Select(x => x.Lookup).Distinct().Count()` (and the `g.Select(x => x.Lookup.Id).Distinct().Count()` variant) now translate to FetchXml `aggregate="countcolumn" distinct="true"` over the selected attribute, instead of being treated as a plain row count over the primary key.
+
 ## [1.0.13] - 2026-06-22
 
 - Fixed 'Entity.Id' not resolving in queries over unbound entities (e.g. `Queryable("logicalname").Where(x => x.Id == id)`). The primary key attribute is now resolved from entity metadata using the query's known logical name when the parameter is the base 'Entity' type, so predicates, ordering, and projections referencing 'x.Id' work for unbound queries as they already do for typed ones.
