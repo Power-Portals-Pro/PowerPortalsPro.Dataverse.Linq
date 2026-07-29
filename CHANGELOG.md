@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.0.16] - 2026-07-29
+
 - Added support for non-constant attribute names in `GetAttributeValue<T>(name)`. The name argument no longer has to be a string literal: any expression that can be evaluated while the query is translated — a local variable, field, property, method call, indexer, concatenation, or ternary — is resolved to the attribute name in filters, projections, ordering, grouping, and join keys. Names that depend on the row being queried remain unsupported.
 ## [1.0.14] - 2026-06-25
 
