@@ -7,6 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 - Added support for non-constant attribute names in `GetAttributeValue<T>(name)`. The name argument no longer has to be a string literal: any expression that can be evaluated while the query is translated — a local variable, field, property, method call, indexer, concatenation, or ternary — is resolved to the attribute name in filters, projections, ordering, grouping, and join keys. Names that depend on the row being queried remain unsupported.
+## [1.0.14] - 2026-06-25
+
 - Added support for distinct column counts in grouped aggregates: `g.Select(x => x.Lookup).Distinct().Count()` (and the `g.Select(x => x.Lookup.Id).Distinct().Count()` variant) now translate to FetchXml `aggregate="countcolumn" distinct="true"` over the selected attribute, instead of being treated as a plain row count over the primary key.
 
 ## [1.0.13] - 2026-06-22
