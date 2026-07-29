@@ -6,12 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
-## [1.0.16] - 2026-07-29
-
-- Added support for non-constant attribute names in `GetAttributeValue<T>(name)`. The name argument no longer has to be a string literal: any expression that can be evaluated while the query is translated — a local variable, field, property, method call, indexer, concatenation, or ternary — is resolved to the attribute name in filters, projections, ordering, grouping, and join keys. Names that depend on the row being queried remain unsupported.
 - Fixed `NotSupportedException` for `Contains` over an array whose element type does not implement `IEquatable<T>` — an array of option set enums, most commonly. C# binds `array.Contains(value)` to the span-based `MemoryExtensions.Contains`, which takes a trailing `IEqualityComparer<T>` argument in that case; the extra argument is now recognised and still translates to an `in` (or `not-in`) condition. A non-null comparer has no FetchXml equivalent and remains unsupported.
 - Fixed `Contains` over a collection of option set enums emitting the enum member name (`<value>Hot</value>`) instead of the underlying option set value (`<value>100000002</value>`), which silently matched nothing. Enum elements of any collection type — `List<T>`, `HashSet<T>`, array — are now serialized as their underlying integer.
 - Fixed `CancellationToken` being observed only between pages on async queries. The token is now passed through to the service's cancellable `RetrieveMultipleAsync` overload (used when the service implements `IOrganizationServiceAsync2`, as `ServiceClient` does), so an in-flight request is cancelled rather than running to completion, and it is checked before each page request is sent.
+
+## [1.0.16] - 2026-07-29
+
+- Added support for non-constant attribute names in `GetAttributeValue<T>(name)`. The name argument no longer has to be a string literal: any expression that can be evaluated while the query is translated — a local variable, field, property, method call, indexer, concatenation, or ternary — is resolved to the attribute name in filters, projections, ordering, grouping, and join keys. Names that depend on the row being queried remain unsupported.
 
 ## [1.0.14] - 2026-06-25
 
