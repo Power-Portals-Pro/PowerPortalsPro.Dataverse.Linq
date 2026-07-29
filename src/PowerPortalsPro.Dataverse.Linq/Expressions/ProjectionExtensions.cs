@@ -53,20 +53,21 @@ internal static class ProjectionExtensions
     {
         var param = lambda.Parameters[0];
         var columns = new List<string>();
-        CollectColumns(lambda.Body, arg => arg switch
+        CollectColumns(lambda.Body, arg =>
         {
-            MemberExpression { Member: PropertyInfo prop, Expression: { } attrExpr }
-                when attrExpr.IsOuterEntityAccess(outerPath, param)
-                => prop.GetCustomAttribute<AttributeLogicalNameAttribute>()?.LogicalName,
-            MethodCallExpression
+            if (arg is MemberExpression { Member: PropertyInfo prop, Expression: { } attrExpr }
+                && attrExpr.IsOuterEntityAccess(outerPath, param))
             {
-                Method.Name: nameof(Microsoft.Xrm.Sdk.Entity.GetAttributeValue),
-                Arguments: [ConstantExpression { Value: string attrName }],
-                Object: { } obj
+                return prop.GetCustomAttribute<AttributeLogicalNameAttribute>()?.LogicalName;
             }
-                when obj.IsOuterEntityAccess(outerPath, param)
-                => attrName,
-            _ => null
+
+            if (arg.IsGetAttributeValueCall(out var attrName, out var entityExpr)
+                && entityExpr.IsOuterEntityAccess(outerPath, param))
+            {
+                return attrName;
+            }
+
+            return null;
         }, columns);
         return columns.Count > 0 ? columns : null;
     }
@@ -94,24 +95,28 @@ internal static class ProjectionExtensions
     {
         var param = lambda.Parameters[0];
         var columns = new List<string>();
-        CollectColumns(lambda.Body, arg => arg switch
+        CollectColumns(lambda.Body, arg =>
         {
-            MemberExpression { Member: PropertyInfo prop, Expression: MemberExpression inner }
-                when inner.Member.Name == innerPropertyName
-                && inner.Expression is ParameterExpression p && p == param
-                => prop.GetCustomAttribute<AttributeLogicalNameAttribute>()?.LogicalName,
-            MethodCallExpression
+            if (arg is MemberExpression { Member: PropertyInfo prop, Expression: MemberExpression inner }
+                && IsInnerAccess(inner))
             {
-                Method.Name: nameof(Microsoft.Xrm.Sdk.Entity.GetAttributeValue),
-                Arguments: [ConstantExpression { Value: string attrName }],
-                Object: MemberExpression inner
+                return prop.GetCustomAttribute<AttributeLogicalNameAttribute>()?.LogicalName;
             }
-                when inner.Member.Name == innerPropertyName
-                && inner.Expression is ParameterExpression p && p == param
-                => attrName,
-            _ => null
+
+            if (arg.IsGetAttributeValueCall(out var attrName, out var entityExpr)
+                && entityExpr is MemberExpression innerEntity && IsInnerAccess(innerEntity))
+            {
+                return attrName;
+            }
+
+            return null;
         }, columns);
+
         return columns.Count > 0 ? columns : null;
+
+        bool IsInnerAccess(MemberExpression inner) =>
+            inner.Member.Name == innerPropertyName
+            && inner.Expression is ParameterExpression p && p == param;
     }
 
     /// <summary>

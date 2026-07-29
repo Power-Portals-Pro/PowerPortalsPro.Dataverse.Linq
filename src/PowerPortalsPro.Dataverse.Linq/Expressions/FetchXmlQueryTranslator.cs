@@ -2689,7 +2689,7 @@ internal static class FetchXmlQueryTranslator
     /// <summary>
     /// Extracts attribute logical names from direct property accesses on a parameter
     /// (e.g. <c>d.FirstName</c> where <c>d</c> is the inner entity parameter), as well
-    /// as <c>d.GetAttributeValue&lt;T&gt;("name")</c> calls. Recurses into nested projections.
+    /// as <c>d.GetAttributeValue&lt;T&gt;(name)</c> calls. Recurses into nested projections.
     /// </summary>
     private static List<string> ExtractColumnsFromParameter(Expression body, ParameterExpression param)
     {
@@ -2710,13 +2710,8 @@ internal static class FetchXmlQueryTranslator
             return;
         }
 
-        if (arg is MethodCallExpression
-            {
-                Method.Name: nameof(Entity.GetAttributeValue),
-                Arguments: [ConstantExpression { Value: string attrName }],
-                Object: ParameterExpression op
-            }
-            && op == param)
+        if (arg.IsGetAttributeValueCall(out var attrName, out var entityExpr)
+            && entityExpr is ParameterExpression op && op == param)
         {
             columns.Add(attrName);
             return;

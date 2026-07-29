@@ -617,6 +617,23 @@ var results = await service.Queryable("account", "name", "revenue")
     .ToListAsync();
 ```
 
+The attribute name doesn't have to be a literal. Any expression that can be evaluated
+while the query is translated — a variable, field, property, method call, indexer,
+concatenation — resolves to the attribute name:
+
+```csharp
+foreach (var column in await GetColumnsToQueryAsync())
+{
+    var results = await service.Queryable(logicalName)
+        .Where(e => !string.IsNullOrEmpty(e.GetAttributeValue<string>(column)))
+        .Select(e => new { Value = e.GetAttributeValue<string>(settings.DisplayColumn) })
+        .ToListAsync();
+}
+```
+
+The only requirement is that the name can't depend on the row being queried
+(e.g. `e.GetAttributeValue<string>(e.GetAttributeValue<string>("columnname"))`).
+
 ## Query Options
 
 Configure [FetchXml attributes](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/fetchxml/reference/fetch) on the query:

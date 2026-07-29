@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Linq.Expressions;
 using System.Reflection;
 
@@ -90,6 +91,106 @@ internal static class ExpressionExtensions
 
         throw new NotSupportedException(
             $"Unable to evaluate expression of type {expr.GetType().Name} (NodeType={expr.NodeType}): {expr}");
+    }
+
+    /// <summary>
+    /// Resolves an expression that names something (an attribute logical name, for example)
+    /// to its string value. String literals resolve directly; any other expression that does
+    /// not depend on a lambda parameter — a captured local, a field or property, a method call,
+    /// a concatenation — is evaluated while the query is being translated.
+    /// </summary>
+    /// <exception cref="NotSupportedException">
+    /// The expression is free of lambda parameters but could not be evaluated, or evaluated to
+    /// something other than a non-empty string.
+    /// </exception>
+    internal static bool TryEvaluateName(this Expression expr, [NotNullWhen(true)] out string? name)
+    {
+        while (expr is UnaryExpression { NodeType: ExpressionType.Convert } convert)
+            expr = convert.Operand;
+
+        if (expr is ConstantExpression { Value: string constant })
+        {
+            name = constant;
+            return true;
+        }
+
+        // Anything referencing a lambda parameter depends on the row being queried and so
+        // cannot be resolved while the query is being built.
+        if (expr.ReferencesAnyParameter())
+        {
+            name = null;
+            return false;
+        }
+
+        object? value;
+        try
+        {
+            try
+            {
+                value = expr.EvaluateValue();
+            }
+            catch (NotSupportedException)
+            {
+                // Fall back to the compiler for node types EvaluateValue doesn't handle
+                // (string concatenation, conditionals, delegate invocation, ...).
+                value = Expression.Lambda(expr).Compile().DynamicInvoke();
+            }
+        }
+        catch (Exception ex)
+        {
+            throw new NotSupportedException(
+                $"Unable to evaluate the name argument '{expr}': {ex.Message}", ex);
+        }
+
+        name = value as string;
+        if (string.IsNullOrEmpty(name))
+        {
+            throw new NotSupportedException(
+                $"The name argument '{expr}' evaluated to "
+                + (value is null ? "null" : $"'{value}'")
+                + ". It must resolve to a non-empty string.");
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Returns <c>true</c> when the expression references a <see cref="ParameterExpression"/>
+    /// that is not declared by a lambda inside the expression itself — i.e. the expression
+    /// cannot be evaluated on its own.
+    /// </summary>
+    internal static bool ReferencesAnyParameter(this Expression expr)
+    {
+        var finder = new FreeParameterFinder();
+        finder.Visit(expr);
+        return finder.Found;
+    }
+
+    private sealed class FreeParameterFinder : ExpressionVisitor
+    {
+        private readonly HashSet<ParameterExpression> _declared = [];
+
+        internal bool Found { get; private set; }
+
+        protected override Expression VisitLambda<T>(Expression<T> node)
+        {
+            foreach (var param in node.Parameters)
+                _declared.Add(param);
+
+            var result = base.VisitLambda(node);
+
+            foreach (var param in node.Parameters)
+                _declared.Remove(param);
+
+            return result;
+        }
+
+        protected override Expression VisitParameter(ParameterExpression node)
+        {
+            if (!_declared.Contains(node))
+                Found = true;
+            return node;
+        }
     }
 
     /// <summary>

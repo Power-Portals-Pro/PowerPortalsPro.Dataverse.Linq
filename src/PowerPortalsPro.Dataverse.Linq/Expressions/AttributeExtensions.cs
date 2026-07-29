@@ -1,5 +1,6 @@
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Client;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq.Expressions;
 using System.Reflection;
 
@@ -12,9 +13,38 @@ namespace PowerPortalsPro.Dataverse.Linq.Expressions;
 internal static class AttributeExtensions
 {
     /// <summary>
+    /// Matches a <see cref="Entity.GetAttributeValue{T}"/> call and resolves its attribute-name
+    /// argument. The argument may be a string literal or any expression that can be evaluated
+    /// while the query is translated — a captured variable, a field or property, a method call,
+    /// a concatenation — so long as it doesn't depend on the entity being queried.
+    /// </summary>
+    internal static bool IsGetAttributeValueCall(
+        this Expression expr,
+        [NotNullWhen(true)] out string? attributeName,
+        [NotNullWhen(true)] out Expression? entityExpression)
+    {
+        attributeName = null;
+        entityExpression = null;
+
+        if (expr is not MethodCallExpression { Method.Name: nameof(Entity.GetAttributeValue) } call
+            || call.Arguments.Count != 1
+            || call.Object is null)
+        {
+            return false;
+        }
+
+        if (!call.Arguments[0].TryEvaluateName(out attributeName))
+            return false;
+
+        entityExpression = call.Object;
+        return true;
+    }
+
+    /// <summary>
     /// Resolves an expression to an attribute name and the entity expression it's accessed on.
     /// Handles direct property access, EntityReference.Id, Money.Value, OptionSetValue.Value,
-    /// and <see cref="Entity.GetAttributeValue{T}"/> calls with a string-constant argument.
+    /// and <see cref="Entity.GetAttributeValue{T}"/> calls whose attribute-name argument can be
+    /// resolved at translation time (see <see cref="IsGetAttributeValueCall"/>).
     /// </summary>
     /// <param name="rootEntityLogicalName">
     /// Fallback logical name used to resolve <see cref="Entity.Id"/> when the entity expression's
@@ -28,14 +58,9 @@ internal static class AttributeExtensions
         if (expr is UnaryExpression { NodeType: ExpressionType.Convert } convert)
             expr = convert.Operand;
 
-        // Entity.GetAttributeValue<T>("name")
-        if (expr is MethodCallExpression { Method.Name: nameof(Entity.GetAttributeValue) } getAttr
-            && getAttr.Arguments.Count == 1
-            && getAttr.Arguments[0] is ConstantExpression { Value: string constName }
-            && getAttr.Object is not null)
-        {
-            return (constName, getAttr.Object);
-        }
+        // Entity.GetAttributeValue<T>(name)
+        if (expr.IsGetAttributeValueCall(out var attributeName, out var attributeEntity))
+            return (attributeName, attributeEntity);
 
         if (expr is not MemberExpression memberExpr || memberExpr.Expression is null)
             return null;
@@ -69,14 +94,9 @@ internal static class AttributeExtensions
                     return (attrName, parentContainer);
             }
 
-            // Parent is GetAttributeValue<T>("name"): entity.GetAttributeValue<EntityReference>("attr").Id
-            if (memberExpr.Expression is MethodCallExpression { Method.Name: nameof(Entity.GetAttributeValue) } getAttrUnwrap
-                && getAttrUnwrap.Arguments.Count == 1
-                && getAttrUnwrap.Arguments[0] is ConstantExpression { Value: string unwrapAttrName }
-                && getAttrUnwrap.Object is not null)
-            {
-                return (unwrapAttrName, getAttrUnwrap.Object);
-            }
+            // Parent is GetAttributeValue<T>(name): entity.GetAttributeValue<EntityReference>("attr").Id
+            if (memberExpr.Expression.IsGetAttributeValueCall(out var unwrapAttrName, out var unwrapEntity))
+                return (unwrapAttrName, unwrapEntity);
         }
 
         // Entity.Id — resolve via primary key lookup when the entity type is known

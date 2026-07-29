@@ -1,5 +1,6 @@
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Client;
+using PowerPortalsPro.Dataverse.Linq.Expressions;
 using System.Linq.Expressions;
 using System.Reflection;
 
@@ -191,18 +192,15 @@ internal static class MaterializerBuilder
 
         protected override Expression VisitMethodCall(MethodCallExpression node)
         {
-            // Handle Entity.GetAttributeValue<T>("name")
-            if (node.Method.Name == nameof(Entity.GetAttributeValue)
-                && node.Arguments.Count == 1
-                && node.Arguments[0] is ConstantExpression { Value: string attrName }
-                && node.Object is not null
-                && _resolveEntity(node.Object) is { } res)
+            // Handle Entity.GetAttributeValue<T>(name)
+            if (node.IsGetAttributeValueCall(out var attrName, out var entityExpr)
+                && _resolveEntity(entityExpr) is { } res)
             {
                 var resultType = node.Type;
                 return CreatePropertySlot(res.LinkAlias, attrName, resultType, node);
             }
 
-            // Handle GetAttributeValue<T>("name").Id / .Value (two-level unwrap via method)
+            // Handle GetAttributeValue<T>(name).Id / .Value (two-level unwrap via method)
             // This is already handled by VisitMember since it walks inside
 
             return base.VisitMethodCall(node);
