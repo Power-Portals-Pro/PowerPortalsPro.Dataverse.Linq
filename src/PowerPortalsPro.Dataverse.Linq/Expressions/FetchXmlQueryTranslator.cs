@@ -867,14 +867,21 @@ internal static class FetchXmlQueryTranslator
     private static InPredicateResult? TryResolveInPredicate(MethodCallExpression call, TranslationContext ctx)
     {
         // Two patterns:
-        // 1. Static: Enumerable.Contains(collection, entity.Attr) — 2 args, no Object
+        // 1. Static: Enumerable.Contains(collection, entity.Attr) — 2 args, no Object.
+        //    An array binds to the span-based MemoryExtensions.Contains instead, which
+        //    takes a trailing IEqualityComparer<T> for element types that do not
+        //    implement IEquatable<T> (enums, for example) — hence 3 args.
         // 2. Instance: list.Contains(entity.Attr) — 1 arg, Object is the collection
         Expression? collectionExpr;
         Expression? attrExpr;
 
-        if (call.Object is null && call.Arguments.Count == 2)
+        if (call.Object is null && call.Arguments.Count is 2 or 3)
         {
             // Static Enumerable.Contains<T>(IEnumerable<T>, T)
+            // or MemoryExtensions.Contains<T>(ReadOnlySpan<T>, T[, IEqualityComparer<T>])
+            if (call.Arguments.Count == 3 && !IsDefaultEqualityComparer(call.Arguments[2]))
+                return null;
+
             collectionExpr = call.Arguments[0];
             attrExpr = call.Arguments[1];
         }
@@ -899,10 +906,28 @@ internal static class FetchXmlQueryTranslator
 
         var values = new List<object>();
         foreach (var item in enumerable)
-            values.Add(item);
+            values.Add(UnwrapEnumValue(item)!);
 
         return new InPredicateResult(resolved.Value, values);
     }
+
+    /// <summary>
+    /// Returns <c>true</c> when the expression is the default (null) equality comparer.
+    /// A custom comparer has no FetchXml equivalent, so those calls are not translated.
+    /// </summary>
+    private static bool IsDefaultEqualityComparer(Expression expr) =>
+        expr.Type.IsGenericType
+        && expr.Type.GetGenericTypeDefinition() == typeof(IEqualityComparer<>)
+        && expr.IsNullConstant();
+
+    /// <summary>
+    /// Converts an enum to its underlying integer so it serializes as a FetchXml value
+    /// (<c>100000002</c>) rather than as the member name (<c>Hot</c>).
+    /// </summary>
+    private static object? UnwrapEnumValue(object? value) =>
+        value is not null && value.GetType().IsEnum
+            ? Convert.ChangeType(value, Enum.GetUnderlyingType(value.GetType()))
+            : value;
 
     private static void TranslateLogicalPredicate(
         BinaryExpression expr, FetchFilter filter, FilterType type, TranslationContext ctx, bool negated = false)

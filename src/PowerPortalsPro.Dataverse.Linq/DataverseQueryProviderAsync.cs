@@ -66,14 +66,14 @@ internal class DataverseQueryProviderAsync<T> : DataverseQueryProvider<T>, IAsyn
         var fetchXml = FetchXmlBuilder.Build(query);
 
         await PagedFetchAsync(fetchXml,
-            expr => _asyncService.RetrieveMultipleAsync(expr),
+            expr => RetrieveMultipleAsync(expr, cancellationToken),
             async (response, _) =>
             {
-                cancellationToken.ThrowIfCancellationRequested();
                 await onPage(ProjectEntities<TElement>(response.Entities.ToList(), query));
                 return response.MoreRecords;
             },
-            BuildFetchXmlNotifier(query));
+            BuildFetchXmlNotifier(query),
+            cancellationToken);
     }
 
     // -------------------------------------------------------------------------
@@ -107,10 +107,9 @@ internal class DataverseQueryProviderAsync<T> : DataverseQueryProvider<T>, IAsyn
         var recordCountInvoked = false;
 
         await PagedFetchAsync(FetchXmlBuilder.Build(query),
-            expr => _asyncService.RetrieveMultipleAsync(expr),
+            expr => RetrieveMultipleAsync(expr, cancellationToken),
             async (response, _) =>
             {
-                cancellationToken.ThrowIfCancellationRequested();
                 if (!recordCountInvoked)
                 {
                     if (query.OnRecordCountAsync != null)
@@ -122,35 +121,34 @@ internal class DataverseQueryProviderAsync<T> : DataverseQueryProvider<T>, IAsyn
                 results.AddRange(response.Entities);
                 return response.MoreRecords;
             },
-            BuildFetchXmlNotifier(query));
+            BuildFetchXmlNotifier(query),
+            cancellationToken);
 
         return results;
     }
+
+    /// <summary>
+    /// Issues a single RetrieveMultiple request, passing <paramref name="cancellationToken"/>
+    /// through to the service so an in-flight request is cancelled rather than only being
+    /// observed between pages. Services that predate <see cref="IOrganizationServiceAsync2"/>
+    /// have no cancellable overload, so their requests still run to completion.
+    /// </summary>
+    private Task<EntityCollection> RetrieveMultipleAsync(
+        FetchExpression fetchExpression, CancellationToken cancellationToken) =>
+        _asyncService is IOrganizationServiceAsync2 cancellableService
+            ? cancellableService.RetrieveMultipleAsync(fetchExpression, cancellationToken)
+            : _asyncService.RetrieveMultipleAsync(fetchExpression);
 
     // -------------------------------------------------------------------------
     // Async paged retrieval
     // -------------------------------------------------------------------------
 
-    private static Task PagedFetchAsync(
+    private static async Task PagedFetchAsync(
         string baseFetchXml,
         Func<FetchExpression, Task<EntityCollection>> retrieve,
         Func<EntityCollection, int, Task<bool>> onPage,
-        Action<string>? onFetchXml = null) =>
-        PagedFetchAsyncCore(baseFetchXml, retrieve, onPage, onFetchXml);
-
-    private static Task PagedFetchAsync(
-        string baseFetchXml,
-        Func<FetchExpression, Task<EntityCollection>> retrieve,
-        Func<EntityCollection, int, bool> onPage,
-        Action<string>? onFetchXml = null) =>
-        PagedFetchAsyncCore(baseFetchXml, retrieve,
-            (response, page) => Task.FromResult(onPage(response, page)), onFetchXml);
-
-    private static async Task PagedFetchAsyncCore(
-        string baseFetchXml,
-        Func<FetchExpression, Task<EntityCollection>> retrieve,
-        Func<EntityCollection, int, Task<bool>> onPage,
-        Action<string>? onFetchXml = null)
+        Action<string>? onFetchXml,
+        CancellationToken cancellationToken)
     {
         var fetchDocument = XDocument.Parse(baseFetchXml);
         var explicitPage = fetchDocument.Root!.Attribute("page") != null;
@@ -159,6 +157,8 @@ internal class DataverseQueryProviderAsync<T> : DataverseQueryProvider<T>, IAsyn
 
         while (true)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             if (pagingCookie != null)
             {
                 fetchDocument.Root!.SetAttributeValue("paging-cookie", pagingCookie);

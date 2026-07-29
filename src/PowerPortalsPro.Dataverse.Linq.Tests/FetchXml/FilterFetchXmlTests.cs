@@ -1059,6 +1059,153 @@ public class FilterFetchXmlTests : FetchXmlTestBase
     }
 
     // -------------------------------------------------------------------------
+    // Contains over collection types other than arrays
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_ContainsWithStringList_GeneratesInFilter()
+    {
+        var names = new List<string> { "Custom Account 001", "Custom Account 002" };
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Where(a => names.Contains(a.Name))
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_name" operator="in">
+                    <value>Custom Account 001</value>
+                    <value>Custom Account 002</value>
+                  </condition>
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_ContainsWithHashSet_GeneratesInFilter()
+    {
+        var names = new HashSet<string> { "Custom Account 001" };
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Where(a => names.Contains(a.Name))
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_name" operator="in">
+                    <value>Custom Account 001</value>
+                  </condition>
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    // -------------------------------------------------------------------------
+    // Contains over a collection of enums — values must serialize as the
+    // underlying option set integers, not the enum member names
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_ContainsWithEnumList_GeneratesInWithUnderlyingValues()
+    {
+        var ratings = new List<CustomAccount.AccountRating_Enum>
+        {
+            CustomAccount.AccountRating_Enum.Hot,
+            CustomAccount.AccountRating_Enum.Warm
+        };
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Where(a => ratings.Contains(a.AccountRating!.Value))
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_accountrating" operator="in">
+                    <value>100000002</value>
+                    <value>100000001</value>
+                  </condition>
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_ContainsWithEnumArray_GeneratesInWithUnderlyingValues()
+    {
+        var ratings = new[]
+        {
+            CustomAccount.AccountRating_Enum.Hot,
+            CustomAccount.AccountRating_Enum.Warm
+        };
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Where(a => ratings.Contains(a.AccountRating!.Value))
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_accountrating" operator="in">
+                    <value>100000002</value>
+                    <value>100000001</value>
+                  </condition>
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_NegatedContainsWithEnumList_GeneratesNotInWithUnderlyingValues()
+    {
+        var ratings = new List<CustomAccount.AccountRating_Enum> { CustomAccount.AccountRating_Enum.Cold };
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Where(a => !ratings.Contains(a.AccountRating!.Value))
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="new_accountrating" operator="not-in">
+                    <value>100000000</value>
+                  </condition>
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_ContainsWithCustomEqualityComparer_ThrowsNotSupported()
+    {
+        var names = new List<string> { "Custom Account 001" };
+
+        var act = () => _service.Queryable<CustomAccount>()
+            .Where(a => names.Contains(a.Name, StringComparer.OrdinalIgnoreCase))
+            .ToFetchXml();
+
+        act.Should().Throw<NotSupportedException>();
+    }
+
+    // -------------------------------------------------------------------------
     // Captured entity property — should evaluate as value, not column reference
     // -------------------------------------------------------------------------
 

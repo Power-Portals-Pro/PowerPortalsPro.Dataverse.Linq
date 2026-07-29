@@ -11,7 +11,9 @@ namespace PowerPortalsPro.Dataverse.Linq.Tests;
 /// </summary>
 internal class RetryOrganizationService(ServiceClient inner, int maxRetries = 3)
 #if !NETFRAMEWORK
-    : IOrganizationServiceAsync
+    // IOrganizationServiceAsync2 (what ServiceClient itself implements) so the cancellable
+    // request overloads the query provider prefers are exercised by the integration tests.
+    : IOrganizationServiceAsync2
 #else
     : IOrganizationService
 #endif
@@ -53,7 +55,7 @@ internal class RetryOrganizationService(ServiceClient inner, int maxRetries = 3)
     }
 
 #if !NETFRAMEWORK
-    private async Task<T> ExecuteWithRetryAsync<T>(Func<Task<T>> action)
+    private async Task<T> ExecuteWithRetryAsync<T>(Func<Task<T>> action, CancellationToken cancellationToken = default)
     {
         for (var attempt = 0; ; attempt++)
         {
@@ -63,12 +65,12 @@ internal class RetryOrganizationService(ServiceClient inner, int maxRetries = 3)
             }
             catch (FaultException<OrganizationServiceFault> ex) when (attempt < maxRetries && IsTransient(ex))
             {
-                await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, attempt)));
+                await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, attempt)), cancellationToken);
             }
         }
     }
 
-    private async Task ExecuteWithRetryAsync(Func<Task> action)
+    private async Task ExecuteWithRetryAsync(Func<Task> action, CancellationToken cancellationToken = default)
     {
         for (var attempt = 0; ; attempt++)
         {
@@ -79,7 +81,7 @@ internal class RetryOrganizationService(ServiceClient inner, int maxRetries = 3)
             }
             catch (FaultException<OrganizationServiceFault> ex) when (attempt < maxRetries && IsTransient(ex))
             {
-                await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, attempt)));
+                await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, attempt)), cancellationToken);
             }
         }
     }
@@ -118,5 +120,25 @@ internal class RetryOrganizationService(ServiceClient inner, int maxRetries = 3)
         ExecuteWithRetryAsync(() => inner.AssociateAsync(entityName, entityId, relationship, relatedEntities));
     public Task DisassociateAsync(string entityName, Guid entityId, Relationship relationship, EntityReferenceCollection relatedEntities) =>
         ExecuteWithRetryAsync(() => inner.DisassociateAsync(entityName, entityId, relationship, relatedEntities));
+
+    // IOrganizationServiceAsync2 — cancellable overloads
+    public Task<Guid> CreateAsync(Entity entity, CancellationToken cancellationToken) =>
+        ExecuteWithRetryAsync(() => inner.CreateAsync(entity, cancellationToken), cancellationToken);
+    public Task<Entity> CreateAndReturnAsync(Entity entity, CancellationToken cancellationToken) =>
+        ExecuteWithRetryAsync(() => inner.CreateAndReturnAsync(entity, cancellationToken), cancellationToken);
+    public Task UpdateAsync(Entity entity, CancellationToken cancellationToken) =>
+        ExecuteWithRetryAsync(() => inner.UpdateAsync(entity, cancellationToken), cancellationToken);
+    public Task DeleteAsync(string entityName, Guid id, CancellationToken cancellationToken) =>
+        ExecuteWithRetryAsync(() => inner.DeleteAsync(entityName, id, cancellationToken), cancellationToken);
+    public Task<Entity> RetrieveAsync(string entityName, Guid id, ColumnSet columnSet, CancellationToken cancellationToken) =>
+        ExecuteWithRetryAsync(() => inner.RetrieveAsync(entityName, id, columnSet, cancellationToken), cancellationToken);
+    public Task<EntityCollection> RetrieveMultipleAsync(QueryBase query, CancellationToken cancellationToken) =>
+        ExecuteWithRetryAsync(() => inner.RetrieveMultipleAsync(query, cancellationToken), cancellationToken);
+    public Task<OrganizationResponse> ExecuteAsync(OrganizationRequest request, CancellationToken cancellationToken) =>
+        ExecuteWithRetryAsync(() => inner.ExecuteAsync(request, cancellationToken), cancellationToken);
+    public Task AssociateAsync(string entityName, Guid entityId, Relationship relationship, EntityReferenceCollection relatedEntities, CancellationToken cancellationToken) =>
+        ExecuteWithRetryAsync(() => inner.AssociateAsync(entityName, entityId, relationship, relatedEntities, cancellationToken), cancellationToken);
+    public Task DisassociateAsync(string entityName, Guid entityId, Relationship relationship, EntityReferenceCollection relatedEntities, CancellationToken cancellationToken) =>
+        ExecuteWithRetryAsync(() => inner.DisassociateAsync(entityName, entityId, relationship, relatedEntities, cancellationToken), cancellationToken);
 #endif
 }

@@ -171,6 +171,61 @@ public partial class PagingIntegrationTests
     }
 
     // -------------------------------------------------------------------------
+    // Cancellation
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ToListAsync_WithAlreadyCancelledToken_ThrowsWithoutQuerying()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var requests = 0;
+
+        var act = async () => await Service.Queryable<CustomAccount>()
+            .CaptureFetchXml(_ => requests++)
+            .ToListAsync(cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        requests.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ToListAsync_CancelledBeforeRequestIsSent_Throws()
+    {
+        using var cts = new CancellationTokenSource();
+
+        // CaptureFetchXml fires immediately before each request leaves, so the token is
+        // already cancelled while the RetrieveMultiple is in flight.
+        var act = async () => await Service.Queryable<CustomContact>()
+            .CaptureFetchXml(_ => cts.Cancel())
+            .WithPageSize(10)
+            .ToListAsync(cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
+    public async Task ForEachPageAsync_CancelledInPageCallback_StopsAfterCurrentPage()
+    {
+        using var cts = new CancellationTokenSource();
+        var pages = 0;
+
+        var act = async () => await Service.Queryable<CustomContact>()
+            .WithPageSize(10)
+            .ForEachPageAsync(
+                _ =>
+                {
+                    pages++;
+                    cts.Cancel();
+                    return Task.CompletedTask;
+                },
+                cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        pages.Should().Be(1);
+    }
+
+    // -------------------------------------------------------------------------
     // WithAggregateLimit
     // -------------------------------------------------------------------------
 

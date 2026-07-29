@@ -842,6 +842,70 @@ public partial class FilterIntegrationTests
     }
 
     // -------------------------------------------------------------------------
+    // Contains over collection types other than arrays
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ToListAsync_ContainsWithStringList_ReturnsMatchingRecords()
+    {
+        var names = new List<string> { "Custom Account 001", "Custom Account 002" };
+
+        var results = await Service.Queryable<CustomAccount>()
+            .Where(a => names.Contains(a.Name))
+            .ToListAsync();
+
+        results.Should().HaveCount(2);
+        results.Select(a => a.Name).Should().BeEquivalentTo(names);
+    }
+
+    // -------------------------------------------------------------------------
+    // Contains over a collection of enums — the option set integers must reach
+    // the server, not the enum member names
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ToListAsync_ContainsWithEnumList_ReturnsMatchingRecords()
+    {
+        var ratings = new List<CustomAccount.AccountRating_Enum>
+        {
+            CustomAccount.AccountRating_Enum.Hot,
+            CustomAccount.AccountRating_Enum.Warm
+        };
+
+        var all = await Service.Queryable<CustomAccount>().ToListAsync();
+        var expected = all.Count(a => a.AccountRating.HasValue && ratings.Contains(a.AccountRating.Value));
+
+        var results = await Service.Queryable<CustomAccount>()
+            .Where(a => ratings.Contains(a.AccountRating!.Value))
+            .ToListAsync();
+
+        results.Should().HaveCount(expected);
+        results.Should().NotBeEmpty();
+        results.Should().OnlyContain(a => ratings.Contains(a.AccountRating!.Value));
+    }
+
+    [Fact]
+    public async Task ToListAsync_ContainsWithEnumArray_ReturnsMatchingRecords()
+    {
+        var ratings = new[]
+        {
+            CustomAccount.AccountRating_Enum.Hot,
+            CustomAccount.AccountRating_Enum.Warm
+        };
+
+        var all = await Service.Queryable<CustomAccount>().ToListAsync();
+        var expected = all.Count(a => a.AccountRating.HasValue && ratings.Contains(a.AccountRating.Value));
+
+        var results = await Service.Queryable<CustomAccount>()
+            .Where(a => ratings.Contains(a.AccountRating!.Value))
+            .ToListAsync();
+
+        results.Should().HaveCount(expected);
+        results.Should().NotBeEmpty();
+        results.Should().OnlyContain(a => ratings.Contains(a.AccountRating!.Value));
+    }
+
+    // -------------------------------------------------------------------------
     // Column comparison across single entity
     // -------------------------------------------------------------------------
 
