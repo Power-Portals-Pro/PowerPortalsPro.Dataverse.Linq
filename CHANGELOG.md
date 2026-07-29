@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.0.17] - 2026-07-29
+
 - Fixed `NotSupportedException` for `Contains` over an array whose element type does not implement `IEquatable<T>` — an array of option set enums, most commonly. C# binds `array.Contains(value)` to the span-based `MemoryExtensions.Contains`, which takes a trailing `IEqualityComparer<T>` argument in that case; the extra argument is now recognised and still translates to an `in` (or `not-in`) condition. A non-null comparer has no FetchXml equivalent and remains unsupported.
 - Fixed `Contains` over a collection of option set enums emitting the enum member name (`<value>Hot</value>`) instead of the underlying option set value (`<value>100000002</value>`), which silently matched nothing. Enum elements of any collection type — `List<T>`, `HashSet<T>`, array — are now serialized as their underlying integer.
 - Fixed `CancellationToken` being observed only between pages on async queries. The token is now passed through to the service's cancellable `RetrieveMultipleAsync` overload (used when the service implements `IOrganizationServiceAsync2`, as `ServiceClient` does), so an in-flight request is cancelled rather than running to completion, and it is checked before each page request is sent.
