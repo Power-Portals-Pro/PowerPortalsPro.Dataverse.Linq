@@ -337,7 +337,9 @@ internal static class FetchXmlQueryTranslator
             // reached for single (non-chained) left joins.
             var outerColumns = lambda.ExtractColumnsViaPath(ctx.OuterEntityPath);
             IReadOnlyList<string>? innerColumns = ctx.InnerEntityProperty is not null
-                ? lambda.ExtractInnerColumnsViaProperty(ctx.InnerEntityProperty)
+                ? lambda.ExtractInnerColumnsViaProperty(ctx.InnerEntityProperty,
+                    () => ctx.PrimaryKeyResolver?.Invoke(ctx.Query.Links[^1].Name)
+                        ?? $"{ctx.Query.Links[^1].Name}id")
                 : null;
             var wholeInner = ctx.InnerEntityProperty is not null
                 && lambda.ReferencesWholeInnerEntity(ctx.InnerEntityProperty);
@@ -348,11 +350,12 @@ internal static class FetchXmlQueryTranslator
                 ctx.InnerEntityProperty, ctx.Query.Links[^1].Alias!,
                 ctx.InnerEntityProperty is not null
                     ? lambda.Parameters[0].Type.GetProperty(ctx.InnerEntityProperty)?.PropertyType
-                    : null);
+                    : null,
+                ctx.Query.EntityLogicalName, ctx.Query.Links[^1].Name);
             // Build materializer (new path)
             ctx.Query.Materializer = MaterializerBuilder.BuildJoinMaterializer(
                 lambda,
-                expr => leftJoinResolver(expr) is { } r ? (r.LinkAlias, r.EntityType) : null,
+                expr => leftJoinResolver(expr) is { } r ? (r.LinkAlias, r.EntityType, r.LogicalName) : null,
                 ctx.PrimaryKeyResolver);
         }
         else if (ctx.JoinMappings is not null)
@@ -476,7 +479,7 @@ internal static class FetchXmlQueryTranslator
         var joinResolver = CreateJoinResolver(ctx.JoinMappings!);
         ctx.Query.Materializer = MaterializerBuilder.BuildJoinMaterializer(
             lambda,
-            expr => joinResolver(expr) is { } r ? (r.LinkAlias, r.EntityType) : null,
+            expr => joinResolver(expr) is { } r ? (r.LinkAlias, r.EntityType, r.LogicalName) : null,
             ctx.PrimaryKeyResolver);
     }
 
@@ -1369,30 +1372,50 @@ internal static class FetchXmlQueryTranslator
         Expression expr, Dictionary<string, JoinEntityInfo> joinMappings,
         Func<string, string>? primaryKeyResolver = null)
     {
+        if (expr is UnaryExpression { NodeType: ExpressionType.Convert } convert)
+            expr = convert.Operand;
+
         var result = expr.ResolveAttributeAccess(primaryKeyResolver);
         if (result is not { } access)
-            return null;
+        {
+            // Unbound Entity.Id (e.g. ti.c.Id where c came from Queryable("logicalname")) —
+            // the CLR type has no logical name, so take it from the join mapping instead.
+            if (expr is MemberExpression { Member.Name: nameof(Entity.Id), Expression: { } idEntity }
+                && idEntity.Type == typeof(Entity)
+                && FindJoinMapping(idEntity, joinMappings) is { LogicalName: { } logicalName } idMapping)
+            {
+                var primaryKey = primaryKeyResolver?.Invoke(logicalName) ?? $"{logicalName}id";
+                return new ResolvedAttribute(primaryKey, idMapping.LinkAlias);
+            }
 
-        // Walk up the member chain to find an entity name in joinMappings.
-        // Simple join: ti.a.Name → entityExpression is ti.a
-        // Chained join: ti2.ti1.a.Name → entityExpression is ti2.ti1.a
-        // Direct parameter: o.Name → entityExpression is o (ParameterExpression)
-        var current = access.EntityExpression;
+            return null;
+        }
+
+        return FindJoinMapping(access.EntityExpression, joinMappings) is { } mapping
+            ? new ResolvedAttribute(access.AttributeName, mapping.LinkAlias)
+            : null;
+    }
+
+    /// <summary>
+    /// Walks up the member chain of an entity expression to find its entry in joinMappings.
+    /// Simple join: ti.a → "a"; chained join: ti2.ti1.a → "a";
+    /// direct parameter: (ti, o) => ... o → "o".
+    /// </summary>
+    private static JoinEntityInfo? FindJoinMapping(
+        Expression entityExpression, Dictionary<string, JoinEntityInfo> joinMappings)
+    {
+        var current = entityExpression;
         while (current is MemberExpression me)
         {
             if (joinMappings.TryGetValue(me.Member.Name, out var mapping))
-                return new ResolvedAttribute(access.AttributeName, mapping.LinkAlias);
+                return mapping;
             current = me.Expression;
         }
 
-        // Direct parameter access (e.g., (ti, o) => ... o.Name where o is a parameter)
-        if (current is ParameterExpression param
-            && joinMappings.TryGetValue(param.Name!, out var directMapping))
-        {
-            return new ResolvedAttribute(access.AttributeName, directMapping.LinkAlias);
-        }
-
-        return null;
+        return current is ParameterExpression param
+            && joinMappings.TryGetValue(param.Name!, out var directMapping)
+                ? directMapping
+                : null;
     }
 
     // -------------------------------------------------------------------------
@@ -2432,8 +2455,8 @@ internal static class FetchXmlQueryTranslator
 
         ctx.JoinMappings = new Dictionary<string, JoinEntityInfo>
         {
-            [resultLambda.Parameters[0].Name!] = new() { EntityType = outerEntityType, LinkAlias = null },
-            [resultLambda.Parameters[1].Name!] = new() { EntityType = innerEntityType, LinkAlias = link.Alias }
+            [resultLambda.Parameters[0].Name!] = new() { EntityType = outerEntityType, LogicalName = outerLogicalName, LinkAlias = null },
+            [resultLambda.Parameters[1].Name!] = new() { EntityType = innerEntityType, LogicalName = innerLogicalName, LinkAlias = link.Alias }
         };
         if (!resultLambda.IsTransparentIdentifier())
             HandleJoinSelect(resultLambda, ctx);
@@ -2458,7 +2481,9 @@ internal static class FetchXmlQueryTranslator
         var outerKeyLambda = outerKeyArg.ExtractLambda();
         var innerKeyLambda = innerKeyArg.ExtractLambda();
 
-        var innerKeyAttr = innerKeyLambda.Body.GetAttributeName(ctx.PrimaryKeyResolver)
+        // The inner key lambda's parameter is the inner entity itself, so its logical name
+        // is the fallback for resolving Entity.Id on an unbound inner entity.
+        var innerKeyAttr = innerKeyLambda.Body.GetAttributeName(ctx.PrimaryKeyResolver, innerLogicalName)
             ?? throw new NotSupportedException(
                 "Inner join key must be a property decorated with [AttributeLogicalName].");
 
@@ -2497,6 +2522,7 @@ internal static class FetchXmlQueryTranslator
         updatedMappings[resultLambda.Parameters[1].Name!] = new JoinEntityInfo
         {
             EntityType = innerEntityType,
+            LogicalName = innerLogicalName,
             LinkAlias = link.Alias
         };
 
@@ -2587,7 +2613,8 @@ internal static class FetchXmlQueryTranslator
         {
             // Select folded into SelectMany — handle projection here
             var foldedInnerColumns = referencesInner
-                ? ExtractColumnsFromParameter(resultSelector.Body, innerParam)
+                ? ExtractColumnsFromParameter(resultSelector.Body, innerParam,
+                    () => ctx.PrimaryKeyResolver?.Invoke(innerLogicalName) ?? $"{innerLogicalName}id")
                 : null;
             ApplyLeftJoinColumns(ctx.Query, columns,
                 foldedInnerColumns is { Count: > 0 } ? foldedInnerColumns : null,
@@ -2595,11 +2622,13 @@ internal static class FetchXmlQueryTranslator
 
             var foldedResolver = CreateFoldedLeftJoinResolver(
                 resultSelector.Parameters[0], outerPath, outerEntityType,
-                innerParam, ctx.Query.Links[^1].Alias!);
+                innerParam, ctx.Query.Links[^1].Alias!,
+                outerLogicalName, innerLogicalName);
             // Build materializer (new path)
             ctx.Query.Materializer = MaterializerBuilder.BuildJoinMaterializer(
                 resultSelector,
-                expr => foldedResolver(expr) is { } r ? (r.LinkAlias, r.EntityType) : null,
+                expr => foldedResolver(expr) is { } r ? (r.LinkAlias, r.EntityType, r.LogicalName) : null,
+                ctx.PrimaryKeyResolver,
                 innerDirectParam: innerParam);
         }
         else
@@ -2628,8 +2657,8 @@ internal static class FetchXmlQueryTranslator
             var groupJoinResultSelector = groupJoinCall.Arguments[4].ExtractLambda();
             ctx.JoinMappings = new Dictionary<string, JoinEntityInfo>
             {
-                [groupJoinResultSelector.Parameters[0].Name!] = new() { EntityType = outerEntityType, LinkAlias = null },
-                [resultSelector.Parameters[1].Name!] = new() { EntityType = innerEntityType, LinkAlias = ctx.Query.Links[^1].Alias }
+                [groupJoinResultSelector.Parameters[0].Name!] = new() { EntityType = outerEntityType, LogicalName = outerLogicalName, LinkAlias = null },
+                [resultSelector.Parameters[1].Name!] = new() { EntityType = innerEntityType, LogicalName = innerLogicalName, LinkAlias = ctx.Query.Links[^1].Alias }
             };
         }
     }
@@ -2716,20 +2745,29 @@ internal static class FetchXmlQueryTranslator
     /// (e.g. <c>d.FirstName</c> where <c>d</c> is the inner entity parameter), as well
     /// as <c>d.GetAttributeValue&lt;T&gt;(name)</c> calls. Recurses into nested projections.
     /// </summary>
-    private static List<string> ExtractColumnsFromParameter(Expression body, ParameterExpression param)
+    /// <param name="resolveIdColumn">
+    /// Resolves the primary key column of the entity <paramref name="param"/> refers to. Used for
+    /// <see cref="Entity.Id"/> on an unbound entity, which has no [AttributeLogicalName]; invoked
+    /// only when such an access is found, since resolving may require a metadata request.
+    /// </param>
+    private static List<string> ExtractColumnsFromParameter(
+        Expression body, ParameterExpression param, Func<string>? resolveIdColumn = null)
     {
         var columns = new List<string>();
         foreach (var arg in body.GetProjectionArguments())
-            ExtractFromExpr(arg, param, columns);
+            ExtractFromExpr(arg, param, columns, resolveIdColumn);
         return columns;
     }
 
-    private static void ExtractFromExpr(Expression arg, ParameterExpression param, List<string> columns)
+    private static void ExtractFromExpr(
+        Expression arg, ParameterExpression param, List<string> columns, Func<string>? resolveIdColumn)
     {
         if (arg is MemberExpression { Member: PropertyInfo prop, Expression: ParameterExpression p }
             && p == param)
         {
             var name = prop.GetCustomAttribute<AttributeLogicalNameAttribute>()?.LogicalName;
+            if (name is null && prop.Name == nameof(Entity.Id) && p.Type == typeof(Entity))
+                name = resolveIdColumn?.Invoke();
             if (name is not null)
                 columns.Add(name);
             return;
@@ -2745,20 +2783,20 @@ internal static class FetchXmlQueryTranslator
         switch (arg)
         {
             case NewExpression or MemberInitExpression:
-                columns.AddRange(ExtractColumnsFromParameter(arg, param));
+                columns.AddRange(ExtractColumnsFromParameter(arg, param, resolveIdColumn));
                 break;
             case ConditionalExpression conditional:
-                ExtractFromExpr(conditional.IfTrue, param, columns);
-                ExtractFromExpr(conditional.IfFalse, param, columns);
+                ExtractFromExpr(conditional.IfTrue, param, columns, resolveIdColumn);
+                ExtractFromExpr(conditional.IfFalse, param, columns, resolveIdColumn);
                 break;
             case UnaryExpression { NodeType: ExpressionType.Convert } unary:
-                ExtractFromExpr(unary.Operand, param, columns);
+                ExtractFromExpr(unary.Operand, param, columns, resolveIdColumn);
                 break;
             case MethodCallExpression mc:
                 if (mc.Object is not null)
-                    ExtractFromExpr(mc.Object, param, columns);
+                    ExtractFromExpr(mc.Object, param, columns, resolveIdColumn);
                 foreach (var ca in mc.Arguments)
-                    ExtractFromExpr(ca, param, columns);
+                    ExtractFromExpr(ca, param, columns, resolveIdColumn);
                 break;
             case ConstantExpression or DefaultExpression or MemberExpression or ParameterExpression:
                 break;
@@ -2802,7 +2840,7 @@ internal static class FetchXmlQueryTranslator
     /// Identifies which entity (root or linked) an expression refers to.
     /// <c>LinkAlias</c> is <c>null</c> for the root entity.
     /// </summary>
-    private readonly record struct EntityResolution(string? LinkAlias, Type EntityType);
+    private readonly record struct EntityResolution(string? LinkAlias, Type EntityType, string? LogicalName = null);
 
     /// <summary>
     /// Creates an entity resolver for inner-join scenarios using the JoinMappings dictionary.
@@ -2817,13 +2855,13 @@ internal static class FetchXmlQueryTranslator
             while (current is MemberExpression me)
             {
                 if (joinMappings.TryGetValue(me.Member.Name, out var mapping))
-                    return new EntityResolution(mapping.LinkAlias, mapping.EntityType);
+                    return new EntityResolution(mapping.LinkAlias, mapping.EntityType, mapping.LogicalName);
                 current = me.Expression;
             }
 
             if (current is ParameterExpression param
                 && joinMappings.TryGetValue(param.Name!, out var directMapping))
-                return new EntityResolution(directMapping.LinkAlias, directMapping.EntityType);
+                return new EntityResolution(directMapping.LinkAlias, directMapping.EntityType, directMapping.LogicalName);
 
             return null;
         };
@@ -2838,20 +2876,22 @@ internal static class FetchXmlQueryTranslator
         Type outerEntityType,
         string? innerPropertyName,
         string innerAlias,
-        Type? innerEntityType)
+        Type? innerEntityType,
+        string? outerLogicalName,
+        string? innerLogicalName)
     {
         return expr =>
         {
             // Outer entity via TI path
             if (expr.IsOuterEntityAccess(outerPath, originalParam))
-                return new EntityResolution(null, outerEntityType);
+                return new EntityResolution(null, outerEntityType, outerLogicalName);
 
             // Inner entity via property: ti.innerProp
             if (innerPropertyName is not null
                 && expr is MemberExpression { Member.Name: var name, Expression: ParameterExpression p }
                 && p == originalParam
                 && name == innerPropertyName)
-                return new EntityResolution(innerAlias, innerEntityType ?? expr.Type);
+                return new EntityResolution(innerAlias, innerEntityType ?? expr.Type, innerLogicalName);
 
             return null;
         };
@@ -2866,17 +2906,19 @@ internal static class FetchXmlQueryTranslator
         string[] outerPath,
         Type outerEntityType,
         ParameterExpression innerParam,
-        string innerAlias)
+        string innerAlias,
+        string? outerLogicalName,
+        string? innerLogicalName)
     {
         return expr =>
         {
             // Outer entity via TI path
             if (expr.IsOuterEntityAccess(outerPath, outerTiParam))
-                return new EntityResolution(null, outerEntityType);
+                return new EntityResolution(null, outerEntityType, outerLogicalName);
 
             // Inner entity via direct parameter
             if (expr is ParameterExpression p && p == innerParam)
-                return new EntityResolution(innerAlias, innerParam.Type);
+                return new EntityResolution(innerAlias, innerParam.Type, innerLogicalName);
 
             return null;
         };
@@ -2975,6 +3017,13 @@ internal static class FetchXmlQueryTranslator
     private sealed class JoinEntityInfo
     {
         public required Type EntityType { get; init; }
+
+        /// <summary>
+        /// The entity's logical name. Needed to resolve <see cref="Entity.Id"/> on unbound
+        /// entities, whose CLR type (<see cref="Entity"/>) carries no logical name.
+        /// </summary>
+        public string? LogicalName { get; init; }
+
         public string? LinkAlias { get; init; }
     }
 

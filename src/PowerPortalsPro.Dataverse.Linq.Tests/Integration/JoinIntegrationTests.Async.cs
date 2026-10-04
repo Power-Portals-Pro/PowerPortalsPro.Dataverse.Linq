@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Microsoft.Xrm.Sdk;
 using PowerPortalsPro.Dataverse.Linq.Tests.Proxies;
 
 namespace PowerPortalsPro.Dataverse.Linq.Tests.Integration;
@@ -642,5 +643,150 @@ public partial class JoinIntegrationTests
         results.Should().NotBeEmpty();
         results.Select(r => r.Name).Should().OnlyHaveUniqueItems();
         results.Should().AllSatisfy(r => r.Name.Should().NotBeNull());
+    }
+
+    // -------------------------------------------------------------------------
+    // Mixed typed and late-bound joins
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ToListAsync_MixedJoin_LateBoundOuterTypedInner_ReturnsAllMatches()
+    {
+        var results = await (from a in Service.Queryable("new_customaccount")
+                             join c in Service.Queryable<CustomContact>()
+                                 on a.Id equals c.ParentAccount.Id
+                             select new
+                             {
+                                 AccountName = a.GetAttributeValue<string>("new_name"),
+                                 c.FirstName,
+                             }).ToListAsync();
+
+        // 100 accounts × 5 contacts
+        results.Should().HaveCount(500);
+        results.Should().AllSatisfy(r =>
+        {
+            r.AccountName.Should().NotBeNullOrEmpty();
+            r.FirstName.Should().NotBeNullOrEmpty();
+        });
+    }
+
+    [Fact]
+    public async Task ToListAsync_MixedLeftJoin_TypedOuterLateBoundInner_IncludesUnmatchedRows()
+    {
+        var results = await (from a in Service.Queryable<CustomAccount>()
+                             join c in Service.Queryable("new_customcontact")
+                                 on a.CustomAccountId equals c.GetAttributeValue<EntityReference>("new_parentaccount").Id into contacts
+                             from c in contacts.DefaultIfEmpty()
+                             select new { Account = a, Contact = c }).ToListAsync();
+
+        // 100 accounts × 5 contacts + 50 accounts with no contacts
+        results.Should().HaveCount(550);
+        results.Where(r => r.Contact == null).Should().HaveCount(50);
+        results.Where(r => r.Contact != null).Should().AllSatisfy(r =>
+        {
+            r.Contact!.Id.Should().NotBe(Guid.Empty);
+            r.Contact.GetAttributeValue<string>("new_firstname").Should().NotBeNullOrEmpty();
+        });
+    }
+
+    [Fact]
+    public async Task ToListAsync_MixedJoin_WhereAndOrderByOnLateBoundInner_ReturnsFilteredOrderedResults()
+    {
+        var results = await (from a in Service.Queryable<CustomAccount>()
+                             join c in Service.Queryable("new_customcontact")
+                                 on a.CustomAccountId equals c.GetAttributeValue<EntityReference>("new_parentaccount").Id
+                             where c.GetAttributeValue<string>("new_lastname") == "Last1"
+                             orderby c.GetAttributeValue<string>("new_firstname")
+                             select new
+                             {
+                                 a.Name,
+                                 FirstName = c.GetAttributeValue<string>("new_firstname"),
+                                 LastName = c.GetAttributeValue<string>("new_lastname"),
+                             }).ToListAsync();
+
+        // One "Last1" contact per account with contacts
+        results.Should().HaveCount(100);
+        results.Should().AllSatisfy(r => r.LastName.Should().Be("Last1"));
+        results.Select(r => r.FirstName).Should().BeInAscendingOrder();
+    }
+
+    [Fact]
+    public async Task ToListAsync_MixedJoin_SelectWholeEntities_ReturnsTypedAndLateBoundEntities()
+    {
+        var results = await (from a in Service.Queryable<CustomAccount>()
+                             join c in Service.Queryable("new_customcontact")
+                                 on a.CustomAccountId equals c.GetAttributeValue<EntityReference>("new_parentaccount").Id
+                             select new { Account = a, Contact = c }).ToListAsync();
+
+        results.Should().HaveCount(500);
+        results.Should().AllSatisfy(r =>
+        {
+            r.Account.CustomAccountId.Should().NotBe(Guid.Empty);
+            r.Account.Name.Should().NotBeNullOrEmpty();
+            r.Contact.LogicalName.Should().Be("new_customcontact");
+            r.Contact.Id.Should().NotBe(Guid.Empty);
+            r.Contact.GetAttributeValue<EntityReference>("new_parentaccount").Id
+                .Should().Be(r.Account.CustomAccountId);
+        });
+    }
+
+    [Fact]
+    public async Task ToListAsync_MixedJoin_WhereOnLateBoundInnerId_ReturnsSingleMatch()
+    {
+        var contactId = await Service.Queryable<CustomContact>()
+            .Where(c => c.ParentAccount != null)
+            .Select(c => c.CustomContactId)
+            .FirstAsync();
+
+        var results = await (from a in Service.Queryable<CustomAccount>()
+                             join c in Service.Queryable("new_customcontact")
+                                 on a.CustomAccountId equals c.GetAttributeValue<EntityReference>("new_parentaccount").Id
+                             where c.Id == contactId
+                             select new { a.Name, ContactId = c.Id }).ToListAsync();
+
+        results.Should().ContainSingle()
+            .Which.ContactId.Should().Be(contactId);
+    }
+
+    [Fact]
+    public async Task ToListAsync_MixedChainedJoin_TypedLateBoundTyped_ReturnsResults()
+    {
+        var results = await (from a in Service.Queryable<CustomAccount>()
+                             join c in Service.Queryable("new_customcontact")
+                                 on a.CustomAccountId equals c.GetAttributeValue<EntityReference>("new_parentaccount").Id
+                             join o in Service.Queryable<CustomOpportunity>()
+                                 on c.Id equals o.Contact.Id
+                             select new
+                             {
+                                 AccountName = a.Name,
+                                 FirstName = c.GetAttributeValue<string>("new_firstname"),
+                                 OpportunityName = o.Name,
+                             }).ToListAsync();
+
+        // 100 opportunities, each linked to a contact that has a parent account
+        results.Should().HaveCount(100);
+        results.Should().AllSatisfy(r =>
+        {
+            r.AccountName.Should().NotBeNullOrEmpty();
+            r.FirstName.Should().NotBeNullOrEmpty();
+            r.OpportunityName.Should().StartWith("Opportunity");
+        });
+    }
+
+    [Fact]
+    public async Task ToListAsync_MixedLeftJoinWithWhere_SelectLateBoundInnerId_ReturnsIdsForMatchedRows()
+    {
+        var results = await (from a in Service.Queryable<CustomAccount>()
+                             join c in Service.Queryable("new_customcontact")
+                                 on a.CustomAccountId equals c.GetAttributeValue<EntityReference>("new_parentaccount").Id into contacts
+                             from c in contacts.DefaultIfEmpty()
+                             where a.Name != null
+                             select new { a.Name, ContactId = c.Id }).ToListAsync();
+
+        // 100 accounts × 5 contacts + 50 accounts with no contacts
+        results.Should().HaveCount(550);
+        results.Where(r => r.ContactId == Guid.Empty).Should().HaveCount(50);
+        results.Where(r => r.ContactId != Guid.Empty).Select(r => r.ContactId)
+            .Should().OnlyHaveUniqueItems().And.HaveCount(500);
     }
 }

@@ -280,6 +280,115 @@ public partial class JoinIntegrationTests(ServiceClientFixture fixture) : Integr
         });
     }
 
+    // -------------------------------------------------------------------------
+    // Mixed typed and late-bound joins
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void MixedJoin_TypedOuterLateBoundInner_ReturnsAllMatches()
+    {
+        var results = (from a in Service.Queryable<CustomAccount>()
+                       join c in Service.Queryable("new_customcontact")
+                           on a.CustomAccountId equals c.GetAttributeValue<EntityReference>("new_parentaccount").Id
+                       select new
+                       {
+                           a.Name,
+                           FirstName = c.GetAttributeValue<string>("new_firstname"),
+                       }).ToList();
+
+        // 100 accounts × 5 contacts
+        results.Should().HaveCount(500);
+        results.Should().AllSatisfy(r =>
+        {
+            r.Name.Should().NotBeNullOrEmpty();
+            r.FirstName.Should().NotBeNullOrEmpty();
+        });
+    }
+
+    [Fact]
+    public void MixedLeftJoin_LateBoundOuterTypedInner_IncludesUnmatchedRows()
+    {
+        var results = (from a in Service.Queryable("new_customaccount")
+                       join c in Service.Queryable<CustomContact>()
+                           on a.Id equals c.ParentAccount.Id into contacts
+                       from c in contacts.DefaultIfEmpty()
+                       select new
+                       {
+                           AccountName = a.GetAttributeValue<string>("new_name"),
+                           FirstName = c != null ? c.FirstName : null,
+                       }).ToList();
+
+        // 100 accounts × 5 contacts + 50 accounts with no contacts
+        results.Should().HaveCount(550);
+        results.Should().AllSatisfy(r => r.AccountName.Should().NotBeNullOrEmpty());
+        results.Where(r => r.FirstName == null).Should().HaveCount(50);
+    }
+
+    [Fact]
+    public void MixedChainedJoin_TypedLateBoundTyped_ReturnsResults()
+    {
+        var results = (from a in Service.Queryable<CustomAccount>()
+                       join c in Service.Queryable("new_customcontact")
+                           on a.CustomAccountId equals c.GetAttributeValue<EntityReference>("new_parentaccount").Id
+                       join o in Service.Queryable<CustomOpportunity>()
+                           on c.Id equals o.Contact.Id
+                       select new
+                       {
+                           AccountName = a.Name,
+                           FirstName = c.GetAttributeValue<string>("new_firstname"),
+                           OpportunityName = o.Name,
+                       }).ToList();
+
+        // 100 opportunities, each linked to a contact that has a parent account
+        results.Should().HaveCount(100);
+        results.Should().AllSatisfy(r =>
+        {
+            r.AccountName.Should().NotBeNullOrEmpty();
+            r.FirstName.Should().NotBeNullOrEmpty();
+            r.OpportunityName.Should().StartWith("Opportunity");
+        });
+    }
+
+    [Fact]
+    public void MixedChainedJoin_LateBoundIdAsInnerKey_ReturnsResults()
+    {
+        var results = (from c in Service.Queryable<CustomContact>()
+                       join o in Service.Queryable<CustomOpportunity>()
+                           on c.CustomContactId equals o.Contact.Id
+                       join a in Service.Queryable("new_customaccount")
+                           on c.ParentAccount.Id equals a.Id
+                       select new
+                       {
+                           c.FirstName,
+                           OpportunityName = o.Name,
+                           AccountName = a.GetAttributeValue<string>("new_name"),
+                       }).ToList();
+
+        results.Should().HaveCount(100);
+        results.Should().AllSatisfy(r =>
+        {
+            r.FirstName.Should().NotBeNullOrEmpty();
+            r.OpportunityName.Should().StartWith("Opportunity");
+            r.AccountName.Should().NotBeNullOrEmpty();
+        });
+    }
+
+    [Fact]
+    public void MixedLeftJoin_SelectLateBoundInnerId_ReturnsIdsForMatchedRows()
+    {
+        var results = (from a in Service.Queryable<CustomAccount>()
+                       join c in Service.Queryable("new_customcontact")
+                           on a.CustomAccountId equals c.GetAttributeValue<EntityReference>("new_parentaccount").Id into contacts
+                       from c in contacts.DefaultIfEmpty()
+                       select new { a.Name, ContactId = c.Id }).ToList();
+
+        // 100 accounts × 5 contacts + 50 accounts with no contacts
+        results.Should().HaveCount(550);
+        results.Where(r => r.ContactId == Guid.Empty).Should().HaveCount(50);
+        results.Where(r => r.ContactId != Guid.Empty).Select(r => r.ContactId)
+            .Should().OnlyHaveUniqueItems().And.HaveCount(500);
+    }
+
     private sealed record DocumentLocationInfo(Guid Id, string? RelativeUrl);
     private sealed record EntityDocumentLocation(Entity Source)
     {

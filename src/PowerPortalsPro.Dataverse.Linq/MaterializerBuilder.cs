@@ -17,9 +17,11 @@ internal static class MaterializerBuilder
 {
     /// <summary>
     /// Resolution callback: given an expression that potentially references an entity,
-    /// returns the link alias (null = root) and entity CLR type, or null if not an entity ref.
+    /// returns the link alias (null = root), entity CLR type and entity logical name, or null
+    /// if not an entity ref. The logical name resolves <see cref="Entity.Id"/> on unbound
+    /// entities, whose CLR type (<see cref="Entity"/>) carries none.
     /// </summary>
-    internal delegate (string? LinkAlias, Type EntityType)? EntityResolver(Expression expr);
+    internal delegate (string? LinkAlias, Type EntityType, string? LogicalName)? EntityResolver(Expression expr);
 
     /// <summary>
     /// Builds a <see cref="MaterializerInfo"/> for inner-join and left-join selects.
@@ -170,7 +172,8 @@ internal static class MaterializerBuilder
                 && _primaryKeyResolver is not null)
             {
                 var entityLogicalName = node.Expression.Type
-                    .GetCustomAttribute<EntityLogicalNameAttribute>()?.LogicalName;
+                    .GetCustomAttribute<EntityLogicalNameAttribute>()?.LogicalName
+                    ?? idRes.LogicalName;
 
                 if (entityLogicalName is not null)
                 {

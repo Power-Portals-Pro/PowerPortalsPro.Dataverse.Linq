@@ -1,5 +1,7 @@
 using FluentAssertions;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
+using NSubstitute;
 using PowerPortalsPro.Dataverse.Linq.Tests.Proxies;
 
 namespace PowerPortalsPro.Dataverse.Linq.Tests.FetchXml;
@@ -852,5 +854,438 @@ public class JoinFetchXmlTests : FetchXmlTestBase
               </entity>
             </fetch>
             """);
+    }
+
+    // -------------------------------------------------------------------------
+    // Mixed typed and late-bound joins
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_MixedInnerJoin_TypedOuterLateBoundInner_GeneratesLinkEntity()
+    {
+        var fetchXml = (from a in _service.Queryable<CustomAccount>()
+                        join c in _service.Queryable("new_customcontact")
+                            on a.CustomAccountId equals c.GetAttributeValue<EntityReference>("new_parentaccount").Id
+                        select new
+                        {
+                            a.Name,
+                            FirstName = c.GetAttributeValue<string>("new_firstname"),
+                        }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="inner">
+                  <attribute name="new_firstname" />
+                </link-entity>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_MixedInnerJoin_LateBoundOuterTypedInner_GeneratesLinkEntity()
+    {
+        var fetchXml = (from a in _service.Queryable("new_customaccount")
+                        join c in _service.Queryable<CustomContact>()
+                            on a.Id equals c.ParentAccount.Id
+                        select new
+                        {
+                            AccountName = a.GetAttributeValue<string>("new_name"),
+                            c.FirstName,
+                        }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="inner">
+                  <attribute name="new_firstname" />
+                </link-entity>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_MixedInnerJoin_LookupOnLateBoundOuter_GeneratesLinkEntity()
+    {
+        var fetchXml = (from c in _service.Queryable("new_customcontact")
+                        join a in _service.Queryable<CustomAccount>()
+                            on c.GetAttributeValue<EntityReference>("new_parentaccount").Id equals a.CustomAccountId
+                        select new
+                        {
+                            FirstName = c.GetAttributeValue<string>("new_firstname"),
+                            AccountName = a.Name,
+                        }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customcontact">
+                <attribute name="new_firstname" />
+                <link-entity name="new_customaccount" from="new_customaccountid" to="new_parentaccount" alias="a" link-type="inner">
+                  <attribute name="new_name" />
+                </link-entity>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_MixedLeftJoin_TypedOuterLateBoundInner_GeneratesOuterLinkEntity()
+    {
+        var fetchXml = (from a in _service.Queryable<CustomAccount>()
+                        join c in _service.Queryable("new_customcontact")
+                            on a.CustomAccountId equals c.GetAttributeValue<EntityReference>("new_parentaccount").Id into contacts
+                        from c in contacts.DefaultIfEmpty()
+                        select new
+                        {
+                            a.Name,
+                            FirstName = c.GetAttributeValue<string>("new_firstname"),
+                            LastName = c.GetAttributeValue<string>("new_lastname"),
+                        }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="outer">
+                  <attribute name="new_firstname" />
+                  <attribute name="new_lastname" />
+                </link-entity>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_MixedLeftJoin_LateBoundOuterTypedInner_GeneratesOuterLinkEntity()
+    {
+        var fetchXml = (from a in _service.Queryable("new_customaccount")
+                        join c in _service.Queryable<CustomContact>()
+                            on a.Id equals c.ParentAccount.Id into contacts
+                        from c in contacts.DefaultIfEmpty()
+                        select new
+                        {
+                            AccountName = a.GetAttributeValue<string>("new_name"),
+                            FirstName = c != null ? c.FirstName : null,
+                        }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="outer">
+                  <attribute name="new_firstname" />
+                </link-entity>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_MixedJoin_WhereAndOrderByOnLateBoundInner_QualifiesByLinkAlias()
+    {
+        var fetchXml = (from a in _service.Queryable<CustomAccount>()
+                        join c in _service.Queryable("new_customcontact")
+                            on a.CustomAccountId equals c.GetAttributeValue<EntityReference>("new_parentaccount").Id
+                        where a.Name != null && c.GetAttributeValue<string>("new_lastname") == "Smith"
+                        orderby c.GetAttributeValue<string>("new_firstname")
+                        select new
+                        {
+                            a.Name,
+                            FirstName = c.GetAttributeValue<string>("new_firstname"),
+                        }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+                <order attribute="new_firstname" descending="false" entityname="c" />
+                <filter type="and">
+                  <condition attribute="new_name" operator="not-null" />
+                  <condition entityname="c" attribute="new_lastname" operator="eq" value="Smith" />
+                </filter>
+                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="inner">
+                  <attribute name="new_firstname" />
+                </link-entity>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_MixedJoin_SelectWholeEntities_IncludesAllAttributes()
+    {
+        var fetchXml = (from a in _service.Queryable<CustomAccount>()
+                        join c in _service.Queryable("new_customcontact")
+                            on a.CustomAccountId equals c.GetAttributeValue<EntityReference>("new_parentaccount").Id
+                        select new { Account = a, Contact = c }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <all-attributes />
+                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="inner">
+                  <all-attributes />
+                </link-entity>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_MixedChainedJoin_TypedLateBoundTyped_GeneratesNestedLinkEntities()
+    {
+        var fetchXml = (from a in _service.Queryable<CustomAccount>()
+                        join c in _service.Queryable("new_customcontact")
+                            on a.CustomAccountId equals c.GetAttributeValue<EntityReference>("new_parentaccount").Id
+                        join o in _service.Queryable<CustomOpportunity>()
+                            on c.Id equals o.Contact.Id
+                        select new
+                        {
+                            AccountName = a.Name,
+                            FirstName = c.GetAttributeValue<string>("new_firstname"),
+                            OpportunityName = o.Name,
+                        }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="inner">
+                  <attribute name="new_firstname" />
+                  <link-entity name="new_customopportunity" from="new_contact" to="new_customcontactid" alias="o" link-type="inner">
+                    <attribute name="new_name" />
+                  </link-entity>
+                </link-entity>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_MixedChainedJoin_LateBoundIdAsInnerKey_GeneratesSiblingLinkEntities()
+    {
+        var fetchXml = (from c in _service.Queryable<CustomContact>()
+                        join o in _service.Queryable<CustomOpportunity>()
+                            on c.CustomContactId equals o.Contact.Id
+                        join a in _service.Queryable("new_customaccount")
+                            on c.ParentAccount.Id equals a.Id
+                        select new
+                        {
+                            c.FirstName,
+                            OpportunityName = o.Name,
+                            AccountName = a.GetAttributeValue<string>("new_name"),
+                        }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customcontact">
+                <attribute name="new_firstname" />
+                <link-entity name="new_customopportunity" from="new_contact" to="new_customcontactid" alias="o" link-type="inner">
+                  <attribute name="new_name" />
+                </link-entity>
+                <link-entity name="new_customaccount" from="new_customaccountid" to="new_parentaccount" alias="a" link-type="inner">
+                  <attribute name="new_name" />
+                </link-entity>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_MixedJoin_WhereOnLateBoundInnerId_QualifiesByLinkAlias()
+    {
+        var contactId = Guid.Parse("11111111-2222-3333-4444-555555555555");
+
+        var fetchXml = (from a in _service.Queryable<CustomAccount>()
+                        join c in _service.Queryable("new_customcontact")
+                            on a.CustomAccountId equals c.GetAttributeValue<EntityReference>("new_parentaccount").Id
+                        where c.Id == contactId
+                        select new { a.Name }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+                <filter type="and">
+                  <condition entityname="c" attribute="new_customcontactid" operator="eq" value="11111111-2222-3333-4444-555555555555" />
+                </filter>
+                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="inner" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_MixedJoin_SelectLateBoundInnerId_SelectsPrimaryKey()
+    {
+        var fetchXml = (from a in _service.Queryable<CustomAccount>()
+                        join c in _service.Queryable("new_customcontact")
+                            on a.CustomAccountId equals c.GetAttributeValue<EntityReference>("new_parentaccount").Id
+                        select new { a.Name, ContactId = c.Id }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="inner">
+                  <attribute name="new_customcontactid" />
+                </link-entity>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void Materialize_MixedJoin_SelectLateBoundInnerId_ReturnsId()
+    {
+        var contactId = Guid.NewGuid();
+        var row = new Entity("new_customaccount", Guid.NewGuid());
+        row["new_name"] = "Contoso";
+        row["c.new_customcontactid"] = new AliasedValue("new_customcontact", "new_customcontactid", contactId);
+
+        _service.RetrieveMultiple(Arg.Any<QueryBase>())
+            .Returns(new EntityCollection { Entities = { row }, MoreRecords = false });
+
+        var results = (from a in _service.Queryable<CustomAccount>()
+                       join c in _service.Queryable("new_customcontact")
+                           on a.CustomAccountId equals c.GetAttributeValue<EntityReference>("new_parentaccount").Id
+                       where c.Id == contactId
+                       select new { a.Name, ContactId = c.Id }).ToList();
+
+        results.Should().ContainSingle();
+        results[0].Name.Should().Be("Contoso");
+        results[0].ContactId.Should().Be(contactId);
+    }
+
+    [Fact]
+    public void Materialize_MixedLeftJoin_SelectLateBoundInnerId_ReturnsId()
+    {
+        var contactId = Guid.NewGuid();
+        var row = new Entity("new_customaccount", Guid.NewGuid());
+        row["new_name"] = "Contoso";
+        row["c.new_customcontactid"] = new AliasedValue("new_customcontact", "new_customcontactid", contactId);
+
+        _service.RetrieveMultiple(Arg.Any<QueryBase>())
+            .Returns(new EntityCollection { Entities = { row }, MoreRecords = false });
+
+        var results = (from a in _service.Queryable<CustomAccount>()
+                       join c in _service.Queryable("new_customcontact")
+                           on a.CustomAccountId equals c.GetAttributeValue<EntityReference>("new_parentaccount").Id into contacts
+                       from c in contacts.DefaultIfEmpty()
+                       select new { a.Name, ContactId = c.Id }).ToList();
+
+        results.Should().ContainSingle();
+        results[0].Name.Should().Be("Contoso");
+        results[0].ContactId.Should().Be(contactId);
+    }
+
+    [Fact]
+    public void ToFetchXml_MixedLeftJoin_SelectLateBoundInnerId_SelectsPrimaryKey()
+    {
+        var fetchXml = (from a in _service.Queryable<CustomAccount>()
+                        join c in _service.Queryable("new_customcontact")
+                            on a.CustomAccountId equals c.GetAttributeValue<EntityReference>("new_parentaccount").Id into contacts
+                        from c in contacts.DefaultIfEmpty()
+                        select new { a.Name, ContactId = c.Id }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="outer">
+                  <attribute name="new_customcontactid" />
+                </link-entity>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void Materialize_MixedLeftJoin_SelectLateBoundInnerId_UnmatchedRowReturnsEmptyGuid()
+    {
+        var row = new Entity("new_customaccount", Guid.NewGuid());
+        row["new_name"] = "Empty Account";
+
+        _service.RetrieveMultiple(Arg.Any<QueryBase>())
+            .Returns(new EntityCollection { Entities = { row }, MoreRecords = false });
+
+        var results = (from a in _service.Queryable<CustomAccount>()
+                       join c in _service.Queryable("new_customcontact")
+                           on a.CustomAccountId equals c.GetAttributeValue<EntityReference>("new_parentaccount").Id into contacts
+                       from c in contacts.DefaultIfEmpty()
+                       select new { a.Name, ContactId = c.Id }).ToList();
+
+        results.Should().ContainSingle();
+        results[0].Name.Should().Be("Empty Account");
+        results[0].ContactId.Should().Be(Guid.Empty);
+    }
+
+    [Fact]
+    public void ToFetchXml_MixedLeftJoinWithWhere_SelectLateBoundInnerId_SelectsPrimaryKey()
+    {
+        // A where clause between the left join and the select routes the projection through
+        // the transparent-identifier path rather than the folded SelectMany projection.
+        var fetchXml = (from a in _service.Queryable<CustomAccount>()
+                        join c in _service.Queryable("new_customcontact")
+                            on a.CustomAccountId equals c.GetAttributeValue<EntityReference>("new_parentaccount").Id into contacts
+                        from c in contacts.DefaultIfEmpty()
+                        where a.Name != null
+                        select new { a.Name, ContactId = c.Id }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+                <filter type="and">
+                  <condition attribute="new_name" operator="not-null" />
+                </filter>
+                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="outer">
+                  <attribute name="new_customcontactid" />
+                </link-entity>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void Materialize_MixedLeftJoinWithWhere_SelectLateBoundInnerId_ReturnsId()
+    {
+        var contactId = Guid.NewGuid();
+        var matched = new Entity("new_customaccount", Guid.NewGuid());
+        matched["new_name"] = "Contoso";
+        matched["c.new_customcontactid"] = new AliasedValue("new_customcontact", "new_customcontactid", contactId);
+        var unmatched = new Entity("new_customaccount", Guid.NewGuid());
+        unmatched["new_name"] = "Empty Account";
+
+        _service.RetrieveMultiple(Arg.Any<QueryBase>())
+            .Returns(new EntityCollection { Entities = { matched, unmatched }, MoreRecords = false });
+
+        var results = (from a in _service.Queryable<CustomAccount>()
+                       join c in _service.Queryable("new_customcontact")
+                           on a.CustomAccountId equals c.GetAttributeValue<EntityReference>("new_parentaccount").Id into contacts
+                       from c in contacts.DefaultIfEmpty()
+                       where a.Name != null
+                       select new { a.Name, ContactId = c.Id }).ToList();
+
+        results.Should().HaveCount(2);
+        results[0].ContactId.Should().Be(contactId);
+        results[1].ContactId.Should().Be(Guid.Empty);
     }
 }

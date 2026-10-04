@@ -456,6 +456,21 @@ var results = await (from c in service.Queryable("contact")
                          on c.GetAttributeValue<EntityReference>(lookupColumn).Id equals a.Id
                      select new { AccountName = a.GetAttributeValue<string>(nameColumn) })
                     .ToListAsync();
+
+// Mixed typed and late-bound — combine proxy classes and unbound queries freely,
+// in either direction and across chained joins
+var results = await (from a in service.Queryable<Account>()
+                     join c in service.Queryable("contact")
+                         on a.AccountId equals c.GetAttributeValue<EntityReference>("parentcustomerid").Id
+                     join o in service.Queryable<Opportunity>()
+                         on c.Id equals o.ParentContactId.Id
+                     select new
+                     {
+                         AccountName = a.Name,
+                         ContactName = c.GetAttributeValue<string>("fullname"),
+                         OpportunityName = o.Name
+                     })
+                    .ToListAsync();
 ```
 
 Only the columns referenced through `GetAttributeValue` are retrieved for each entity. Projecting a whole entity (e.g. `select new { Contact = c, Account = a }`) retrieves all of its columns (`<all-attributes />`), and the result is a regular `Entity` you can read with `GetAttributeValue`.

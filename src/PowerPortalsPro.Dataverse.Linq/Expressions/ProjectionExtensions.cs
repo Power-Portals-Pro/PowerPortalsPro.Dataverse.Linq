@@ -90,8 +90,13 @@ internal static class ProjectionExtensions
     /// projection. Only members accessed through <paramref name="innerPropertyName"/> are
     /// collected.
     /// </summary>
+    /// <param name="resolveIdColumn">
+    /// Resolves the inner entity's primary key column. Used for <see cref="Entity.Id"/> on an
+    /// unbound inner entity, which has no [AttributeLogicalName]; invoked only when such an
+    /// access is found, since resolving may require a metadata request.
+    /// </param>
     internal static IReadOnlyList<string>? ExtractInnerColumnsViaProperty(
-        this LambdaExpression lambda, string innerPropertyName)
+        this LambdaExpression lambda, string innerPropertyName, Func<string>? resolveIdColumn = null)
     {
         var param = lambda.Parameters[0];
         var columns = new List<string>();
@@ -100,7 +105,10 @@ internal static class ProjectionExtensions
             if (arg is MemberExpression { Member: PropertyInfo prop, Expression: MemberExpression inner }
                 && IsInnerAccess(inner))
             {
-                return prop.GetCustomAttribute<AttributeLogicalNameAttribute>()?.LogicalName;
+                var name = prop.GetCustomAttribute<AttributeLogicalNameAttribute>()?.LogicalName;
+                if (name is null && prop.Name == nameof(Entity.Id) && inner.Type == typeof(Entity))
+                    name = resolveIdColumn?.Invoke();
+                return name;
             }
 
             if (arg.IsGetAttributeValueCall(out var attrName, out var entityExpr)
