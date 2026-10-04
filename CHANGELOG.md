@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+- Fixed `Entity.Id` on a late-bound (`Queryable("logicalname")`) entity in joins that mix typed and late-bound sources. The base `Entity` type carries no logical name, so the primary key could not be resolved once the entity was reached through a join; each joined entity's logical name is now tracked and used instead. This fixes:
+  - Chained joins keyed on a late-bound `Id` (e.g. `on c.Id equals o.Contact.Id`, or `equals a.Id` as the inner key), which threw `NotSupportedException` ("Could not resolve outer join key through transparent identifier"). Filters such as `where c.Id == id` on a late-bound joined entity are also resolved this way.
+  - Projecting a late-bound joined entity's `Id` (e.g. `select new { ContactId = c.Id }`) in an inner join, which threw `ArgumentException` during materialization.
+  - Projecting it after a left join, which threw `NullReferenceException` for unmatched rows, or — when a `where` clause came between the join and the `select` — silently returned `Guid.Empty` for every row because the primary key column was never requested. Unmatched rows now return `Guid.Empty`, matching other columns of a missing left-join match.
+
 ## [1.0.17] - 2026-07-29
 
 - Fixed `NotSupportedException` for `Contains` over an array whose element type does not implement `IEquatable<T>` — an array of option set enums, most commonly. C# binds `array.Contains(value)` to the span-based `MemoryExtensions.Contains`, which takes a trailing `IEqualityComparer<T>` argument in that case; the extra argument is now recognised and still translates to an `in` (or `not-in`) condition. A non-null comparer has no FetchXml equivalent and remains unsupported.
