@@ -411,6 +411,55 @@ var results = await (from c in service.Queryable<Contact>()
                     .ToListAsync();
 ```
 
+### Late-Bound Joins
+
+Joins also work with [unbound queries](#unbound-queries) — no proxy classes required. Use `Entity.Id` for the primary key and `GetAttributeValue<EntityReference>("lookupname").Id` for lookup columns in the join condition.
+
+```csharp
+// Inner join
+var results = await (from a in service.Queryable("account")
+                     join c in service.Queryable("contact")
+                         on a.Id equals c.GetAttributeValue<EntityReference>("parentcustomerid").Id
+                     where a.GetAttributeValue<string>("name") != null
+                     select new
+                     {
+                         AccountName = a.GetAttributeValue<string>("name"),
+                         ContactName = c.GetAttributeValue<string>("fullname")
+                     })
+                    .ToListAsync();
+
+// Left join (DefaultIfEmpty)
+var results = await (from a in service.Queryable("account")
+                     join c in service.Queryable("contact")
+                         on a.Id equals c.GetAttributeValue<EntityReference>("parentcustomerid").Id into contacts
+                     from c in contacts.DefaultIfEmpty()
+                     select new
+                     {
+                         AccountName = a.GetAttributeValue<string>("name"),
+                         ContactName = c.GetAttributeValue<string>("fullname")
+                     })
+                    .ToListAsync();
+
+// Join from the lookup side — the lookup is on the outer entity
+var results = await (from c in service.Queryable("contact")
+                     join a in service.Queryable("account")
+                         on c.GetAttributeValue<EntityReference>("parentcustomerid").Id equals a.Id
+                     where a.GetAttributeValue<string>("name") == "Contoso"
+                     select new { Contact = c, Account = a })
+                    .ToListAsync();
+
+// Attribute names can come from variables
+var lookupColumn = "parentcustomerid";
+var nameColumn = "name";
+var results = await (from c in service.Queryable("contact")
+                     join a in service.Queryable("account")
+                         on c.GetAttributeValue<EntityReference>(lookupColumn).Id equals a.Id
+                     select new { AccountName = a.GetAttributeValue<string>(nameColumn) })
+                    .ToListAsync();
+```
+
+Only the columns referenced through `GetAttributeValue` are retrieved for each entity. Projecting a whole entity (e.g. `select new { Contact = c, Account = a }`) retrieves all of its columns (`<all-attributes />`), and the result is a regular `Entity` you can read with `GetAttributeValue`.
+
 ## Ordering
 
 Translates to [FetchXml order elements](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/fetchxml/order-rows).
