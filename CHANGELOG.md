@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.0.18] - 2026-10-04
+
 - Fixed `Entity.Id` on a late-bound (`Queryable("logicalname")`) entity in joins that mix typed and late-bound sources. The base `Entity` type carries no logical name, so the primary key could not be resolved once the entity was reached through a join; each joined entity's logical name is now tracked and used instead. This fixes:
   - Chained joins keyed on a late-bound `Id` (e.g. `on c.Id equals o.Contact.Id`, or `equals a.Id` as the inner key), which threw `NotSupportedException` ("Could not resolve outer join key through transparent identifier"). Filters such as `where c.Id == id` on a late-bound joined entity are also resolved this way.
   - Projecting a late-bound joined entity's `Id` (e.g. `select new { ContactId = c.Id }`) in an inner join, which threw `ArgumentException` during materialization.
