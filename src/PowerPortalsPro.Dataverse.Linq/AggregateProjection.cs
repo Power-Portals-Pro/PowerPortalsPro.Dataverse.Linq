@@ -31,12 +31,16 @@ internal static class AggregateProjection
 
     /// <summary>
     /// Reconstructs a linked entity from AliasedValue entries with the given alias prefix.
-    /// Returns <c>null</c> when no aliased values match (left-join, no match).
+    /// Returns <c>null</c> when no aliased values match (left-join, no match). Its
+    /// <see cref="Entity.Id"/> is the <paramref name="primaryKey"/> attribute's value. When that
+    /// is null — no metadata was at hand — it is <c>{logicalname}id</c>'s, which every table but
+    /// the activities uses, or else <c>activityid</c>'s, which every activity uses.
     /// </summary>
-    public static T? ExtractLinkedEntity<T>(Entity entity, string alias) where T : Entity, new()
+    public static T? ExtractLinkedEntity<T>(Entity entity, string alias, string? primaryKey = null) where T : Entity, new()
     {
         var prefix = alias + ".";
         T? result = null;
+        Guid? activityId = null;
 
         foreach (var kvp in entity.Attributes)
         {
@@ -47,10 +51,15 @@ internal static class AggregateProjection
                 result.Attributes[attrName] = av.Value;
 
                 // Set the entity Id if this is the primary key
-                if (attrName == av.EntityLogicalName + "id" && av.Value is Guid id)
+                if (attrName == (primaryKey ?? av.EntityLogicalName + "id") && av.Value is Guid id)
                     result.Id = id;
+                else if (primaryKey is null && attrName == "activityid" && av.Value is Guid activity)
+                    activityId = activity;
             }
         }
+
+        if (result is not null && result.Id == Guid.Empty && activityId is { } fallback)
+            result.Id = fallback;
 
         return result;
     }

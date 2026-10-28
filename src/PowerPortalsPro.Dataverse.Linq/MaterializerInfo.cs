@@ -20,6 +20,13 @@ internal sealed class MaterializerSlot
     public required Type ValueType { get; init; }
     public string? Alias { get; init; }
     public string? AttributeName { get; init; }
+
+    /// <summary>
+    /// For a <see cref="SlotKind.LinkedEntity"/>: its primary key attribute, from metadata, which
+    /// fills its <see cref="Entity.Id"/>. Null when it couldn't be read; <c>{logicalname}id</c> is
+    /// tried then.
+    /// </summary>
+    public string? PrimaryKey { get; init; }
 }
 
 internal sealed class MaterializerInfo
@@ -42,7 +49,7 @@ internal sealed class MaterializerInfo
             args[i] = slot.Kind switch
             {
                 SlotKind.TypedEntity => ExtractTypedEntity(entity, slot.ValueType),
-                SlotKind.LinkedEntity => ExtractLinkedEntity(entity, slot.Alias!, slot.ValueType),
+                SlotKind.LinkedEntity => ExtractLinkedEntity(entity, slot.Alias!, slot.ValueType, slot.PrimaryKey),
                 SlotKind.RootAttribute => AggregateProjection.ExtractRootValueUntyped(entity, slot.AttributeName!, slot.ValueType),
                 SlotKind.AliasedValue => AggregateProjection.ExtractValueUntyped(entity, slot.Alias!, slot.ValueType),
                 _ => throw new InvalidOperationException($"Unknown slot kind: {slot.Kind}")
@@ -59,11 +66,11 @@ internal sealed class MaterializerInfo
             .Invoke(entity, null)!;
     }
 
-    private static object? ExtractLinkedEntity(Entity entity, string alias, Type entityType)
+    private static object? ExtractLinkedEntity(Entity entity, string alias, Type entityType, string? primaryKey)
     {
         // Reconstruct linked entity from aliased values, or null for unmatched left joins
         return typeof(AggregateProjection).GetMethod(nameof(AggregateProjection.ExtractLinkedEntity))!
             .MakeGenericMethod(entityType)
-            .Invoke(null, [entity, alias]);
+            .Invoke(null, [entity, alias, primaryKey]);
     }
 }

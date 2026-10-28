@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+- Fixed a joined activity — an appointment, email, task or any other, selected whole from a join (`select new { a, Task = t }`) — coming back with an empty `Id`. A joined entity's `Id` is now read from its primary key as its metadata names it (`activityid` for every activity) rather than `{logicalname}id`.
+
 ## [1.0.19] - 2026-10-28
 
 - Fixed `Count()` / `LongCount()` (and their async forms) failing on activity tables — appointments, emails, tasks and the rest — with "entity doesn't contain attribute with Name = 'appointmentid'". The count is now taken over the table's primary key as its metadata names it (`activityid` for every activity) rather than `{logicalname}id`. The same applies to grouped counts, `CountChildren()`, and a `where x == null` test on a left join's unmatched rows.

@@ -11,6 +11,40 @@ public partial class JoinIntegrationTests
     // -------------------------------------------------------------------------
 
     [Fact]
+    public async Task ToListAsync_WithJoinedActivity_FillsItsIdFromActivityId()
+    {
+        // An activity's key is activityid: the joined activity's Id is read from it.
+        var results = await (from u in Service.Queryable("systemuser")
+                             join t in Service.Queryable("activitypointer")
+                                 on u.Id equals t.GetAttributeValue<EntityReference>("ownerid").Id
+                             select new { UserId = u.Id, Activity = t }).Take(10).ToListAsync();
+
+        results.Should().NotBeEmpty();
+        results.Should().AllSatisfy(r =>
+        {
+            r.Activity.Id.Should().NotBe(Guid.Empty);
+            r.Activity.Id.Should().Be(r.Activity.GetAttributeValue<Guid>("activityid"));
+        });
+    }
+
+    [Fact]
+    public async Task ToListAsync_WithLeftJoinedActivity_FillsItsIdFromActivityId()
+    {
+        var results = await (from u in Service.Queryable("systemuser")
+                             join t in Service.Queryable("activitypointer")
+                                 on u.Id equals t.GetAttributeValue<EntityReference>("ownerid").Id into activities
+                             from t in activities.DefaultIfEmpty()
+                             select new { UserId = u.Id, Activity = t }).Take(50).ToListAsync();
+
+        results.Should().Contain(r => r.Activity != null, "some user owns an activity");
+        results.Where(r => r.Activity != null).Should().AllSatisfy(r =>
+        {
+            r.Activity!.Id.Should().NotBe(Guid.Empty);
+            r.Activity.Id.Should().Be(r.Activity.GetAttributeValue<Guid>("activityid"));
+        });
+    }
+
+    [Fact]
     public async Task ToListAsync_WithJoin_ReturnsProjectedValuesFromBothEntities()
     {
         var results = await (from a in Service.Queryable<CustomAccount>()

@@ -1302,4 +1302,73 @@ public class JoinFetchXmlTests : FetchXmlTestBase
 
         fetchXml.Should().Contain("""attribute="activityid" operator="null""");
     }
+
+    [Fact]
+    public void Materialize_JoinedActivity_TakesItsIdFromItsPrimaryKey()
+    {
+        // A joined activity's key comes back as activityid, never taskid.
+        var taskId = Guid.NewGuid();
+        var row = new Entity("new_customaccount", Guid.NewGuid());
+        row["new_name"] = "Contoso";
+        row["t.activityid"] = new AliasedValue("task", "activityid", taskId);
+        row["t.subject"] = new AliasedValue("task", "subject", "Call back");
+
+        _service.RetrieveMultiple(Arg.Any<QueryBase>())
+            .Returns(new EntityCollection { Entities = { row }, MoreRecords = false });
+
+        var results = (from a in _service.Queryable<CustomAccount>()
+                       join t in _service.Queryable("task")
+                           on a.CustomAccountId equals t.GetAttributeValue<EntityReference>("regardingobjectid").Id
+                       select new { a.Name, Task = t }).ToList();
+
+        results.Should().ContainSingle();
+        results[0].Task.Id.Should().Be(taskId);
+        results[0].Task.GetAttributeValue<string>("subject").Should().Be("Call back");
+    }
+
+    [Fact]
+    public void Materialize_JoinedActivity_WithNoMetadata_TakesItsIdFromActivityId()
+    {
+        // A service that answers only queries: the key isn't known, and activityid is tried.
+#if !NETFRAMEWORK
+        var service = Substitute.For<Microsoft.PowerPlatform.Dataverse.Client.IOrganizationServiceAsync>();
+#else
+        var service = Substitute.For<IOrganizationService>();
+#endif
+        service.Execute(Arg.Any<OrganizationRequest>()).Returns(_ => throw new InvalidOperationException("No metadata"));
+        var taskId = Guid.NewGuid();
+        var row = new Entity("new_customaccount", Guid.NewGuid());
+        row["new_name"] = "Contoso";
+        row["t.activityid"] = new AliasedValue("task", "activityid", taskId);
+        service.RetrieveMultiple(Arg.Any<QueryBase>())
+            .Returns(new EntityCollection { Entities = { row }, MoreRecords = false });
+
+        var results = (from a in service.Queryable<CustomAccount>()
+                       join t in service.Queryable("task")
+                           on a.CustomAccountId equals t.GetAttributeValue<EntityReference>("regardingobjectid").Id
+                       select new { a.Name, Task = t }).ToList();
+
+        results.Should().ContainSingle().Which.Task.Id.Should().Be(taskId);
+    }
+
+    [Fact]
+    public void Materialize_LeftJoinedActivity_TakesItsIdFromItsPrimaryKey()
+    {
+        var taskId = Guid.NewGuid();
+        var row = new Entity("new_customaccount", Guid.NewGuid());
+        row["new_name"] = "Contoso";
+        row["t.activityid"] = new AliasedValue("task", "activityid", taskId);
+
+        _service.RetrieveMultiple(Arg.Any<QueryBase>())
+            .Returns(new EntityCollection { Entities = { row }, MoreRecords = false });
+
+        var results = (from a in _service.Queryable<CustomAccount>()
+                       join t in _service.Queryable("task")
+                           on a.CustomAccountId equals t.GetAttributeValue<EntityReference>("regardingobjectid").Id into tasks
+                       from t in tasks.DefaultIfEmpty()
+                       select new { a.Name, Task = t }).ToList();
+
+        results.Should().ContainSingle();
+        results[0].Task!.Id.Should().Be(taskId);
+    }
 }

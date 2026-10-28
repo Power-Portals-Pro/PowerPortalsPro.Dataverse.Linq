@@ -187,7 +187,7 @@ internal static class MaterializerBuilder
             if (node.Expression is not null && _resolveEntity(node) is { } wholeRes)
             {
                 var entityType = (node.Member as PropertyInfo)?.PropertyType ?? node.Type;
-                return CreateEntitySlot(wholeRes.LinkAlias, entityType, node);
+                return CreateEntitySlot(wholeRes.LinkAlias, entityType, wholeRes.LogicalName, node);
             }
 
             return base.VisitMember(node);
@@ -216,13 +216,13 @@ internal static class MaterializerBuilder
             {
                 var directRes = _resolveEntity(node);
                 if (directRes is not null)
-                    return CreateEntitySlot(directRes.Value.LinkAlias, node.Type, node);
+                    return CreateEntitySlot(directRes.Value.LinkAlias, node.Type, directRes.Value.LogicalName, node);
             }
 
             // Whole entity as a direct parameter reference
             if (_resolveEntity(node) is { } paramRes)
             {
-                return CreateEntitySlot(paramRes.LinkAlias, node.Type, node);
+                return CreateEntitySlot(paramRes.LinkAlias, node.Type, paramRes.LogicalName, node);
             }
 
             return base.VisitParameter(node);
@@ -266,8 +266,25 @@ internal static class MaterializerBuilder
             return param;
         }
 
+        // A joined entity's primary key, from metadata; null with no service, no logical name, or
+        // metadata that can't be read, when the entity's Id is looked for under {logicalname}id.
+        private string? PrimaryKeyOf(string? logicalName)
+        {
+            if (logicalName is null || _primaryKeyResolver is null)
+                return null;
+
+            try
+            {
+                return _primaryKeyResolver(logicalName);
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
         private ParameterExpression CreateEntitySlot(
-            string? linkAlias, Type entityType, Expression originalExpr)
+            string? linkAlias, Type entityType, string? logicalName, Expression originalExpr)
         {
             var cacheKey = linkAlias is null
                 ? $"entity:root:{entityType.FullName}"
@@ -294,6 +311,8 @@ internal static class MaterializerBuilder
                     Kind = SlotKind.LinkedEntity,
                     ValueType = entityType,
                     Alias = linkAlias,
+                    PrimaryKey = PrimaryKeyOf(
+                        entityType.GetCustomAttribute<EntityLogicalNameAttribute>()?.LogicalName ?? logicalName),
                 };
             }
 
