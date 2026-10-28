@@ -38,7 +38,9 @@ public abstract class FetchXmlTestBase
                 // Set PrimaryIdAttribute via reflection (it has no public setter)
                 typeof(EntityMetadata)
                     .GetProperty(nameof(EntityMetadata.PrimaryIdAttribute))!
-                    .SetValue(metadata, $"{entityRequest.LogicalName}id");
+                    .SetValue(metadata, ActivityEntities.Contains(entityRequest.LogicalName)
+                        ? "activityid"
+                        : $"{entityRequest.LogicalName}id");
                 var response = new RetrieveEntityResponse();
                 response.Results["EntityMetadata"] = metadata;
                 return response;
@@ -49,6 +51,14 @@ public abstract class FetchXmlTestBase
         // Clear the metadata cache so tests don't interfere with each other
         EntityMetadataCache.Clear();
     }
+
+    /// <summary>Entities whose primary key is <c>activityid</c>, as every activity's is.</summary>
+    protected static readonly HashSet<string> ActivityEntities = ["appointment", "task", "email", "phonecall", "activitypointer"];
+
+    /// <summary>Translates a late-bound query with the metadata service, as a provider does.</summary>
+    protected string TranslateWithMetadata(System.Linq.Expressions.Expression expression, string entityLogicalName) =>
+        FetchXmlBuilder.Build(Expressions.FetchXmlQueryTranslator.Translate<Entity>(
+            expression, null, entityLogicalName, _service));
 
     protected static void AssertFetchXml(string actual, string expected) =>
         NormalizeLineEndings(actual).Should().Be(NormalizeLineEndings(expected));

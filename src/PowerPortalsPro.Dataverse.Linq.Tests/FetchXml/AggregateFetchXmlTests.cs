@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Microsoft.Xrm.Sdk;
+using NSubstitute;
 using PowerPortalsPro.Dataverse.Linq.Tests.Proxies;
 
 namespace PowerPortalsPro.Dataverse.Linq.Tests.FetchXml;
@@ -117,6 +118,60 @@ public class AggregateFetchXmlTests : FetchXmlTestBase
               </entity>
             </fetch>
             """);
+    }
+
+    [Fact]
+    public void ToFetchXml_Count_OfAnActivity_CountsItsPrimaryKeyFromMetadata()
+    {
+        // An activity's primary key is activityid, not appointmentid.
+        var queryable = _service.Queryable("appointment");
+        var expr = System.Linq.Expressions.Expression.Call(
+            typeof(Queryable), nameof(Queryable.Count),
+            [typeof(Entity)],
+            queryable.Expression);
+
+        var fetchXml = TranslateWithMetadata(expr, "appointment");
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="appointment">
+                <attribute name="activityid" alias="count" aggregate="count" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_GroupedCount_OfAnActivity_CountsItsPrimaryKeyFromMetadata()
+    {
+        var fetchXml = (from a in _service.Queryable("appointment")
+                        group a by a.GetAttributeValue<EntityReference>("ownerid") into g
+                        select new { Owner = g.Key, Count = g.Count() }).ToFetchXml();
+
+        fetchXml.Should().Contain("""<attribute name="activityid" alias="count" aggregate="count" />""");
+    }
+
+    [Fact]
+    public void ToFetchXml_Count_WhenMetadataCannotBeRead_CountsLogicalNameId()
+    {
+        // A service that answers only queries, as many fakes do: the count still translates.
+#if !NETFRAMEWORK
+        var service = Substitute.For<Microsoft.PowerPlatform.Dataverse.Client.IOrganizationServiceAsync>();
+#else
+        var service = Substitute.For<IOrganizationService>();
+#endif
+        service.Execute(Arg.Any<OrganizationRequest>()).Returns(_ => throw new InvalidOperationException("No metadata"));
+        var queryable = service.Queryable("new_customaccount");
+        var expr = System.Linq.Expressions.Expression.Call(
+            typeof(Queryable), nameof(Queryable.Count),
+            [typeof(Entity)],
+            queryable.Expression);
+
+        var fetchXml = FetchXmlBuilder.Build(Expressions.FetchXmlQueryTranslator.Translate<Entity>(
+            expr, null, "new_customaccount", service));
+
+        fetchXml.Should().Contain("""<attribute name="new_customaccountid" alias="count" aggregate="count" />""");
     }
 
     [Fact]

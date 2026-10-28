@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Microsoft.Xrm.Sdk;
 using PowerPortalsPro.Dataverse.Linq.Tests.Proxies;
 
 namespace PowerPortalsPro.Dataverse.Linq.Tests.Integration;
@@ -14,6 +15,16 @@ public partial class AggregateIntegrationTests
     {
         var all = await Service.Queryable<CustomAccount>().ToListAsync();
         var count = Service.Queryable<CustomAccount>().Count();
+
+        count.Should().Be(all.Count);
+    }
+
+    [Fact]
+    public async Task CountAsync_OfAnActivity_MatchesListCount()
+    {
+        // An activity's primary key is activityid; counting appointmentid fails in Dataverse.
+        var all = await Service.Queryable("appointment").Select(x => x.Id).ToListAsync();
+        var count = await Service.Queryable("appointment").CountAsync();
 
         count.Should().Be(all.Count);
     }

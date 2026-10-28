@@ -320,7 +320,8 @@ public static partial class ServiceClientExtensions
     /// Translates a query terminated by an operator that does not return an
     /// <see cref="IQueryable{T}"/> — an aggregate (<c>Count</c>, <c>Sum</c>, <c>Min</c>,
     /// <c>Max</c>, <c>Average</c>, <c>CountColumn</c>) or an element operator (<c>First</c>,
-    /// <c>Single</c>, …) — into its FetchXml representation <b>without executing it</b>.
+    /// <c>Single</c>, …) — into its FetchXml representation <b>without executing it</b>. Naming
+    /// a table's primary key (as <c>Count</c> does) reads the table's metadata, once per table.
     /// The <paramref name="terminal"/> delegate describes the terminal call; it is run
     /// against a capturing queryable that records the expression instead of querying
     /// Dataverse.

@@ -338,8 +338,7 @@ internal static class FetchXmlQueryTranslator
             var outerColumns = lambda.ExtractColumnsViaPath(ctx.OuterEntityPath);
             IReadOnlyList<string>? innerColumns = ctx.InnerEntityProperty is not null
                 ? lambda.ExtractInnerColumnsViaProperty(ctx.InnerEntityProperty,
-                    () => ctx.PrimaryKeyResolver?.Invoke(ctx.Query.Links[^1].Name)
-                        ?? $"{ctx.Query.Links[^1].Name}id")
+                    () => ctx.PrimaryKeyOf(ctx.Query.Links[^1].Name))
                 : null;
             var wholeInner = ctx.InnerEntityProperty is not null
                 && lambda.ReferencesWholeInnerEntity(ctx.InnerEntityProperty);
@@ -377,7 +376,7 @@ internal static class FetchXmlQueryTranslator
                 foreach (var ra in rowAggregates)
                     ctx.Query.Attributes.Add(new FetchAttribute
                     {
-                        Name = $"{ctx.Query.EntityLogicalName}id",
+                        Name = ctx.PrimaryKeyOf(ctx.Query.EntityLogicalName),
                         Alias = ra.Alias,
                         RowAggregate = "CountChildren"
                     });
@@ -603,7 +602,7 @@ internal static class FetchXmlQueryTranslator
             filter.Conditions.Add(new FetchCondition
             {
                 EntityAlias = link.Alias,
-                Attribute = $"{link.Name}id",
+                Attribute = ctx.PrimaryKeyOf(link.Name),
                 Operator = ConditionOperator.Null
             });
             return;
@@ -1085,7 +1084,7 @@ internal static class FetchXmlQueryTranslator
         filter.Conditions.Add(new FetchCondition
         {
             EntityAlias = link.Alias,
-            Attribute = $"{link.Name}id",
+            Attribute = ctx.PrimaryKeyOf(link.Name),
             Operator = nullOp
         });
         return true;
@@ -1532,7 +1531,7 @@ internal static class FetchXmlQueryTranslator
             ctx.Query.Attributes.Clear();
             ctx.Query.Attributes.Add(new FetchAttribute
             {
-                Name = $"{ctx.Query.EntityLogicalName}id",
+                Name = ctx.PrimaryKeyOf(ctx.Query.EntityLogicalName),
                 Alias = fetchXmlFunction,
                 Aggregate = fetchXmlFunction
             });
@@ -2245,11 +2244,12 @@ internal static class FetchXmlQueryTranslator
             var elementInfo = GetPrimaryGroupElement(ctx);
             if (elementInfo is not null)
             {
-                var entityName = elementInfo.EntityType.GetEntityLogicalName();
-                return ($"{entityName}id", aggregateFunc, elementInfo.LinkAlias, false);
+                // A late-bound element's CLR type (Entity) carries no logical name; its info does.
+                var entityName = elementInfo.LogicalName ?? elementInfo.EntityType.GetEntityLogicalName();
+                return (ctx.PrimaryKeyOf(entityName), aggregateFunc, elementInfo.LinkAlias, false);
             }
 
-            return ($"{ctx.Query.EntityLogicalName}id", aggregateFunc, null, false);
+            return (ctx.PrimaryKeyOf(ctx.Query.EntityLogicalName), aggregateFunc, null, false);
         }
 
         // Aggregate with selector — extract attribute from the lambda
@@ -2614,7 +2614,7 @@ internal static class FetchXmlQueryTranslator
             // Select folded into SelectMany — handle projection here
             var foldedInnerColumns = referencesInner
                 ? ExtractColumnsFromParameter(resultSelector.Body, innerParam,
-                    () => ctx.PrimaryKeyResolver?.Invoke(innerLogicalName) ?? $"{innerLogicalName}id")
+                    () => ctx.PrimaryKeyOf(innerLogicalName))
                 : null;
             ApplyLeftJoinColumns(ctx.Query, columns,
                 foldedInnerColumns is { Count: > 0 } ? foldedInnerColumns : null,
@@ -2948,6 +2948,28 @@ internal static class FetchXmlQueryTranslator
             Service is not null
                 ? entityLogicalName => EntityMetadataCache.GetPrimaryIdAttribute(Service, entityLogicalName)
                 : null;
+
+        /// <summary>
+        /// The primary key attribute of an entity: from its metadata when a service is available,
+        /// otherwise <c>{logicalname}id</c>, which most entities use. Activities don't: theirs is
+        /// <c>activityid</c>. A service whose metadata can't be read — a fake that answers only
+        /// queries, or a user without the privilege — gets <c>{logicalname}id</c> too, as every
+        /// query did before the key was looked up.
+        /// </summary>
+        public string PrimaryKeyOf(string entityLogicalName)
+        {
+            if (Service is null)
+                return $"{entityLogicalName}id";
+
+            try
+            {
+                return EntityMetadataCache.GetPrimaryIdAttribute(Service, entityLogicalName);
+            }
+            catch (Exception)
+            {
+                return $"{entityLogicalName}id";
+            }
+        }
 
         /// <summary>
         /// After a left join: the CLR type of the outer (root) entity.

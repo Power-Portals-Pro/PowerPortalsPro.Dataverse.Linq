@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+- Fixed `Count()` / `LongCount()` (and their async forms) failing on activity tables — appointments, emails, tasks and the rest — with "entity doesn't contain attribute with Name = 'appointmentid'". The count is now taken over the table's primary key as its metadata names it (`activityid` for every activity) rather than `{logicalname}id`. The same applies to grouped counts, `CountChildren()`, and a `where x == null` test on a left join's unmatched rows.
+
 ## [1.0.18] - 2026-10-04
 
 - Fixed `Entity.Id` on a late-bound (`Queryable("logicalname")`) entity in joins that mix typed and late-bound sources. The base `Entity` type carries no logical name, so the primary key could not be resolved once the entity was reached through a join; each joined entity's logical name is now tracked and used instead. This fixes:

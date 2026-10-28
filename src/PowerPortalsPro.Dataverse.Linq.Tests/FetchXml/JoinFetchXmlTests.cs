@@ -1288,4 +1288,18 @@ public class JoinFetchXmlTests : FetchXmlTestBase
         results[0].ContactId.Should().Be(contactId);
         results[1].ContactId.Should().Be(Guid.Empty);
     }
+
+    [Fact]
+    public void ToFetchXml_LeftJoinNullCheck_OnAnActivity_TestsItsPrimaryKeyFromMetadata()
+    {
+        // The accounts with no task: an activity's key is activityid, not taskid.
+        var fetchXml = (from a in _service.Queryable<CustomAccount>()
+                        join t in _service.Queryable("task")
+                            on a.Id equals t.GetAttributeValue<EntityReference>("regardingobjectid").Id into tasks
+                        from t in tasks.DefaultIfEmpty()
+                        where t == null
+                        select a).ToFetchXml();
+
+        fetchXml.Should().Contain("""attribute="activityid" operator="null""");
+    }
 }
