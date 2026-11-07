@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+- Fixed a select of a single value — `x.GetAttributeValue<T>("col")`, the indexer `x["col"]` or `x.Id` as the whole projection (`Select(a => a.GetAttributeValue<string>("name"))`) — reading every column (`<all-attributes />`). With `Distinct()` that returned duplicates: the fetch was distinct over every column, the primary key included, so each row was distinct. It now reads only that column, `Id` as the table's primary key (`accountid`, or `activityid` for an activity), so `Distinct()` de-duplicates on the server. The same applies to `First()`, `Single()` and the rest over such a select, and a no-selector aggregate over one (`.Select(a => a.GetAttributeValue<int?>("numberofemployees")).Max()`) now translates instead of throwing.
+- Fixed a select dropping columns its projection reads in a method call, operator or conditional (`new { a.Name, Website = a.Website.ToUpper() }`, `a.NumberOfEmployees + 1`, `a.IsPreferred ?? false ? … : …`): only plain property reads were requested, so the others came back null and threw or gave wrong values. Every column the projection reads is now requested. A select that also uses the entity whole (`new { a.Name, Account = a }`) reads every column, so the entity it returns is complete.
+
 ## [1.0.20] - 2026-10-28
 
 - Fixed a joined activity — an appointment, email, task or any other, selected whole from a join (`select new { a, Task = t }`) — coming back with an empty `Id`. A joined entity's `Id` is now read from its primary key as its metadata names it (`activityid` for every activity) rather than `{logicalname}id`.

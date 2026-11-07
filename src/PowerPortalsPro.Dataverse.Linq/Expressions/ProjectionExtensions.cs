@@ -1,5 +1,6 @@
 using PowerPortalsPro.Dataverse.Linq.Model;
 using Microsoft.Xrm.Sdk;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq.Expressions;
 using System.Reflection;
 
@@ -26,21 +27,127 @@ internal static class ProjectionExtensions
     };
 
     /// <summary>
-    /// Extracts attribute logical names from a simple select body (anonymous type,
-    /// member-init, or single property access).
+    /// Extracts the attributes a select on the root entity reads, wherever they sit in its body:
+    /// the whole body (<c>a =&gt; a.GetAttributeValue&lt;string&gt;("name")</c>, <c>a =&gt; a["name"]</c>,
+    /// <c>a =&gt; a.Id</c>), an anonymous type or member-init, or nested in a method call,
+    /// operator or conditional (<c>a.Website.ToUpper()</c>, <c>a.NumberOfEmployees + 1</c>).
     /// </summary>
-    internal static IReadOnlyList<string>? ExtractColumns(this Expression body)
+    /// <param name="lambda">The select's lambda; its parameter is the root entity.</param>
+    /// <param name="primaryKeyOf">Resolves an entity's primary key, for <see cref="Entity.Id"/>.</param>
+    /// <param name="rootEntityLogicalName">
+    /// The root entity's logical name, for <see cref="Entity.Id"/> on an unbound entity.
+    /// </param>
+    /// <returns>
+    /// The attributes, or <c>null</c> when the select needs every attribute: it uses the entity
+    /// other than through an attribute (selects it whole, passes it to a method, reads
+    /// <see cref="Entity.Attributes"/> or <see cref="Entity.FormattedValues"/>, or names an
+    /// attribute only the row can supply), or reads no attribute at all.
+    /// </returns>
+    internal static IReadOnlyList<string>? ExtractRootColumns(
+        this LambdaExpression lambda, Func<string, string> primaryKeyOf, string rootEntityLogicalName)
     {
-        var columns = new List<string>();
+        var collector = new RootColumnCollector(lambda.Parameters[0], primaryKeyOf, rootEntityLogicalName);
+        collector.Visit(lambda.Body);
 
-        foreach (var arg in body.GetProjectionArguments())
+        return collector.NeedsWholeEntity || collector.Columns.Count == 0 ? null : collector.Columns;
+    }
+
+    /// <summary>
+    /// Returns <c>true</c> when a select on the root entity is one attribute read and nothing
+    /// else (<c>a =&gt; a.Name</c>, <c>a =&gt; (decimal?)a.CreditLimit.Value</c>,
+    /// <c>a =&gt; a["name"]</c>), so its value is the column's value.
+    /// </summary>
+    internal static bool IsSingleRootAttributeRead(
+        this LambdaExpression lambda, Func<string, string> primaryKeyOf, string rootEntityLogicalName) =>
+        RootColumnCollector.TryResolve(lambda.Body, lambda.Parameters[0], primaryKeyOf, rootEntityLogicalName, out _);
+
+    /// <summary>
+    /// Walks a root-entity select and collects each attribute it reads on the entity parameter.
+    /// Any other use of the parameter means the select needs the whole entity.
+    /// </summary>
+    private sealed class RootColumnCollector(
+        ParameterExpression entity, Func<string, string> primaryKeyOf, string rootEntityLogicalName)
+        : ExpressionVisitor
+    {
+        public List<string> Columns { get; } = [];
+
+        public bool NeedsWholeEntity { get; private set; }
+
+        public override Expression? Visit(Expression? node)
         {
-            var name = arg.GetAttributeName();
-            if (name is not null)
-                columns.Add(name);
+            if (node is null || NeedsWholeEntity)
+                return node;
+
+            if (TryResolve(node, entity, primaryKeyOf, rootEntityLogicalName, out var name))
+            {
+                if (!Columns.Contains(name))
+                    Columns.Add(name);
+                return node;
+            }
+
+            return base.Visit(node);
         }
 
-        return columns.Count > 0 ? columns : null;
+        protected override Expression VisitParameter(ParameterExpression node)
+        {
+            // Reached only when no attribute read consumed the parameter first.
+            if (node == entity)
+                NeedsWholeEntity = true;
+            return node;
+        }
+
+        protected override Expression VisitMember(MemberExpression node)
+        {
+            // Every row returned carries its logical name, whatever the columns.
+            if (node.Member.Name == nameof(Entity.LogicalName)
+                && node.Member.DeclaringType == typeof(Entity)
+                && Unwrap(node.Expression) == entity)
+            {
+                return node;
+            }
+
+            return base.VisitMember(node);
+        }
+
+        protected override Expression VisitMethodCall(MethodCallExpression node)
+        {
+            // A row aggregate the select adds as its own attribute; it reads no column.
+            if (node.Method.Name == nameof(ServiceClientExtensions.CountChildren)
+                && node.Method.DeclaringType == typeof(ServiceClientExtensions))
+            {
+                return node;
+            }
+
+            return base.VisitMethodCall(node);
+        }
+
+        internal static bool TryResolve(
+            Expression expr, ParameterExpression entity, Func<string, string> primaryKeyOf,
+            string rootEntityLogicalName, [NotNullWhen(true)] out string? name)
+        {
+            while (expr is UnaryExpression { NodeType: ExpressionType.Convert or ExpressionType.ConvertChecked } convert)
+                expr = convert.Operand;
+
+            if (expr.IsEntityIndexerCall(out name, out var indexed) && Unwrap(indexed) == entity)
+                return true;
+
+            var access = expr.ResolveAttributeAccess(primaryKeyOf, rootEntityLogicalName);
+            if (access is not null && Unwrap(access.Value.EntityExpression) == entity)
+            {
+                name = access.Value.AttributeName;
+                return true;
+            }
+
+            name = null;
+            return false;
+        }
+
+        private static Expression? Unwrap(Expression? expr)
+        {
+            while (expr is UnaryExpression { NodeType: ExpressionType.Convert or ExpressionType.TypeAs } convert)
+                expr = convert.Operand;
+            return expr;
+        }
     }
 
     /// <summary>

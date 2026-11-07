@@ -41,6 +41,33 @@ internal static class AttributeExtensions
     }
 
     /// <summary>
+    /// Matches the <see cref="Entity"/> indexer, <c>entity["name"]</c>, and resolves its
+    /// attribute-name argument as <see cref="IsGetAttributeValueCall"/> does.
+    /// </summary>
+    internal static bool IsEntityIndexerCall(
+        this Expression expr,
+        [NotNullWhen(true)] out string? attributeName,
+        [NotNullWhen(true)] out Expression? entityExpression)
+    {
+        attributeName = null;
+        entityExpression = null;
+
+        if (expr is not MethodCallExpression { Method.Name: "get_Item", Object: { } entity } call
+            || call.Arguments.Count != 1
+            || call.Arguments[0].Type != typeof(string)
+            || !typeof(Entity).IsAssignableFrom(entity.Type))
+        {
+            return false;
+        }
+
+        if (!call.Arguments[0].TryEvaluateName(out attributeName))
+            return false;
+
+        entityExpression = entity;
+        return true;
+    }
+
+    /// <summary>
     /// Resolves an expression to an attribute name and the entity expression it's accessed on.
     /// Handles direct property access, EntityReference.Id, Money.Value, OptionSetValue.Value,
     /// and <see cref="Entity.GetAttributeValue{T}"/> calls whose attribute-name argument can be

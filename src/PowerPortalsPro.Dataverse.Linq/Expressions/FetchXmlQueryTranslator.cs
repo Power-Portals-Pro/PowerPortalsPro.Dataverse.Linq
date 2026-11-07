@@ -365,9 +365,11 @@ internal static class FetchXmlQueryTranslator
         else
         {
             // Simple select on root entity
-            var columns = lambda.Body.ExtractColumns();
+            var columns = lambda.ExtractRootColumns(ctx.PrimaryKeyOf, ctx.Query.EntityLogicalName);
             if (columns is { Count: > 0 })
                 ctx.Query.ApplyColumns(columns);
+            ctx.ProjectionIsSingleAttribute =
+                lambda.IsSingleRootAttributeRead(ctx.PrimaryKeyOf, ctx.Query.EntityLogicalName);
 
             // Check for CountChildren() calls in the projection
             var rowAggregates = lambda.Body.ExtractRowAggregates();
@@ -1556,8 +1558,10 @@ internal static class FetchXmlQueryTranslator
         else
         {
             // No-selector (e.g. .Select(a => a.Prop).Min())
-            // The preceding Select should have populated Attributes with a single column.
-            if (ctx.Query.Attributes.Count != 1)
+            // The preceding Select should have populated Attributes with a single column, and
+            // its value must be that column's: a computed one (a.Prop + 1) reads one column too,
+            // but aggregating the column would drop the computation.
+            if (ctx.Query.Attributes.Count != 1 || ctx.ProjectionIsSingleAttribute == false)
                 throw new NotSupportedException(
                     $"'{methodName}' without a selector requires exactly one column. " +
                     "Use a Select to project a single column, or use the overload with a selector.");
@@ -2970,6 +2974,13 @@ internal static class FetchXmlQueryTranslator
                 return $"{entityLogicalName}id";
             }
         }
+
+        /// <summary>
+        /// Set by a select on the root entity: <c>true</c> when it reads one attribute and nothing
+        /// else, <c>false</c> when it computes or combines values. <c>null</c> when no such select
+        /// has run (a join's select sets nothing).
+        /// </summary>
+        public bool? ProjectionIsSingleAttribute { get; set; }
 
         /// <summary>
         /// After a left join: the CLR type of the outer (root) entity.

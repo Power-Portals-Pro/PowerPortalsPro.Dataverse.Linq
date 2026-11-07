@@ -241,7 +241,7 @@ public class BasicFetchXmlTests : FetchXmlTestBase
     // -------------------------------------------------------------------------
 
     [Fact]
-    public void ToFetchXml_SelectWithTernary_ExtractsIdAttribute()
+    public void ToFetchXml_SelectWithTernary_ExtractsAttributesTheTernaryReads()
     {
         var fetchXml = _service.Queryable<CustomAccount>()
             .Select(a => new
@@ -251,13 +251,14 @@ public class BasicFetchXmlTests : FetchXmlTestBase
             })
             .ToFetchXml();
 
-        // The ternary expression evaluates client-side; only the attribute
-        // accesses that resolve to a simple member are emitted.
+        // The ternary evaluates client-side, so the attribute it reads must be fetched;
+        // without it, BoolValue would always be false.
         AssertFetchXml(fetchXml,
             """
             <fetch mapping="logical">
               <entity name="new_customaccount">
                 <attribute name="new_customaccountid" />
+                <attribute name="new_ispreferredaccount" />
               </entity>
             </fetch>
             """);
