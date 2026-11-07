@@ -267,6 +267,7 @@ public class JoinFetchXmlTests : FetchXmlTestBase
               <entity name="new_customaccount">
                 <attribute name="new_name" />
                 <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="outer">
+                  <attribute name="new_customcontactid" />
                   <attribute name="new_firstname" />
                 </link-entity>
               </entity>
@@ -295,6 +296,7 @@ public class JoinFetchXmlTests : FetchXmlTestBase
               <entity name="new_customaccount">
                 <attribute name="new_name" />
                 <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="outer">
+                  <attribute name="new_customcontactid" />
                   <attribute name="new_firstname" />
                   <attribute name="new_lastname" />
                 </link-entity>
@@ -706,10 +708,12 @@ public class JoinFetchXmlTests : FetchXmlTestBase
               <entity name="new_customaccount">
                 <attribute name="new_name" />
                 <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="outer">
+                  <attribute name="new_customcontactid" />
                   <attribute name="new_firstname" />
                   <attribute name="new_lastname" />
                 </link-entity>
                 <link-entity name="new_customopportunity" from="new_contact" to="new_primarycontact" alias="o" link-type="outer">
+                  <attribute name="new_customopportunityid" />
                   <attribute name="new_name" />
                 </link-entity>
               </entity>
@@ -790,7 +794,6 @@ public class JoinFetchXmlTests : FetchXmlTestBase
             """
             <fetch mapping="logical">
               <entity name="new_customaccount">
-                <all-attributes />
                 <order attribute="createdon" descending="true" entityname="c" />
                 <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="matchfirstrowusingcrossapply">
                   <attribute name="new_parentaccount" />
@@ -846,7 +849,6 @@ public class JoinFetchXmlTests : FetchXmlTestBase
             """
             <fetch mapping="logical">
               <entity name="new_customaccount">
-                <all-attributes />
                 <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="inner">
                   <attribute name="new_parentaccount" />
                   <attribute name="ownerid" />
@@ -982,6 +984,7 @@ public class JoinFetchXmlTests : FetchXmlTestBase
               <entity name="new_customaccount">
                 <attribute name="new_name" />
                 <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="outer">
+                  <attribute name="new_customcontactid" />
                   <attribute name="new_firstname" />
                 </link-entity>
               </entity>

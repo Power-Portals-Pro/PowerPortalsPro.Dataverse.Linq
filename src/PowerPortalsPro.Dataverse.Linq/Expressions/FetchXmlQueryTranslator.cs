@@ -335,27 +335,16 @@ internal static class FetchXmlQueryTranslator
             // After a single left join — resolve member accesses through transparent identifiers.
             // OuterEntityPath is cleared by HandleChainedLeftJoin, so this path is only
             // reached for single (non-chained) left joins.
-            var outerColumns = lambda.ExtractColumnsViaPath(ctx.OuterEntityPath);
-            IReadOnlyList<string>? innerColumns = ctx.InnerEntityProperty is not null
-                ? lambda.ExtractInnerColumnsViaProperty(ctx.InnerEntityProperty,
-                    () => ctx.PrimaryKeyOf(ctx.Query.Links[^1].Name))
-                : null;
-            var wholeInner = ctx.InnerEntityProperty is not null
-                && lambda.ReferencesWholeInnerEntity(ctx.InnerEntityProperty);
-            ApplyLeftJoinColumns(ctx.Query, outerColumns, innerColumns, wholeInner);
-
-            var leftJoinResolver = CreateLeftJoinResolver(
+            var resolveEntity = CreateLeftJoinResolver(
                 lambda.Parameters[0], ctx.OuterEntityPath!, ctx.OuterEntityType!,
                 ctx.InnerEntityProperty, ctx.Query.Links[^1].Alias!,
                 ctx.InnerEntityProperty is not null
                     ? lambda.Parameters[0].Type.GetProperty(ctx.InnerEntityProperty)?.PropertyType
                     : null,
                 ctx.Query.EntityLogicalName, ctx.Query.Links[^1].Name);
-            // Build materializer (new path)
+            ctx.Query.ApplyProjectedColumns(lambda.ExtractProjectedColumns(resolveEntity, ctx.PrimaryKeyOf));
             ctx.Query.Materializer = MaterializerBuilder.BuildJoinMaterializer(
-                lambda,
-                expr => leftJoinResolver(expr) is { } r ? (r.LinkAlias, r.EntityType, r.LogicalName) : null,
-                ctx.PrimaryKeyResolver);
+                lambda, resolveEntity, ctx.PrimaryKeyResolver);
         }
         else if (ctx.JoinMappings is not null)
         {
@@ -365,11 +354,10 @@ internal static class FetchXmlQueryTranslator
         else
         {
             // Simple select on root entity
-            var columns = lambda.ExtractRootColumns(ctx.PrimaryKeyOf, ctx.Query.EntityLogicalName);
-            if (columns is { Count: > 0 })
-                ctx.Query.ApplyColumns(columns);
-            ctx.ProjectionIsSingleAttribute =
-                lambda.IsSingleRootAttributeRead(ctx.PrimaryKeyOf, ctx.Query.EntityLogicalName);
+            var resolveRoot = ProjectionExtensions.RootEntityResolver(
+                lambda.Parameters[0], ctx.Query.EntityLogicalName);
+            ctx.Query.ApplyProjectedColumns(lambda.ExtractProjectedColumns(resolveRoot, ctx.PrimaryKeyOf));
+            ctx.ProjectionIsSingleAttribute = lambda.IsSingleAttributeRead(resolveRoot, ctx.PrimaryKeyOf);
 
             // Check for CountChildren() calls in the projection
             var rowAggregates = lambda.Body.ExtractRowAggregates();
@@ -404,188 +392,15 @@ internal static class FetchXmlQueryTranslator
         // of an earlier projection (e.g. a prior `select c` that set AllAttributes on a
         // link), that earlier projection must not leak through — otherwise a link's
         // AllAttributes would suppress the narrower columns this Select requests. Clear
-        // link projections up front; the loop below repopulates them from this lambda.
+        // link projections up front; the columns this lambda reads repopulate them.
         // (In a single-pass query this runs once on links that have no columns yet, so
         // it is a no-op there.)
         ClearLinkProjectedColumns(ctx.Query.Links);
 
-        // Collect columns keyed by entity alias ("" = root entity)
-        var columnsByAlias = new Dictionary<string, List<string>>();
-        var wholeEntityAliases = new HashSet<string>();
-
-        // A bare-parameter body (e.g. the folded result selector (c, o) => c) projects a
-        // whole entity but yields no projection arguments. Treat the body itself as the
-        // single argument so the whole-entity reference below is detected.
-        var projectionArgs = lambda.Body.GetProjectionArguments().ToList();
-        if (projectionArgs.Count == 0)
-            projectionArgs.Add(lambda.Body);
-
-        foreach (var arg in projectionArgs)
-        {
-            // Try attribute resolution first — if it succeeds, it's a property access
-            var resolved = ResolveAttribute(arg, ctx);
-            if (resolved is not null)
-            {
-                var key = resolved.Value.EntityAlias ?? string.Empty;
-                if (!columnsByAlias.TryGetValue(key, out var list))
-                {
-                    list = [];
-                    columnsByAlias[key] = list;
-                }
-                list.Add(resolved.Value.Name);
-                continue;
-            }
-
-            // Check if it's a whole entity reference (not a property on it)
-            var wholeEntity = ResolveWholeJoinEntity(arg, ctx.JoinMappings!);
-            if (wholeEntity is not null)
-            {
-                wholeEntityAliases.Add(wholeEntity);
-                continue;
-            }
-
-            // Walk into sub-expressions for nested projections
-            CollectJoinAttributesByAlias(arg, ctx, columnsByAlias);
-        }
-
-        foreach (var (alias, columns) in columnsByAlias)
-        {
-            if (alias == string.Empty)
-                ctx.Query.ApplyColumns(columns);
-            else
-            {
-                var link = ctx.Query.Links.FindLinkByAlias(alias);
-                if (link is not null)
-                    foreach (var col in columns)
-                        link.Attributes.Add(new FetchAttribute { Name = col });
-            }
-        }
-
-        // Set all-attributes for whole entity references
-        foreach (var alias in wholeEntityAliases)
-        {
-            if (alias == string.Empty)
-            {
-                // Root entity — keep all-attributes (don't call ApplyColumns)
-            }
-            else
-            {
-                var link = ctx.Query.Links.FindLinkByAlias(alias);
-                if (link is not null)
-                    link.AllAttributes = true;
-            }
-        }
-
-        // Build materializer (new path)
-        var joinResolver = CreateJoinResolver(ctx.JoinMappings!);
+        var resolveEntity = CreateJoinResolver(ctx.JoinMappings!);
+        ctx.Query.ApplyProjectedColumns(lambda.ExtractProjectedColumns(resolveEntity, ctx.PrimaryKeyOf));
         ctx.Query.Materializer = MaterializerBuilder.BuildJoinMaterializer(
-            lambda,
-            expr => joinResolver(expr) is { } r ? (r.LinkAlias, r.EntityType, r.LogicalName) : null,
-            ctx.PrimaryKeyResolver);
-    }
-
-    /// <summary>
-    /// Returns the join entity alias if the expression is a whole entity reference
-    /// (e.g. <c>ti.pa</c> in a join projection), or null if it's a property access.
-    /// Returns "" for the root entity.
-    /// </summary>
-    private static string? ResolveWholeJoinEntity(
-        Expression expr, Dictionary<string, JoinEntityInfo> joinMappings)
-    {
-        var current = expr;
-        while (current is MemberExpression me)
-        {
-            if (joinMappings.TryGetValue(me.Member.Name, out var mapping))
-                return mapping.LinkAlias ?? string.Empty;
-            current = me.Expression;
-        }
-
-        if (current is ParameterExpression param
-            && joinMappings.TryGetValue(param.Name!, out var directMapping))
-            return directMapping.LinkAlias ?? string.Empty;
-
-        return null;
-    }
-
-    /// <summary>
-    /// Recursively walks an expression to find all attribute references in a join
-    /// projection, keyed by entity alias (null for root entity).
-    /// </summary>
-    private static void CollectJoinAttributesByAlias(
-        Expression expr, TranslationContext ctx,
-        Dictionary<string, List<string>> columnsByAlias)
-    {
-        var resolved = ResolveAttribute(expr, ctx);
-        if (resolved is not null)
-        {
-            var key = resolved.Value.EntityAlias ?? string.Empty;
-            if (!columnsByAlias.TryGetValue(key, out var list))
-            {
-                list = [];
-                columnsByAlias[key] = list;
-            }
-            list.Add(resolved.Value.Name);
-            return;
-        }
-
-        // Walk into sub-expressions to find nested attribute references
-        switch (expr)
-        {
-            case MethodCallExpression mc:
-                if (mc.Object is not null)
-                    CollectJoinAttributesByAlias(mc.Object, ctx, columnsByAlias);
-                foreach (var a in mc.Arguments)
-                    CollectJoinAttributesByAlias(a, ctx, columnsByAlias);
-                break;
-
-            case BinaryExpression binary:
-                CollectJoinAttributesByAlias(binary.Left, ctx, columnsByAlias);
-                CollectJoinAttributesByAlias(binary.Right, ctx, columnsByAlias);
-                break;
-
-            case UnaryExpression unary:
-                CollectJoinAttributesByAlias(unary.Operand, ctx, columnsByAlias);
-                break;
-
-            case NewArrayExpression newArray:
-                foreach (var element in newArray.Expressions)
-                    CollectJoinAttributesByAlias(element, ctx, columnsByAlias);
-                break;
-
-            case ConditionalExpression conditional:
-                CollectJoinAttributesByAlias(conditional.Test, ctx, columnsByAlias);
-                CollectJoinAttributesByAlias(conditional.IfTrue, ctx, columnsByAlias);
-                CollectJoinAttributesByAlias(conditional.IfFalse, ctx, columnsByAlias);
-                break;
-
-            // Leaf nodes that carry no attribute references
-            case ConstantExpression:
-            case ParameterExpression:
-            case DefaultExpression:
-                break;
-
-            // MemberExpression that didn't resolve to an attribute (e.g. closure variable,
-            // non-entity property) — walk into the inner expression if present.
-            case MemberExpression me:
-                if (me.Expression is not null)
-                    CollectJoinAttributesByAlias(me.Expression, ctx, columnsByAlias);
-                break;
-
-            case NewExpression ne:
-                foreach (var arg in ne.Arguments)
-                    CollectJoinAttributesByAlias(arg, ctx, columnsByAlias);
-                break;
-
-            case MemberInitExpression memberInit:
-                foreach (var binding in memberInit.Bindings)
-                    if (binding is MemberAssignment assignment)
-                        CollectJoinAttributesByAlias(assignment.Expression, ctx, columnsByAlias);
-                break;
-
-            default:
-                throw new NotSupportedException(
-                    $"Unsupported expression type '{expr.NodeType}' in join projection.");
-        }
+            lambda, resolveEntity, ctx.PrimaryKeyResolver);
     }
 
     // -------------------------------------------------------------------------
@@ -1726,7 +1541,7 @@ internal static class FetchXmlQueryTranslator
             // Match the range-variable name anywhere in the member chain. Chained joins
             // produce nested transparent identifiers (e.g. ti.ti1.c2), so the entity
             // member's parent is not necessarily the parameter itself — consistent with
-            // how ResolveJoinAttribute / ResolveWholeJoinEntity walk the chain.
+            // how ResolveJoinAttribute walks the chain.
             if (joinMappings.TryGetValue(me.Member.Name, out var mapping))
                 return mapping;
             current = me.Expression;
@@ -2600,40 +2415,21 @@ internal static class FetchXmlQueryTranslator
         if (outerPath is null)
             return;
 
-        // Try to extract columns directly from the result selector.
-        // If the selector IS the final projection (select folded in), this succeeds.
-        // If it's a transparent-identifier wrapper, no columns are found and we
-        // set up context for subsequent Select/Where instead.
-        var columns = resultSelector.ExtractColumnsViaPath(outerPath);
-        var innerParam = resultSelector.Parameters[1];
-
         // A transparent-identifier wrapper (all arguments are parameters) means further
         // operators follow. A real projection (not a TI) means the select was folded in.
         var isFoldedProjection = !resultSelector.IsTransparentIdentifier();
-        var referencesInner = isFoldedProjection && resultSelector.Body.GetProjectionArguments()
-            .Any(a => ReferencesParameter(a, innerParam));
 
         if (isFoldedProjection)
         {
             // Select folded into SelectMany — handle projection here
-            var foldedInnerColumns = referencesInner
-                ? ExtractColumnsFromParameter(resultSelector.Body, innerParam,
-                    () => ctx.PrimaryKeyOf(innerLogicalName))
-                : null;
-            ApplyLeftJoinColumns(ctx.Query, columns,
-                foldedInnerColumns is { Count: > 0 } ? foldedInnerColumns : null,
-                wholeInner: referencesInner && (foldedInnerColumns is null or { Count: 0 }));
-
-            var foldedResolver = CreateFoldedLeftJoinResolver(
+            var innerParam = resultSelector.Parameters[1];
+            var resolveEntity = CreateFoldedLeftJoinResolver(
                 resultSelector.Parameters[0], outerPath, outerEntityType,
                 innerParam, ctx.Query.Links[^1].Alias!,
                 outerLogicalName, innerLogicalName);
-            // Build materializer (new path)
+            ctx.Query.ApplyProjectedColumns(resultSelector.ExtractProjectedColumns(resolveEntity, ctx.PrimaryKeyOf));
             ctx.Query.Materializer = MaterializerBuilder.BuildJoinMaterializer(
-                resultSelector,
-                expr => foldedResolver(expr) is { } r ? (r.LinkAlias, r.EntityType, r.LogicalName) : null,
-                ctx.PrimaryKeyResolver,
-                innerDirectParam: innerParam);
+                resultSelector, resolveEntity, ctx.PrimaryKeyResolver, innerDirectParam: innerParam);
         }
         else
         {
@@ -2716,165 +2512,51 @@ internal static class FetchXmlQueryTranslator
         return null;
     }
 
-    /// <summary>
-    /// Returns <c>true</c> when <paramref name="expr"/> or any nested projection argument
-    /// references <paramref name="param"/> (directly or via property access).
-    /// </summary>
-    private static bool ReferencesParameter(Expression expr, ParameterExpression param)
-    {
-        if (expr is ParameterExpression p && p == param) return true;
-        if (expr is MemberExpression me && me.Expression is ParameterExpression mp && mp == param) return true;
-        if (expr is NewExpression or MemberInitExpression)
-            return expr.GetProjectionArguments().Any(a => ReferencesParameter(a, param));
-        if (expr is ConditionalExpression conditional)
-            return ReferencesParameter(conditional.IfTrue, param)
-                || ReferencesParameter(conditional.IfFalse, param);
-        if (expr is UnaryExpression { NodeType: ExpressionType.Convert } unary)
-            return ReferencesParameter(unary.Operand, param);
-        if (expr is MethodCallExpression mc)
-        {
-            if (mc.Object is not null && ReferencesParameter(mc.Object, param))
-                return true;
-            return mc.Arguments.Any(a => ReferencesParameter(a, param));
-        }
-        if (expr is ConstantExpression or DefaultExpression or MemberExpression or ParameterExpression)
-            return false;
-        throw new NotSupportedException(
-            $"Unsupported expression type '{expr.NodeType}' in projection. " +
-            $"Column references inside '{expr.NodeType}' expressions cannot be extracted.");
-    }
-
-    /// <summary>
-    /// Extracts attribute logical names from direct property accesses on a parameter
-    /// (e.g. <c>d.FirstName</c> where <c>d</c> is the inner entity parameter), as well
-    /// as <c>d.GetAttributeValue&lt;T&gt;(name)</c> calls. Recurses into nested projections.
-    /// </summary>
-    /// <param name="resolveIdColumn">
-    /// Resolves the primary key column of the entity <paramref name="param"/> refers to. Used for
-    /// <see cref="Entity.Id"/> on an unbound entity, which has no [AttributeLogicalName]; invoked
-    /// only when such an access is found, since resolving may require a metadata request.
-    /// </param>
-    private static List<string> ExtractColumnsFromParameter(
-        Expression body, ParameterExpression param, Func<string>? resolveIdColumn = null)
-    {
-        var columns = new List<string>();
-        foreach (var arg in body.GetProjectionArguments())
-            ExtractFromExpr(arg, param, columns, resolveIdColumn);
-        return columns;
-    }
-
-    private static void ExtractFromExpr(
-        Expression arg, ParameterExpression param, List<string> columns, Func<string>? resolveIdColumn)
-    {
-        if (arg is MemberExpression { Member: PropertyInfo prop, Expression: ParameterExpression p }
-            && p == param)
-        {
-            var name = prop.GetCustomAttribute<AttributeLogicalNameAttribute>()?.LogicalName;
-            if (name is null && prop.Name == nameof(Entity.Id) && p.Type == typeof(Entity))
-                name = resolveIdColumn?.Invoke();
-            if (name is not null)
-                columns.Add(name);
-            return;
-        }
-
-        if (arg.IsGetAttributeValueCall(out var attrName, out var entityExpr)
-            && entityExpr is ParameterExpression op && op == param)
-        {
-            columns.Add(attrName);
-            return;
-        }
-
-        switch (arg)
-        {
-            case NewExpression or MemberInitExpression:
-                columns.AddRange(ExtractColumnsFromParameter(arg, param, resolveIdColumn));
-                break;
-            case ConditionalExpression conditional:
-                ExtractFromExpr(conditional.IfTrue, param, columns, resolveIdColumn);
-                ExtractFromExpr(conditional.IfFalse, param, columns, resolveIdColumn);
-                break;
-            case UnaryExpression { NodeType: ExpressionType.Convert } unary:
-                ExtractFromExpr(unary.Operand, param, columns, resolveIdColumn);
-                break;
-            case MethodCallExpression mc:
-                if (mc.Object is not null)
-                    ExtractFromExpr(mc.Object, param, columns, resolveIdColumn);
-                foreach (var ca in mc.Arguments)
-                    ExtractFromExpr(ca, param, columns, resolveIdColumn);
-                break;
-            case ConstantExpression or DefaultExpression or MemberExpression or ParameterExpression:
-                break;
-            default:
-                throw new NotSupportedException(
-                    $"Unsupported expression type '{arg.NodeType}' in projection. " +
-                    $"Column references inside '{arg.NodeType}' expressions cannot be extracted.");
-        }
-    }
-
-    /// <summary>
-    /// Applies outer and inner column lists to the query and its last link entity.
-    /// Shared between HandleSelect (left-join branch) and HandleSelectMany (folded branch).
-    /// </summary>
-    private static void ApplyLeftJoinColumns(
-        FetchXmlQuery query,
-        IReadOnlyList<string>? outerColumns,
-        IReadOnlyList<string>? innerColumns,
-        bool wholeInner)
-    {
-        if (outerColumns is { Count: > 0 })
-            query.ApplyColumns(outerColumns);
-
-        var link = query.Links[^1];
-        if (wholeInner)
-        {
-            link.AllAttributes = true;
-        }
-        else if (innerColumns is { Count: > 0 })
-        {
-            foreach (var col in innerColumns)
-                link.Attributes.Add(new FetchAttribute { Name = col });
-        }
-    }
-
     // -------------------------------------------------------------------------
     // Entity resolution helpers for materializer building
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Identifies which entity (root or linked) an expression refers to.
-    /// <c>LinkAlias</c> is <c>null</c> for the root entity.
-    /// </summary>
-    private readonly record struct EntityResolution(string? LinkAlias, Type EntityType, string? LogicalName = null);
-
-    /// <summary>
     /// Creates an entity resolver for inner-join scenarios using the JoinMappings dictionary.
-    /// Walks the member chain to find a mapping key.
+    /// An entity is a join parameter (<c>(a, c) =&gt; ...</c>) or a transparent identifier's member
+    /// named for one (<c>ti.a</c>, <c>ti2.ti1.a</c>). Only the entity itself resolves: a column of
+    /// it (<c>ti.a.Website</c>) or a value derived from one (<c>ti.a.Website.Length</c>) does not.
     /// </summary>
-    private static Func<Expression, EntityResolution?> CreateJoinResolver(
+    private static MaterializerBuilder.EntityResolver CreateJoinResolver(
         Dictionary<string, JoinEntityInfo> joinMappings)
     {
         return expr =>
         {
-            var current = expr;
-            while (current is MemberExpression me)
+            var name = expr switch
             {
-                if (joinMappings.TryGetValue(me.Member.Name, out var mapping))
-                    return new EntityResolution(mapping.LinkAlias, mapping.EntityType, mapping.LogicalName);
-                current = me.Expression;
-            }
+                MemberExpression { Member.Name: var memberName, Expression: { } owner } member
+                    when typeof(Entity).IsAssignableFrom(member.Type) && IsTransparentIdentifierChain(owner)
+                    => memberName,
+                ParameterExpression { Name: { } parameterName } parameter
+                    when typeof(Entity).IsAssignableFrom(parameter.Type)
+                    => parameterName,
+                _ => null,
+            };
 
-            if (current is ParameterExpression param
-                && joinMappings.TryGetValue(param.Name!, out var directMapping))
-                return new EntityResolution(directMapping.LinkAlias, directMapping.EntityType, directMapping.LogicalName);
+            return name is not null && joinMappings.TryGetValue(name, out var mapping)
+                ? (mapping.LinkAlias, mapping.EntityType, mapping.LogicalName)
+                : null;
+        };
 
-            return null;
+        // The lambda's parameter, or a chain of transparent identifiers from it: no entity on the way.
+        static bool IsTransparentIdentifierChain(Expression expr) => expr switch
+        {
+            ParameterExpression => true,
+            MemberExpression { Expression: { } owner } member =>
+                !typeof(Entity).IsAssignableFrom(member.Type) && IsTransparentIdentifierChain(owner),
+            _ => false,
         };
     }
 
     /// <summary>
     /// Creates an entity resolver for left-join scenarios (TI path for outer, property for inner).
     /// </summary>
-    private static Func<Expression, EntityResolution?> CreateLeftJoinResolver(
+    private static MaterializerBuilder.EntityResolver CreateLeftJoinResolver(
         ParameterExpression originalParam,
         string[] outerPath,
         Type outerEntityType,
@@ -2888,14 +2570,14 @@ internal static class FetchXmlQueryTranslator
         {
             // Outer entity via TI path
             if (expr.IsOuterEntityAccess(outerPath, originalParam))
-                return new EntityResolution(null, outerEntityType, outerLogicalName);
+                return (null, outerEntityType, outerLogicalName);
 
             // Inner entity via property: ti.innerProp
             if (innerPropertyName is not null
                 && expr is MemberExpression { Member.Name: var name, Expression: ParameterExpression p }
                 && p == originalParam
                 && name == innerPropertyName)
-                return new EntityResolution(innerAlias, innerEntityType ?? expr.Type, innerLogicalName);
+                return (innerAlias, innerEntityType ?? expr.Type, innerLogicalName);
 
             return null;
         };
@@ -2905,7 +2587,7 @@ internal static class FetchXmlQueryTranslator
     /// Creates an entity resolver for folded left-join scenarios (TI path for outer,
     /// direct parameter for inner).
     /// </summary>
-    private static Func<Expression, EntityResolution?> CreateFoldedLeftJoinResolver(
+    private static MaterializerBuilder.EntityResolver CreateFoldedLeftJoinResolver(
         ParameterExpression outerTiParam,
         string[] outerPath,
         Type outerEntityType,
@@ -2918,11 +2600,11 @@ internal static class FetchXmlQueryTranslator
         {
             // Outer entity via TI path
             if (expr.IsOuterEntityAccess(outerPath, outerTiParam))
-                return new EntityResolution(null, outerEntityType, outerLogicalName);
+                return (null, outerEntityType, outerLogicalName);
 
             // Inner entity via direct parameter
             if (expr is ParameterExpression p && p == innerParam)
-                return new EntityResolution(innerAlias, innerParam.Type, innerLogicalName);
+                return (innerAlias, innerParam.Type, innerLogicalName);
 
             return null;
         };

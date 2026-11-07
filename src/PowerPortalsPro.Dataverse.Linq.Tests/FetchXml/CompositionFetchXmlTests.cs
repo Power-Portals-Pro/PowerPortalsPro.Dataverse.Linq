@@ -161,7 +161,6 @@ public class CompositionFetchXmlTests : FetchXmlTestBase
             """
             <fetch mapping="logical">
               <entity name="new_customaccount">
-                <all-attributes />
                 <filter type="and">
                   <condition attribute="new_name" operator="not-null" />
                   <condition entityname="c" attribute="new_firstname" operator="eq" value="Bob" />
@@ -187,7 +186,6 @@ public class CompositionFetchXmlTests : FetchXmlTestBase
             """
             <fetch mapping="logical">
               <entity name="new_customaccount">
-                <all-attributes />
                 <order attribute="new_lastname" descending="false" entityname="c" />
                 <filter type="and">
                   <condition attribute="new_name" operator="not-null" />
@@ -216,7 +214,6 @@ public class CompositionFetchXmlTests : FetchXmlTestBase
             """
             <fetch mapping="logical">
               <entity name="new_customaccount">
-                <all-attributes />
                 <filter type="and">
                   <condition entityname="c" attribute="new_firstname" operator="eq" value="A" />
                   <condition entityname="c" attribute="new_lastname" operator="eq" value="B" />
@@ -242,7 +239,6 @@ public class CompositionFetchXmlTests : FetchXmlTestBase
             """
             <fetch mapping="logical" top="5">
               <entity name="new_customaccount">
-                <all-attributes />
                 <filter type="and">
                   <condition attribute="new_name" operator="not-null" />
                 </filter>
@@ -271,7 +267,6 @@ public class CompositionFetchXmlTests : FetchXmlTestBase
             """
             <fetch mapping="logical" top="1">
               <entity name="new_customaccount">
-                <all-attributes />
                 <filter type="and">
                   <condition attribute="new_name" operator="not-null" />
                 </filter>
@@ -304,7 +299,6 @@ public class CompositionFetchXmlTests : FetchXmlTestBase
             """
             <fetch mapping="logical">
               <entity name="new_customaccount">
-                <all-attributes />
                 <filter type="and">
                   <condition attribute="new_name" operator="not-null" />
                 </filter>
@@ -339,7 +333,6 @@ public class CompositionFetchXmlTests : FetchXmlTestBase
             """
             <fetch mapping="logical">
               <entity name="new_customaccount">
-                <all-attributes />
                 <filter type="and">
                   <condition attribute="new_name" operator="not-null" />
                 </filter>
@@ -372,7 +365,6 @@ public class CompositionFetchXmlTests : FetchXmlTestBase
             """
             <fetch mapping="logical">
               <entity name="new_customaccount">
-                <all-attributes />
                 <filter type="and">
                   <condition attribute="new_name" operator="not-null" />
                   <condition entityname="c" attribute="new_lastname" operator="not-null" />

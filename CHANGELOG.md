@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 - Fixed a select of a single value — `x.GetAttributeValue<T>("col")`, the indexer `x["col"]` or `x.Id` as the whole projection (`Select(a => a.GetAttributeValue<string>("name"))`) — reading every column (`<all-attributes />`). With `Distinct()` that returned duplicates: the fetch was distinct over every column, the primary key included, so each row was distinct. It now reads only that column, `Id` as the table's primary key (`accountid`, or `activityid` for an activity), so `Distinct()` de-duplicates on the server. The same applies to `First()`, `Single()` and the rest over such a select, and a no-selector aggregate over one (`.Select(a => a.GetAttributeValue<int?>("numberofemployees")).Max()`) now translates instead of throwing.
 - Fixed a select dropping columns its projection reads in a method call, operator or conditional (`new { a.Name, Website = a.Website.ToUpper() }`, `a.NumberOfEmployees + 1`, `a.IsPreferred ?? false ? … : …`): only plain property reads were requested, so the others came back null and threw or gave wrong values. Every column the projection reads is now requested. A select that also uses the entity whole (`new { a.Name, Account = a }`) reads every column, so the entity it returns is complete.
+- Fixed the same in a select after a join or left join, which collected its columns separately:
+  - Columns read in a method call or member chain (`a.Website.Length`) were not requested on a left join, and an operator (`a.NumberOfEmployees + 1`, `c.FirstName + " " + c.LastName`) threw `NotSupportedException`. On an inner join the columns were requested, but the select threw while building its results.
+  - An entity used whole beside one of its columns (`select new { a.Name, Account = a }`) came back with only that column.
+  - A single value as the whole projection (`select a.GetAttributeValue<string>("name")`, `select a.Id`) read every column of the root.
+  - An entity the select doesn't read now gets no columns. A select of only joined columns used to read every column of the root, so `(from a … join c … select c.LastName).Distinct()` returned a row per account and contact rather than each last name once.
+  - A left join's `c == null` / `c != null` in the projection now reads the joined row's primary key. `select new { HasContact = c != null }` threw, and `c == null ? … : c.Name` took a matched contact whose name was null for no match.
 
 ## [1.0.20] - 2026-10-28
 
