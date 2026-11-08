@@ -52,19 +52,32 @@ internal static class AttributeExtensions
         attributeName = null;
         entityExpression = null;
 
-        if (expr is not MethodCallExpression { Method.Name: "get_Item", Object: { } entity } call
-            || call.Arguments.Count != 1
-            || call.Arguments[0].Type != typeof(string)
-            || !typeof(Entity).IsAssignableFrom(entity.Type))
-        {
-            return false;
-        }
-
-        if (!call.Arguments[0].TryEvaluateName(out attributeName))
+        if (!expr.IsEntityIndexer(out var entity, out var name) || !name.TryEvaluateName(out attributeName))
             return false;
 
         entityExpression = entity;
         return true;
+    }
+
+    /// <summary>
+    /// Matches the shape of a read through the <see cref="Entity"/> indexer, <c>entity[name]</c>,
+    /// whatever its name argument.
+    /// </summary>
+    internal static bool IsEntityIndexer(
+        this Expression expr,
+        [NotNullWhen(true)] out Expression? entity,
+        [NotNullWhen(true)] out Expression? name)
+    {
+        if (expr is MethodCallExpression { Method.Name: "get_Item", Object: { } owner, Arguments: [{ } argument] }
+            && argument.Type == typeof(string)
+            && typeof(Entity).IsAssignableFrom(owner.Type))
+        {
+            (entity, name) = (owner, argument);
+            return true;
+        }
+
+        (entity, name) = (null, null);
+        return false;
     }
 
     /// <summary>

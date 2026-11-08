@@ -411,4 +411,753 @@ public class ScalarProjectionFetchXmlTests : FetchXmlTestBase
 
         act.Should().Throw<NotSupportedException>();
     }
+
+    // -------------------------------------------------------------------------
+    // A select directly on another: folded into one
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_SelectThenSelect_GeneratesTheAttributesTheFirstExposes()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Select(a => new { a.Name, a.Website })
+            .Select(x => x.Name.ToUpper())
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_SelectThenIdentitySelectMax_GeneratesAggregate()
+    {
+        var fetchXml = _service.Queryable("account")
+            .ToFetchXml(q => q.Select(a => a.GetAttributeValue<int?>("numberofemployees")).Select(n => n).Max());
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="account">
+                <attribute name="numberofemployees" alias="max" aggregate="max" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_SelectThenComputedSelectSum_Throws()
+    {
+        var act = () => _service.Queryable<CustomAccount>()
+            .ToFetchXml(q => q.Select(a => a.NumberOfEmployees).Select(n => n + 1).Sum());
+
+        act.Should().Throw<NotSupportedException>();
+    }
+
+    // -------------------------------------------------------------------------
+    // A select composed on an earlier projection
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_SelectAfterWhereOnProjection_GeneratesEachAttributeOnce()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Select(a => new CustomAccount { Name = a.Name, Website = a.Website })
+            .Where(a => a.Name != null)
+            .Select(a => new { a.Name, a.Website })
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+                <attribute name="new_website" />
+                <filter type="and">
+                  <condition attribute="new_name" operator="not-null" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_SelectOverValuesAcrossTake_KeepsTheEarlierProjectionsAttributes()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Select(a => a.Name)
+            .Take(5)
+            .Select(n => n.ToUpper())
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" top="5">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    // -------------------------------------------------------------------------
+    // Selects not folded: the second runs on the first one's results
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_SelectThenSelectOfRowAggregate_KeepsTheRowAggregate()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Select(a => new { a.Name, Children = a.CountChildren() })
+            .Select(x => x.Children)
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+                <attribute name="new_customaccountid" alias="children" rowaggregate="CountChildren" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_SelectThenSelectUsingAComputedValueTwice_GeneratesTheFirstsAttributes()
+    {
+        // Folding would call Guid.NewGuid() once per use of x.Key.
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Select(a => new { a.Name, Key = Guid.NewGuid() })
+            .Select(x => new { A = x.Key, B = x.Key })
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_SelectThenSelectUsingAComputedValueInANestedLambda_GeneratesTheFirstsAttributes()
+    {
+        // Folding would call Guid.NewGuid() each time the nested lambda runs.
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Select(a => new { a.Name, Key = Guid.NewGuid() })
+            .Select(x => Enumerable.Range(0, 3).Select(i => x.Key).ToList())
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_SelectThenSelectNotFoldedOverAnEntityProjection_GeneratesTheFirstsAttributes()
+    {
+        // Two uses of a constructed entity can't be folded; the second select runs on the first's
+        // results rather than re-reading the row.
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Select(a => new CustomAccount { Name = a.Name.ToUpper() })
+            .Select(x => x.Name + x.Name)
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_EntitySelectAfterASelectOnResults_RunsOnTheResults()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Select(a => new { Upper = a.Name.ToUpper() })
+            .Take(5)
+            .Select(x => new CustomAccount { Name = x.Upper })
+            .Take(3)
+            .Select(a => a.Name)
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" top="3">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_SelectThenSelectUsingEachComputedMemberOnce_FoldsToTheMembersRead()
+    {
+        // Each computed member is used once after the members are reduced, so the selects fold
+        // and the description, which nothing reads, isn't requested.
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Select(a => new { a.Name, Website = a.Website.ToUpper(), a.Description })
+            .Select(x => x.Name + x.Website)
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+                <attribute name="new_website" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_SelectThenSelectUsingTheFirstsObjectTwice_GeneratesTheFirstsAttributes()
+    {
+        // Folding would make two objects where the select made one.
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Select(a => new { a.Name, a.Website })
+            .Select(x => new { First = x, Second = x })
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+                <attribute name="new_website" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_OrderByAfterASelectOnResults_Throws()
+    {
+        var act = () => _service.Queryable<CustomAccount>()
+            .Select(a => a.Website)
+            .Take(5)
+            .Select(w => new CustomAccount { Name = w })
+            .OrderBy(x => x.Name)
+            .ToFetchXml();
+
+        act.Should().Throw<NotSupportedException>();
+    }
+
+    [Fact]
+    public void ToFetchXml_WhereAfterASelectOnResults_Throws()
+    {
+        var act = () => _service.Queryable<CustomAccount>()
+            .Select(a => a.Website)
+            .Take(5)
+            .Select(w => new CustomAccount { Name = w })
+            .Where(x => x.Name != null)
+            .ToFetchXml();
+
+        act.Should().Throw<NotSupportedException>();
+    }
+
+    [Fact]
+    public void ToFetchXml_DistinctAfterASelectOnResults_Throws()
+    {
+        // The server would de-duplicate name and website, not the names the last select keeps.
+        var act = () => _service.Queryable<CustomAccount>()
+            .Select(a => new { a.Name, a.Website })
+            .Take(5)
+            .Select(x => x.Name)
+            .Distinct()
+            .ToFetchXml();
+
+        act.Should().Throw<NotSupportedException>();
+    }
+
+    [Fact]
+    public void ToFetchXml_OnAfterMaterializeBeforeASelectOnResults_Throws()
+    {
+        var act = () => _service.Queryable<CustomAccount>()
+            .Select(a => a.Name)
+            .OnAfterMaterialize((e, n) => n.Trim())
+            .Take(5)
+            .Select(n => n.Length)
+            .ToFetchXml();
+
+        act.Should().Throw<NotSupportedException>();
+    }
+
+    [Fact]
+    public void ToFetchXml_SelectThenIdentitySelectOfRowAggregate_Folds()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Select(a => new { a.Name, Children = a.CountChildren() })
+            .Select(x => x)
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+                <attribute name="new_customaccountid" alias="children" rowaggregate="CountChildren" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_SelectThenSelectReachingNestedWorkTwice_DoesNotFold()
+    {
+        // Folding would call Guid.NewGuid() for x.Inner and again for x.Inner.Key; the selects
+        // read no column either way.
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Select(a => new { Inner = new { Key = Guid.NewGuid() } })
+            .Select(x => new { x.Inner, x.Inner.Key })
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount" />
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_AggregateOfASelectComposedAcrossTake_Throws()
+    {
+        // The last select re-reads the row, so its value isn't the first projection's + 1.
+        var act = () => _service.Queryable<CustomAccount>()
+            .ToFetchXml(q => q
+                .Select(a => new CustomAccount { NumberOfEmployees = a.NumberOfEmployees + 1 })
+                .Take(5)
+                .Select(x => x.NumberOfEmployees)
+                .Sum());
+
+        act.Should().Throw<NotSupportedException>();
+    }
+
+    [Fact]
+    public void ToFetchXml_SelectOnGroupedSelect_RunsOnTheGroups()
+    {
+        var fetchXml = (from a in _service.Queryable<CustomAccount>()
+                        group a by a.AccountRating_OptionSetValue.Value into g
+                        select new { Rating = g.Key, Count = g.Count() })
+                       .Select(x => x.Count)
+                       .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="new_customaccount">
+                <attribute name="new_accountrating" alias="rating" groupby="true" />
+                <attribute name="new_customaccountid" alias="count" aggregate="count" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_OnAfterMaterializeBeforeALaterSelect_Throws()
+    {
+        var act = () => _service.Queryable<CustomAccount>()
+            .Select(a => new CustomAccount { Name = a.Name })
+            .OnAfterMaterialize((e, x) => x)
+            .Where(x => x.Name != null)
+            .Select(x => x.Name)
+            .ToFetchXml();
+
+        act.Should().Throw<NotSupportedException>();
+    }
+
+    [Fact]
+    public void ToFetchXml_JoinAfterASelectOnResults_Throws()
+    {
+        var act = () => _service.Queryable<CustomAccount>()
+            .Select(a => a.Name)
+            .Take(5)
+            .Select(n => n.ToUpper())
+            .Join(_service.Queryable<CustomContact>(), n => n, c => c.LastName, (n, c) => c.FirstName)
+            .ToFetchXml();
+
+        act.Should().Throw<NotSupportedException>();
+    }
+
+    [Fact]
+    public void ToFetchXml_SelectThenSelectReadingTwoMembersOfAnEntity_FoldsAndKeepsComposing()
+    {
+        // The object is never used whole, only its members, so making it twice is harmless; the
+        // selects fold and the Where after them is translated.
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Select(a => new CustomAccount { Name = a.Name, Website = a.Website })
+            .Select(x => new CustomAccount { Name = x.Name, Website = x.Website })
+            .Where(x => x.Name != null)
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+                <attribute name="new_website" />
+                <filter type="and">
+                  <condition attribute="new_name" operator="not-null" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_SelectThenSelectOfAMemberComputedInALambda_Folds()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Select(a => new { a.Website, Digits = a.Name.Count(ch => char.IsDigit(ch)) })
+            .Select(x => x.Digits)
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_OnAfterMaterializeBeforeASelectOfTheSameType_Translates()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .OnAfterMaterialize((e, a) => a)
+            .Select(a => new CustomAccount { Name = a.Name })
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_AggregateOfASelectComposedOnAnIdentitySelect_GeneratesAggregate()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .ToFetchXml(q => q
+                .Select(a => a)
+                .Where(a => a.Name != null)
+                .Select(a => a.NumberOfEmployees)
+                .Sum());
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="new_customaccount">
+                <attribute name="new_numberofemployees" alias="sum" aggregate="sum" />
+                <filter type="and">
+                  <condition attribute="new_name" operator="not-null" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_SelectAsCastSum_Throws()
+    {
+        // A Money column "as decimal?" is null, not the column's amount.
+        var act = () => _service.Queryable("account")
+            .ToFetchXml(q => q.Select(a => a["revenue"] as decimal?).Sum());
+
+        act.Should().Throw<NotSupportedException>();
+    }
+
+    [Fact]
+    public void ToFetchXml_SelectThenSelectReadingTwoMembersOfAClass_DoesNotFold()
+    {
+        // A class's constructor may do work of its own (Stamp takes a new Guid), so it isn't run
+        // once per member read; the second select runs on the first's results.
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Select(a => new Stamp(a.Name))
+            .Select(s => new { s.Id, Again = s.Id })
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    /// <summary>A value whose constructor does work of its own.</summary>
+    public sealed class Stamp(string name)
+    {
+        public string Name { get; } = name;
+
+        public Guid Id { get; } = Guid.NewGuid();
+    }
+
+    [Fact]
+    public void ToFetchXml_SelectCastToFloatMax_Throws()
+    {
+        // A decimal beyond float's range would be infinity, not the column's value.
+        var act = () => _service.Queryable<CustomAccount>()
+            .ToFetchXml(q => q.Select(a => (float?)a.CreditLimitMoney.Value).Max());
+
+        act.Should().Throw<NotSupportedException>();
+    }
+
+    [Fact]
+    public void ToFetchXml_SelectDoubleToDecimalSum_Throws()
+    {
+        // A double to decimal can throw for a value decimal can't hold.
+        var act = () => _service.Queryable<CustomAccount>()
+            .ToFetchXml(q => q.Select(a => (decimal?)a.Latitude).Sum());
+
+        act.Should().Throw<NotSupportedException>();
+    }
+
+    [Fact]
+    public void ToFetchXml_SelectWideningCastSum_Throws()
+    {
+        // Summing the int column on the server could overflow where a sum of longs wouldn't.
+        var act = () => _service.Queryable<CustomAccount>()
+            .ToFetchXml(q => q.Select(a => (long?)a.NumberOfEmployees).Sum());
+
+        act.Should().Throw<NotSupportedException>();
+    }
+
+    [Fact]
+    public void ToFetchXml_SelectDistinctSum_Throws()
+    {
+        // The server would sum every row, not each distinct value once.
+        var act = () => _service.Queryable<CustomAccount>()
+            .ToFetchXml(q => q.Select(a => a.NumberOfEmployees).Distinct().Sum());
+
+        act.Should().Throw<NotSupportedException>();
+    }
+
+    [Fact]
+    public void ToFetchXml_SelectDistinctMax_GeneratesAggregate()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .ToFetchXml(q => q.Select(a => a.NumberOfEmployees).Distinct().Max());
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" distinct="true" aggregate="true">
+              <entity name="new_customaccount">
+                <attribute name="new_numberofemployees" alias="max" aggregate="max" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_SelectAsAnotherEntityTypeAcrossTake_RunsOnTheResults()
+    {
+        // A contact made from an account can't be read off the account row.
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Select(a => new CustomContact { LastName = a.Name })
+            .Take(5)
+            .Select(c => c.LastName)
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" top="5">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_CountChildrenInASelectOnResults_Throws()
+    {
+        var act = () => _service.Queryable<CustomAccount>()
+            .Select(a => new { Account = a })
+            .Take(5)
+            .Select(x => x.Account.CountChildren())
+            .ToFetchXml();
+
+        act.Should().Throw<NotSupportedException>();
+    }
+
+    [Fact]
+    public void ToFetchXml_SelectAfterATransformingSelectAcrossTake_RunsOnTheResults()
+    {
+        // The server returns the top 5 names; the first select upper-cases them and the second
+        // reads them off its results, so nothing new is requested.
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Select(a => new CustomAccount { Name = a.Name.ToUpper() })
+            .Take(5)
+            .Select(x => x.Name)
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" top="5">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_OnAfterMaterializeBetweenSelectsOfTheSameType_Throws()
+    {
+        // The hook would run after the later select, not between them where it was placed.
+        var act = () => _service.Queryable<CustomAccount>()
+            .Select(a => a.Name)
+            .OnAfterMaterialize((e, n) => n + "!")
+            .Take(5)
+            .Select(n => n.Substring(0, 1))
+            .ToFetchXml();
+
+        act.Should().Throw<NotSupportedException>();
+    }
+
+    [Fact]
+    public void ToFetchXml_CountAfterASelectOnResults_Throws()
+    {
+        // The server would count every row, not the five the Take kept.
+        var act = () => _service.Queryable<CustomAccount>()
+            .ToFetchXml(q => q.Select(a => a.Name).Take(5).Select(n => n.Length).Count());
+
+        act.Should().Throw<NotSupportedException>();
+    }
+
+    [Fact]
+    public void ToFetchXml_IndexedSelect_Throws()
+    {
+        var act = () => _service.Queryable<CustomAccount>()
+            .Select((a, i) => a.Name + i)
+            .ToFetchXml();
+
+        act.Should().Throw<NotSupportedException>();
+    }
+
+    [Fact]
+    public void ToFetchXml_ThreeSelects_FoldIntoOne()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Select(a => a)
+            .Select(a => new { a.Name, a.Website })
+            .Select(x => x.Name)
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_SelectToWiderTypeThenSelect_Translates()
+    {
+        var fetchXml = _service.Queryable("account")
+            .Select<Entity, object>(a => a.GetAttributeValue<string>("name"))
+            .Select(o => o)
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="account">
+                <attribute name="name" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    // -------------------------------------------------------------------------
+    // Aggregates of a select whose value isn't a root column's
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_SelectNumericCastSum_Throws()
+    {
+        // Summing the decimal column would skip each value's truncation to int.
+        var act = () => _service.Queryable<CustomAccount>()
+            .ToFetchXml(q => q.Select(a => (int)a.CreditLimitMoney.Value).Sum());
+
+        act.Should().Throw<NotSupportedException>();
+    }
+
+    [Fact]
+    public void ToFetchXml_SelectUserDefinedConversionMax_Throws()
+    {
+        var act = () => _service.Queryable<CustomAccount>()
+            .ToFetchXml(q => q.Select(a => (Headcount)a.NumberOfEmployees).Max());
+
+        act.Should().Throw<NotSupportedException>();
+    }
+
+    /// <summary>A value made from a column by a conversion of its own.</summary>
+    public readonly record struct Headcount(int? Count)
+    {
+        public static explicit operator Headcount(int? count) => new(count);
+    }
+
+    [Fact]
+    public void ToFetchXml_UnboundSelectUnboxedIndexerMax_GeneratesAggregate()
+    {
+        var fetchXml = _service.Queryable("account")
+            .ToFetchXml(q => q.Select(a => (int?)a["numberofemployees"]).Max());
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="account">
+                <attribute name="numberofemployees" alias="max" aggregate="max" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_SelectNullableLiftMax_GeneratesAggregate()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .ToFetchXml(q => q.Select(a => (decimal?)a.CreditLimitMoney.Value).Max());
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="new_customaccount">
+                <attribute name="new_creditlimit" alias="max" aggregate="max" />
+              </entity>
+            </fetch>
+            """);
+    }
 }

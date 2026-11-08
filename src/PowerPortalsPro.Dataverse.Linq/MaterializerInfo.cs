@@ -1,4 +1,6 @@
 using Microsoft.Xrm.Sdk;
+using PowerPortalsPro.Dataverse.Linq.Expressions;
+using System.Linq.Expressions;
 
 namespace PowerPortalsPro.Dataverse.Linq;
 
@@ -32,8 +34,40 @@ internal sealed class MaterializerSlot
 internal sealed class MaterializerInfo
 {
     public required Delegate CompiledProjector { get; init; }
+    /// <summary>
+    /// The type <see cref="Invoke"/> returns: the projector's result, or the last
+    /// <see cref="Then"/> select's.
+    /// </summary>
     public required Type ResultType { get; init; }
     public required MaterializerSlot[] Slots { get; init; }
+
+    /// <summary>
+    /// Selects run on the projector's result, in order, for a select on an earlier projection
+    /// (<c>.Select(a =&gt; a.Name).Take(5).Select(n =&gt; n.ToUpper())</c>). Null when there are none.
+    /// </summary>
+    public Func<object?, object?>? Then { get; init; }
+
+    /// <summary>
+    /// This materializer with <paramref name="select"/> run on each of its results.
+    /// </summary>
+    public MaterializerInfo ThenSelect(LambdaExpression select)
+    {
+        // Compiled as object -> object, so each row calls it directly rather than by reflection.
+        var value = Expression.Parameter(typeof(object), "value");
+        var body = select.Body.ReadIndexerAsAttributeValue().ReplaceParameter(
+            select.Parameters[0], Expression.Convert(value, select.Parameters[0].Type));
+        var then = Expression.Lambda<Func<object?, object?>>(
+            Expression.Convert(body, typeof(object)), value).Compile();
+
+        var previous = Then;
+        return new MaterializerInfo
+        {
+            CompiledProjector = CompiledProjector,
+            ResultType = select.ReturnType,
+            Slots = Slots,
+            Then = previous is null ? then : row => then(previous(row)),
+        };
+    }
 
     /// <summary>
     /// Invokes the materializer for a single entity result row.
@@ -55,7 +89,8 @@ internal sealed class MaterializerInfo
                 _ => throw new InvalidOperationException($"Unknown slot kind: {slot.Kind}")
             };
         }
-        return CompiledProjector.DynamicInvoke(args)!;
+        var projected = CompiledProjector.DynamicInvoke(args);
+        return (Then is null ? projected : Then(projected))!;
     }
 
     private static object ExtractTypedEntity(Entity entity, Type entityType)

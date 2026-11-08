@@ -23,8 +23,7 @@ internal static class TransparentIdentifierExtensions
             if (ne.Arguments[i] is not ParameterExpression param)
                 return false;
 
-            var memberName = ne.Members[i] is MethodInfo { Name: ['g', 'e', 't', '_', ..] } getter
-                ? getter.Name[4..] : ne.Members[i].Name;
+            var memberName = ne.Members[i].GetInitializedMemberName();
             if (memberName != param.Name)
                 return false;
         }

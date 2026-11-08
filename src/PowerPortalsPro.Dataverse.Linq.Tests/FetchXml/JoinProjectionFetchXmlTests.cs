@@ -1,3 +1,4 @@
+using FluentAssertions;
 using Microsoft.Xrm.Sdk;
 using PowerPortalsPro.Dataverse.Linq.Tests.Proxies;
 
@@ -111,8 +112,10 @@ public class JoinProjectionFetchXmlTests : FetchXmlTestBase
     }
 
     [Fact]
-    public void ToFetchXml_UnboundLeftJoinSelectIds_GeneratesPrimaryKeys()
+    public void ToFetchXml_UnboundLeftJoinSelectIdAndIndexer_GeneratesTheColumnsRead()
     {
+        // c["new_name"] is read as the column alone, like GetAttributeValue; the contact's
+        // primary key, which nothing reads, would split the distinct rows by contact.
         var fetchXml = (from a in _service.Queryable("new_customaccount")
                         join c in _service.Queryable("new_customcontact")
                             on a.Id equals c.GetAttributeValue<EntityReference>("new_parentaccount").Id into contacts
@@ -283,6 +286,98 @@ public class JoinProjectionFetchXmlTests : FetchXmlTestBase
               </entity>
             </fetch>
             """);
+    }
+
+    [Fact]
+    public void ToFetchXml_JoinSelectRootColumnSum_GeneratesAggregate()
+    {
+        var fetchXml = (from a in _service.Queryable<CustomAccount>()
+                        join c in _service.Queryable<CustomContact>()
+                            on a.CustomAccountId equals c.ParentAccount.Id
+                        select a.NumberOfEmployees).ToFetchXml(q => q.Sum());
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" aggregate="true">
+              <entity name="new_customaccount">
+                <attribute name="new_numberofemployees" alias="sum" aggregate="sum" />
+                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="inner" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_JoinSelectComputedValueSum_Throws()
+    {
+        // Summing the column would drop the + 1.
+        var act = () => (from a in _service.Queryable<CustomAccount>()
+                         join c in _service.Queryable<CustomContact>()
+                             on a.CustomAccountId equals c.ParentAccount.Id
+                         select a.NumberOfEmployees + 1).ToFetchXml(q => q.Sum());
+
+        act.Should().Throw<NotSupportedException>();
+    }
+
+    [Fact]
+    public void ToFetchXml_JoinSelectThenSelect_FoldsToTheColumnsRead()
+    {
+        var fetchXml = (from a in _service.Queryable<CustomAccount>()
+                        join c in _service.Queryable<CustomContact>()
+                            on a.CustomAccountId equals c.ParentAccount.Id
+                        where a.Name != null
+                        select new { a.Name, c.LastName })
+                       .Select(x => x.Name.ToUpper())
+                       .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+                <filter type="and">
+                  <condition attribute="new_name" operator="not-null" />
+                </filter>
+                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="inner" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_SelectOverJoinProjectionAcrossTake_RunsOnTheResults()
+    {
+        var fetchXml = (from a in _service.Queryable<CustomAccount>()
+                        join c in _service.Queryable<CustomContact>()
+                            on a.CustomAccountId equals c.ParentAccount.Id
+                        select new { a.Name, c.LastName })
+                       .Take(5)
+                       .Select(x => x.LastName)
+                       .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" top="5">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="inner">
+                  <attribute name="new_lastname" />
+                </link-entity>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_JoinSelectLinkColumnMax_Throws()
+    {
+        // The joined column isn't a root column; an aggregate without a selector reads the root.
+        var act = () => (from a in _service.Queryable<CustomAccount>()
+                         join c in _service.Queryable<CustomContact>()
+                             on a.CustomAccountId equals c.ParentAccount.Id
+                         select c.LastName).ToFetchXml(q => q.Max());
+
+        act.Should().Throw<NotSupportedException>();
     }
 
     [Fact]

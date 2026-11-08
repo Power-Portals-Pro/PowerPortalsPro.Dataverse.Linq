@@ -14,11 +14,12 @@ namespace PowerPortalsPro.Dataverse.Linq.Expressions;
 internal static class ProjectionExtensions
 {
     /// <summary>
-    /// The root entity as a select on it sees it: the lambda's parameter, and nothing else.
+    /// The root entity as a select on it sees it: the lambda's parameter, and nothing else. The
+    /// parameter must be the root entity's type, not the result of an earlier projection.
     /// </summary>
     internal static MaterializerBuilder.EntityResolver RootEntityResolver(
         ParameterExpression parameter, string logicalName) =>
-        expr => expr == parameter ? (null, parameter.Type, logicalName) : null;
+        expr => expr == parameter ? new MaterializerBuilder.ResolvedEntity(null, parameter.Type, logicalName) : null;
 
     /// <summary>
     /// Extracts the columns a select reads on each entity it reaches, wherever they sit in its
@@ -37,27 +38,14 @@ internal static class ProjectionExtensions
     /// <param name="primaryKeyOf">Resolves an entity's primary key, for <see cref="Entity.Id"/>.</param>
     internal static ProjectedColumns ExtractProjectedColumns(
         this LambdaExpression lambda, MaterializerBuilder.EntityResolver resolveEntity,
-        Func<string, string> primaryKeyOf)
-    {
-        var collector = new ProjectedColumnCollector(resolveEntity, primaryKeyOf);
-        collector.Visit(lambda.Body);
-        return collector.Result;
-    }
-
-    /// <summary>
-    /// Returns <c>true</c> when a select is one attribute read and nothing else
-    /// (<c>a =&gt; a.Name</c>, <c>a =&gt; (decimal?)a.CreditLimit.Value</c>, <c>a =&gt; a["name"]</c>),
-    /// so its value is the column's value.
-    /// </summary>
-    internal static bool IsSingleAttributeRead(
-        this LambdaExpression lambda, MaterializerBuilder.EntityResolver resolveEntity,
         Func<string, string> primaryKeyOf) =>
-        new ProjectedColumnCollector(resolveEntity, primaryKeyOf).TryResolveAttribute(lambda.Body, out _, out _);
+        new ProjectedColumnCollector(resolveEntity, primaryKeyOf).Collect(lambda.Body);
 
     /// <summary>
     /// Requests the columns a select reads: an entity it uses whole gets every column, one it reads
     /// columns of gets those, and one it doesn't touch gets none (the root's rows still come back,
-    /// keyed by their primary key).
+    /// keyed by their primary key). A column already requested, by a projection this one is
+    /// composed on, is not requested twice.
     /// </summary>
     internal static void ApplyProjectedColumns(this FetchXmlQuery query, ProjectedColumns projected)
     {
@@ -75,8 +63,7 @@ internal static class ProjectionExtensions
                 continue;
 
             if (query.Links.FindLinkByAlias(alias) is { } link)
-                foreach (var column in columns)
-                    link.Attributes.Add(new FetchAttribute { Name = column });
+                AddColumns(link.Attributes, columns);
         }
 
         foreach (var alias in projected.WholeEntities)
@@ -96,22 +83,33 @@ internal static class ProjectionExtensions
         MaterializerBuilder.EntityResolver resolveEntity, Func<string, string> primaryKeyOf)
         : ExpressionVisitor
     {
-        public ProjectedColumns Result { get; } = new();
+        private readonly ProjectedColumns _result = new();
+        private Expression? _body;
+
+        public ProjectedColumns Collect(Expression body)
+        {
+            _body = body;
+            Visit(body);
+            return _result;
+        }
 
         public override Expression? Visit(Expression? node)
         {
             if (node is null)
                 return node;
 
-            if (TryResolveAttribute(node, out var alias, out var column))
+            if (TryResolveAttribute(node, out var entity, out var column))
             {
-                Result.Add(alias, column);
+                _result.Add(entity.LinkAlias, column);
+
+                if (node == _body && entity.LinkAlias is null && IsValuePreserving(node))
+                    _result.SingleRootColumn = column;
                 return node;
             }
 
-            if (ResolveEntity(node) is { } entity)
+            if (ResolveEntity(node) is { } whole)
             {
-                Result.WholeEntities.Add(ProjectedColumns.KeyOf(entity.LinkAlias));
+                _result.WholeEntities.Add(ProjectedColumns.KeyOf(whole.LinkAlias));
                 return node;
             }
 
@@ -150,8 +148,7 @@ internal static class ProjectionExtensions
         protected override Expression VisitMethodCall(MethodCallExpression node)
         {
             // A row aggregate the select adds as its own attribute; it reads no column.
-            if (node.Method.Name == nameof(ServiceClientExtensions.CountChildren)
-                && node.Method.DeclaringType == typeof(ServiceClientExtensions))
+            if (node.IsCountChildrenCall())
             {
                 return node;
             }
@@ -164,64 +161,117 @@ internal static class ProjectionExtensions
         /// [AttributeLogicalName] (and its <c>.Id</c> / <c>.Value</c>), <c>GetAttributeValue</c>,
         /// the indexer, or <see cref="Entity.Id"/> as the entity's primary key.
         /// </summary>
-        internal bool TryResolveAttribute(
-            Expression expr, out string? linkAlias, [NotNullWhen(true)] out string? column)
+        private bool TryResolveAttribute(
+            Expression expr, out MaterializerBuilder.ResolvedEntity entity, [NotNullWhen(true)] out string? column)
         {
             expr = Unwrap(expr)!;
 
             if (expr.IsEntityIndexerCall(out column, out var indexed) && ResolveEntity(indexed) is { } indexedEntity)
             {
-                linkAlias = indexedEntity.LinkAlias;
+                entity = indexedEntity;
                 return true;
             }
 
-            if (expr.ResolveAttributeAccess() is { } access && ResolveEntity(access.EntityExpression) is { } accessed)
+            // Entity.Id is the primary key of the entity it's read on, which for an unbound entity
+            // only that entity's resolution names; nothing else needs the key looked up.
+            var owner = expr is MemberExpression { Member.Name: nameof(Entity.Id), Expression: { } idOwner }
+                ? ResolveEntity(idOwner)
+                : null;
+
+            if (expr.ResolveAttributeAccess(owner is null ? null : primaryKeyOf, LogicalNameOf(owner)) is { } access
+                && ResolveEntity(access.EntityExpression) is { } accessed)
             {
-                (linkAlias, column) = (accessed.LinkAlias, access.AttributeName);
+                (entity, column) = (accessed, access.AttributeName);
                 return true;
             }
 
-            if (expr is MemberExpression { Member: PropertyInfo { Name: nameof(Entity.Id) } idProperty, Expression: { } owner }
-                && typeof(Entity).IsAssignableFrom(idProperty.DeclaringType)
-                && ResolveEntity(owner) is { } keyed
-                && PrimaryKeyOf(keyed) is { } primaryKey)
-            {
-                (linkAlias, column) = (keyed.LinkAlias, primaryKey);
-                return true;
-            }
-
-            (linkAlias, column) = (null, null);
+            (entity, column) = (default, null);
             return false;
         }
 
         // A joined row is there when its primary key is; the root's rows always are.
-        private void RequireRow((string? LinkAlias, Type EntityType, string? LogicalName) entity)
+        private void RequireRow(MaterializerBuilder.ResolvedEntity entity)
         {
             if (entity.LinkAlias is null)
                 return;
 
-            if (PrimaryKeyOf(entity) is { } primaryKey)
-                Result.Add(entity.LinkAlias, primaryKey);
+            if (LogicalNameOf(entity) is { } logicalName)
+                _result.Add(entity.LinkAlias, primaryKeyOf(logicalName));
             else
-                Result.WholeEntities.Add(entity.LinkAlias);
+                _result.WholeEntities.Add(entity.LinkAlias);
         }
 
-        private string? PrimaryKeyOf((string? LinkAlias, Type EntityType, string? LogicalName) entity) =>
-            (entity.EntityType.GetCustomAttribute<EntityLogicalNameAttribute>()?.LogicalName ?? entity.LogicalName)
-                is { } logicalName
-                ? primaryKeyOf(logicalName)
+        private static string? LogicalNameOf(MaterializerBuilder.ResolvedEntity? entity) =>
+            entity is { } resolved
+                ? resolved.EntityType.GetCustomAttribute<EntityLogicalNameAttribute>()?.LogicalName ?? resolved.LogicalName
                 : null;
 
-        private (string? LinkAlias, Type EntityType, string? LogicalName)? ResolveEntity(Expression? expr) =>
+        private MaterializerBuilder.ResolvedEntity? ResolveEntity(Expression? expr) =>
             Unwrap(expr) is { } unwrapped ? resolveEntity(unwrapped) : null;
+
+        // A cast that lifts to or from Nullable, boxes or unboxes ((int?)e["count"]), or switches an
+        // enum and its underlying type leaves the column's value as it is. A numeric one doesn't:
+        // narrowing truncates or wraps ((int)a.CreditLimit.Value), and even widening changes how
+        // the value aggregates ((long?)a.Count sums without the int column's overflow).
+        private static bool IsValuePreserving(Expression expr)
+        {
+            while (expr.IsCast(out var convert))
+            {
+                var from = Nullable.GetUnderlyingType(convert.Operand.Type) ?? convert.Operand.Type;
+                var to = Nullable.GetUnderlyingType(convert.Type) ?? convert.Type;
+
+                // "as" gives null for a value of another type (a Money column as decimal?).
+                if (convert.NodeType == ExpressionType.TypeAs && !convert.Type.IsAssignableFrom(convert.Operand.Type))
+                    return false;
+
+                // A conversion method is user code, or decimal's own numeric conversions.
+                if (convert.Method is not null)
+                    return false;
+
+                if (from != to && from.IsValueType && to.IsValueType && UnderlyingOf(from) != UnderlyingOf(to))
+                    return false;
+
+                expr = convert.Operand;
+            }
+
+            return true;
+        }
+
+        private static Type UnderlyingOf(Type type) => type.IsEnum ? Enum.GetUnderlyingType(type) : type;
 
         private static bool IsNull(Expression expr) => Unwrap(expr) is ConstantExpression { Value: null };
 
-        private static Expression? Unwrap(Expression? expr)
+        private static Expression? Unwrap(Expression? expr) => expr?.UnwrapConvert();
+    }
+
+    /// <summary>
+    /// Returns <c>true</c> when the call is <see cref="ServiceClientExtensions.CountChildren"/>.
+    /// </summary>
+    internal static bool IsCountChildrenCall(this MethodCallExpression call) =>
+        call.Method.Name == nameof(ServiceClientExtensions.CountChildren)
+        && call.Method.DeclaringType == typeof(ServiceClientExtensions);
+
+    /// <summary>
+    /// The number of <see cref="ServiceClientExtensions.CountChildren"/> calls anywhere in the
+    /// expression.
+    /// </summary>
+    internal static int CountChildrenCalls(this Expression expr)
+    {
+        var counter = new CountChildrenCounter();
+        counter.Visit(expr);
+        return counter.Count;
+    }
+
+    private sealed class CountChildrenCounter : ExpressionVisitor
+    {
+        public int Count { get; private set; }
+
+        protected override Expression VisitMethodCall(MethodCallExpression node)
         {
-            while (expr is UnaryExpression { NodeType: ExpressionType.Convert or ExpressionType.ConvertChecked or ExpressionType.TypeAs } convert)
-                expr = convert.Operand;
-            return expr;
+            if (node.IsCountChildrenCall())
+                Count++;
+
+            return base.VisitMethodCall(node);
         }
     }
 
@@ -233,12 +283,11 @@ internal static class ProjectionExtensions
         {
             for (var i = 0; i < ne.Arguments.Count; i++)
             {
-                if (ne.Arguments[i] is MethodCallExpression { Method: { Name: nameof(ServiceClientExtensions.CountChildren) } } mc
-                    && mc.Method.DeclaringType == typeof(ServiceClientExtensions))
+                if (ne.Arguments[i] is MethodCallExpression mc
+                    && mc.IsCountChildrenCall())
                 {
                     var member = ne.Members[i];
-                    var memberName = member is MethodInfo { Name: ['g', 'e', 't', '_', ..] } getter
-                        ? getter.Name[4..] : member.Name;
+                    var memberName = member.GetInitializedMemberName();
                     results ??= [];
                     results.Add(new RowAggregateInfo(memberName.ToLowerInvariant()));
                 }
@@ -248,8 +297,8 @@ internal static class ProjectionExtensions
         {
             foreach (var binding in init.Bindings.OfType<MemberAssignment>())
             {
-                if (binding.Expression is MethodCallExpression { Method: { Name: nameof(ServiceClientExtensions.CountChildren) } } mc
-                    && mc.Method.DeclaringType == typeof(ServiceClientExtensions))
+                if (binding.Expression is MethodCallExpression mc
+                    && mc.IsCountChildrenCall())
                 {
                     results ??= [];
                     results.Add(new RowAggregateInfo(binding.Member.Name.ToLowerInvariant()));
@@ -263,8 +312,19 @@ internal static class ProjectionExtensions
     internal static void ApplyColumns(this FetchXmlQuery query, IReadOnlyList<string> columns)
     {
         query.AllAttributes = false;
-        foreach (var col in columns)
-            query.Attributes.Add(new FetchAttribute { Name = col });
+        AddColumns(query.Attributes, columns);
+    }
+
+    // Adds each column not already requested as a plain column (an aliased attribute is an
+    // aggregate, and doesn't count).
+    private static void AddColumns(List<FetchAttribute> attributes, IEnumerable<string> columns)
+    {
+        var requested = new HashSet<string>(attributes.Where(a => a.Alias is null).Select(a => a.Name));
+        foreach (var column in columns)
+        {
+            if (requested.Add(column))
+                attributes.Add(new FetchAttribute { Name = column });
+        }
     }
 }
 
@@ -284,6 +344,13 @@ internal sealed class ProjectedColumns
 
     /// <summary>The entities the select needs whole, which get every column.</summary>
     public HashSet<string> WholeEntities { get; } = [];
+
+    /// <summary>
+    /// The root column the select reads, when that read is the whole select and its value is the
+    /// column's unchanged (<c>a =&gt; a.Name</c>, <c>a =&gt; (int?)a.NumberOfEmployees</c>), so an
+    /// aggregate of the select is an aggregate of the column. Null otherwise.
+    /// </summary>
+    public string? SingleRootColumn { get; set; }
 
     public static string KeyOf(string? linkAlias) => linkAlias ?? Root;
 
@@ -317,12 +384,11 @@ internal sealed class CountChildrenRewriter(ParameterExpression entityParam) : E
 
         for (var i = 0; i < node.Arguments.Count; i++)
         {
-            if (node.Arguments[i] is MethodCallExpression { Method: { Name: nameof(ServiceClientExtensions.CountChildren) } } mc
-                && mc.Method.DeclaringType == typeof(ServiceClientExtensions))
+            if (node.Arguments[i] is MethodCallExpression mc
+                && mc.IsCountChildrenCall())
             {
                 var member = node.Members[i];
-                var memberName = member is MethodInfo { Name: ['g', 'e', 't', '_', ..] } getter
-                    ? getter.Name[4..] : member.Name;
+                var memberName = member.GetInitializedMemberName();
                 var alias = memberName.ToLowerInvariant();
 
                 newArgs[i] = Expression.Call(
@@ -350,8 +416,8 @@ internal sealed class CountChildrenRewriter(ParameterExpression entityParam) : E
         foreach (var binding in node.Bindings)
         {
             if (binding is MemberAssignment assignment
-                && assignment.Expression is MethodCallExpression { Method: { Name: nameof(ServiceClientExtensions.CountChildren) } } mc
-                && mc.Method.DeclaringType == typeof(ServiceClientExtensions))
+                && assignment.Expression is MethodCallExpression mc
+                && mc.IsCountChildrenCall())
             {
                 var alias = assignment.Member.Name.ToLowerInvariant();
                 var extractCall = Expression.Call(

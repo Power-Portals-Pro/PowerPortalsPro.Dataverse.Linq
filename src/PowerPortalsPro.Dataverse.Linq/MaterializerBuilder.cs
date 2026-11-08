@@ -16,12 +16,17 @@ namespace PowerPortalsPro.Dataverse.Linq;
 internal static class MaterializerBuilder
 {
     /// <summary>
-    /// Resolution callback: given an expression that potentially references an entity,
-    /// returns the link alias (null = root), entity CLR type and entity logical name, or null
-    /// if not an entity ref. The logical name resolves <see cref="Entity.Id"/> on unbound
-    /// entities, whose CLR type (<see cref="Entity"/>) carries none.
+    /// An entity of the query that an expression is: the root (<see cref="LinkAlias"/> null) or a
+    /// link entity. The logical name resolves <see cref="Entity.Id"/> on unbound entities, whose CLR
+    /// type (<see cref="Entity"/>) carries none.
     /// </summary>
-    internal delegate (string? LinkAlias, Type EntityType, string? LogicalName)? EntityResolver(Expression expr);
+    internal readonly record struct ResolvedEntity(string? LinkAlias, Type EntityType, string? LogicalName);
+
+    /// <summary>
+    /// Resolution callback: given an expression that potentially references an entity, returns
+    /// the entity it is, or null if it is not one.
+    /// </summary>
+    internal delegate ResolvedEntity? EntityResolver(Expression expr);
 
     /// <summary>
     /// Builds a <see cref="MaterializerInfo"/> for inner-join and left-join selects.
@@ -195,8 +200,10 @@ internal static class MaterializerBuilder
 
         protected override Expression VisitMethodCall(MethodCallExpression node)
         {
-            // Handle Entity.GetAttributeValue<T>(name)
-            if (node.IsGetAttributeValueCall(out var attrName, out var entityExpr)
+            // Handle Entity.GetAttributeValue<T>(name) and the indexer, entity[name]: the column
+            // alone, null when the row doesn't have it
+            if ((node.IsGetAttributeValueCall(out var attrName, out var entityExpr)
+                    || node.IsEntityIndexerCall(out attrName, out entityExpr))
                 && _resolveEntity(entityExpr) is { } res)
             {
                 var resultType = node.Type;

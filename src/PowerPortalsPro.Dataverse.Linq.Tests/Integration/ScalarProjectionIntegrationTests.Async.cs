@@ -130,6 +130,24 @@ public partial class ScalarProjectionIntegrationTests
     }
 
     // -------------------------------------------------------------------------
+    // A select directly on another
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ToListAsync_SelectThenSelect_ReturnsTheSecondProjection()
+    {
+        var expected = (await Service.Queryable<CustomAccount>().Select(a => a.Name).ToListAsync())
+            .Select(n => n.ToUpper());
+
+        var results = await Service.Queryable<CustomAccount>()
+            .Select(a => new { a.Name, a.Website })
+            .Select(x => x.Name.ToUpper())
+            .ToListAsync();
+
+        results.Should().BeEquivalentTo(expected);
+    }
+
+    // -------------------------------------------------------------------------
     // Values computed from attributes
     // -------------------------------------------------------------------------
 
