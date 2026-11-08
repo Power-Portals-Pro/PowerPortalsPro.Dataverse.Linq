@@ -204,6 +204,33 @@ public class SubqueryPlacementFetchXmlTests : FetchXmlTestBase
         fetchXml.Should().Contain("alias=\"c1\" link-type=\"not any\"");
     }
 
+    [Fact]
+    public void ToFetchXml_ExistsInALeftJoin_LeavesTheLeftJoinedEntityItsColumnsAndNullTest()
+    {
+        // The Exists link is the last link added; the left join's c is still the contact.
+        var fetchXml = (from a in Accounts
+                        join c in Contacts on a.CustomAccountId equals c.ParentAccount.Id into contacts
+                        from c in contacts.DefaultIfEmpty()
+                        where Contacts.Exists(p => p.ParentAccount.Id == a.CustomAccountId) && c == null
+                        select new { a.Name, c.LastName }).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+                <filter type="and">
+                  <condition entityname="c" attribute="new_customcontactid" operator="null" />
+                </filter>
+                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="c" link-type="outer">
+                  <attribute name="new_lastname" />
+                </link-entity>
+                <link-entity name="new_customcontact" from="new_parentaccount" to="new_customaccountid" alias="p" link-type="exists" />
+              </entity>
+            </fetch>
+            """);
+    }
+
     // -------------------------------------------------------------------------
     // A later Where is ANDed with an earlier one's ||
     // -------------------------------------------------------------------------

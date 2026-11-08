@@ -150,6 +150,27 @@ public partial class SubqueryAndEqualsIntegrationTests(ServiceClientFixture fixt
     }
 
     [Fact]
+    public void ExistsInALeftJoin_ReadsTheLeftJoinedContacts()
+    {
+        var results = (from a in Accounts
+                       join c in Contacts on a.CustomAccountId equals c.ParentAccount.Id into contacts
+                       from c in contacts.DefaultIfEmpty()
+                       where Contacts.Exists(p => p.ParentAccount.Id == a.CustomAccountId)
+                       select new { a.Name, c.LastName }).ToList();
+
+        results.Should().HaveCount(500);
+        results.Should().AllSatisfy(r => r.LastName.Should().StartWith("Last"));
+    }
+
+    [Fact]
+    public void WhereEqualsOfAnotherNumberType_Throws()
+    {
+        var act = () => Accounts.Where(a => a.NumberOfEmployees.Equals(20L)).ToList();
+
+        act.Should().Throw<NotSupportedException>();
+    }
+
+    [Fact]
     public void AnyOnLeftJoinedEntity_Throws()
     {
         var act = () => (from a in Accounts

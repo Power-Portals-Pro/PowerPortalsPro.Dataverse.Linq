@@ -397,11 +397,11 @@ internal static class FetchXmlQueryTranslator
             // reached for single (non-chained) left joins.
             var resolveEntity = CreateLeftJoinResolver(
                 lambda.Parameters[0], ctx.OuterEntityPath!, ctx.OuterEntityType!,
-                ctx.InnerEntityProperty, ctx.Query.Links[^1].Alias!,
+                ctx.InnerEntityProperty, LeftJoinedLink(ctx).Alias!,
                 ctx.InnerEntityProperty is not null
                     ? lambda.Parameters[0].Type.GetProperty(ctx.InnerEntityProperty)?.PropertyType
                     : null,
-                ctx.Query.EntityLogicalName, ctx.Query.Links[^1].Name);
+                ctx.Query.EntityLogicalName, LeftJoinedLink(ctx).Name);
             ApplyProjection(lambda, resolveEntity, ctx, onJoin: true);
             ctx.Query.Materializer = MaterializerBuilder.BuildJoinMaterializer(
                 lambda, resolveEntity, ctx.PrimaryKeyResolver);
@@ -509,8 +509,18 @@ internal static class FetchXmlQueryTranslator
             ctx.OuterEntityPath = null;
             ctx.OuterEntityType = null;
             ctx.InnerEntityProperty = null;
+            ctx.LeftJoinAlias = null;
         }
     }
+
+    /// <summary>
+    /// The left join a single left join's transparent identifiers name: an Exists after it adds a
+    /// link of its own, so the last link added isn't necessarily it.
+    /// </summary>
+    private static FetchLinkEntity LeftJoinedLink(TranslationContext ctx) =>
+        ctx.LeftJoinAlias is { } alias && ctx.Query.Links.FindLinkByAlias(alias) is { } link
+            ? link
+            : throw new InvalidOperationException("The query has no left join to resolve against.");
 
     /// <summary>
     /// Binds the parameter of each lambda to the entity a join's select kept whole, when there is
@@ -756,7 +766,7 @@ internal static class FetchXmlQueryTranslator
         // ti.c == null is found among the comparisons instead.
         if (!ctx.RowsTransformed && ctx.InnerEntityProperty is not null && lambda.IsNullCheck(ctx.InnerEntityProperty))
         {
-            var link = ctx.Query.Links[^1];
+            var link = LeftJoinedLink(ctx);
             var filter = RootAndFilter(ctx);
             filter.Conditions.Add(new FetchCondition
             {
@@ -1277,7 +1287,7 @@ internal static class FetchXmlQueryTranslator
             || name != ctx.InnerEntityProperty)
             return false;
 
-        var link = ctx.Query.Links[^1];
+        var link = LeftJoinedLink(ctx);
         filter.Conditions.Add(new FetchCondition
         {
             EntityAlias = link.Alias,
@@ -1414,32 +1424,24 @@ internal static class FetchXmlQueryTranslator
     // The joined entity a subquery correlates with, inner-joined all the way from the root.
     private static FetchLinkEntity JoinedLinkOf(string alias, TranslationContext ctx, string operatorName)
     {
-        var path = LinkPath(ctx.Query.Links, alias)
+        var path = ctx.Query.Links.FindLinkPath(alias)
             ?? throw new NotSupportedException($"Could not find the joined entity '{alias}' for {operatorName}().");
 
         // A left join's filter keeps its rows that don't match, and a WithFirstRow join's picks
         // which row is first; neither filters the query's rows, nor does any join under one.
         if (path.FirstOrDefault(link => link.LinkType != "inner") is { } notInner)
             throw new NotSupportedException(
-                $"{operatorName}() on an entity joined through a {(notInner.LinkType == "outer" ? "left join" : "WithFirstRow join")} " +
+                $"{operatorName}() on an entity joined through a {DescribeLinkType(notInner.LinkType)} " +
                 "is not supported; correlate it with the root entity or one inner-joined to it.");
 
         return path[^1];
-    }
 
-    // The links from the root down to the one with the alias, or null when there's none.
-    private static List<FetchLinkEntity>? LinkPath(List<FetchLinkEntity> links, string alias)
-    {
-        foreach (var link in links)
+        static string DescribeLinkType(string? linkType) => linkType switch
         {
-            if (link.Alias == alias)
-                return [link];
-
-            if (LinkPath(link.Links, alias) is { } below)
-                return [link, .. below];
-        }
-
-        return null;
+            "outer" => "left join",
+            "matchfirstrowusingcrossapply" => "WithFirstRow join",
+            _ => $"'{linkType}' link",
+        };
     }
 
     /// <summary>
@@ -1461,9 +1463,10 @@ internal static class FetchXmlQueryTranslator
         // Flatten the AndAlso chain. Only the join condition reads the outer row: the link-entity's
         // filter has only the subquery's own columns, so o.Name == c.LastName would read the
         // opportunity's column of that name.
-        var allConditions = lambda.Body.FlattenAndAlso();
-        var outerConditions = allConditions.Where(c => c.ReferencesParameterOtherThan(innerParam)).ToList();
-        var filterConditions = allConditions.Except(outerConditions).ToList();
+        var outerConditions = new List<Expression>();
+        var filterConditions = new List<Expression>();
+        foreach (var condition in lambda.Body.FlattenAndAlso())
+            (condition.ReferencesParameterOtherThan(innerParam) ? outerConditions : filterConditions).Add(condition);
 
         if (outerConditions.Count > 1)
             throw new NotSupportedException(
@@ -1533,8 +1536,10 @@ internal static class FetchXmlQueryTranslator
     /// Rewrites a call to <c>Equals</c> that compares two values as <c>==</c>:
     /// <c>x.Name.Equals("X")</c>, <c>x["name"].Equals("X")</c>, <c>x.Count.Equals(5)</c>,
     /// <c>Equals(x.Name, "X")</c>, <c>string.Equals(x.Name, "X", StringComparison.OrdinalIgnoreCase)</c>.
-    /// Dataverse compares text without case, as == translates; a comparison that asks for case
-    /// throws. Null when the call isn't one, or its values can't be compared.
+    /// Dataverse compares text without case. Equals without a comparison translates so, as == does,
+    /// though .NET would compare case: the provider's text comparisons all follow Dataverse's. One
+    /// that asks for case by name (StringComparison.Ordinal) throws rather than being ignored.
+    /// Null when the call isn't one, or its values can't be compared.
     /// </summary>
     private static BinaryExpression? TryRewriteEquals(MethodCallExpression call)
     {
@@ -1567,6 +1572,13 @@ internal static class FetchXmlQueryTranslator
         left = Unboxed(left);
         right = Unboxed(right);
 
+        // A boxed value equals only one of its own type: x.NumberOfEmployees.Equals(5L) and an
+        // enum's Equals(1) are always false, where == would convert.
+        var (leftValue, rightValue) = (ValueTypeOf(left.Type), ValueTypeOf(right.Type));
+        if (leftValue is not null && rightValue is not null && leftValue != rightValue)
+            throw new NotSupportedException(
+                $"Equals of a {leftValue.Name} and a {rightValue.Name} is always false; compare values of one type.");
+
         try
         {
             if (left.Type != right.Type)
@@ -1583,6 +1595,9 @@ internal static class FetchXmlQueryTranslator
         {
             return null;
         }
+
+        static Type? ValueTypeOf(Type type) =>
+            Nullable.GetUnderlyingType(type) ?? (type.IsValueType ? type : null);
 
         static Expression Unboxed(Expression expr) =>
             expr is UnaryExpression { NodeType: ExpressionType.Convert, Operand: var operand } && expr.Type == typeof(object)
@@ -1668,7 +1683,7 @@ internal static class FetchXmlQueryTranslator
         // Check if the access is on the inner entity (link entity)
         if (ctx.InnerEntityProperty is not null && entityExpr.IsInnerEntityAccess(ctx.InnerEntityProperty))
         {
-            var linkAlias = ctx.Query.Links[^1].Alias;
+            var linkAlias = LeftJoinedLink(ctx).Alias;
             return new ResolvedAttribute(access.Value.AttributeName, linkAlias);
         }
 
@@ -1960,7 +1975,8 @@ internal static class FetchXmlQueryTranslator
     /// an aggregate query, and the rows' order doesn't change a count, sum or maximum
     /// (<c>OrderBy(a =&gt; a.Name).Count()</c>). A WithFirstRow join's order picks which joined row
     /// each one reads, which an aggregate query can't express, so that throws. An order on an
-    /// aggregate's alias stays.
+    /// aggregate's alias stays. Every column order is the root's, a joined column's by its
+    /// entityname; a link entity's orders are only grouped selects' aliases.
     /// </summary>
     private static void DropOrdersForAggregate(TranslationContext ctx, string operatorName)
     {
@@ -1974,16 +1990,6 @@ internal static class FetchXmlQueryTranslator
         }
 
         ctx.Query.Orders.RemoveAll(order => order.Alias is null);
-        DropColumnOrders(ctx.Query.Links);
-
-        static void DropColumnOrders(List<FetchLinkEntity> links)
-        {
-            foreach (var link in links)
-            {
-                link.Orders.RemoveAll(order => order.Alias is null);
-                DropColumnOrders(link.Links);
-            }
-        }
     }
 
     /// <summary>
@@ -2975,6 +2981,7 @@ internal static class FetchXmlQueryTranslator
         ctx.OuterEntityPath = null;
         ctx.OuterEntityType = null;
         ctx.InnerEntityProperty = null;
+        ctx.LeftJoinAlias = null;
 
         if (!resultLambda.IsTransparentIdentifier())
             HandleJoinSelect(resultLambda, ctx);
@@ -3085,6 +3092,7 @@ internal static class FetchXmlQueryTranslator
             ctx.OuterEntityPath = resultSelector.ReturnType.FindOuterPropertyPath(outerEntityType);
 
             // Identify the inner entity property in the TI for null-check detection.
+            ctx.LeftJoinAlias = ctx.Query.Links[^1].Alias;
             var tiInnerParam = resultSelector.Parameters[1];
             foreach (var prop in resultSelector.ReturnType.GetProperties())
             {
@@ -3380,6 +3388,12 @@ internal static class FetchXmlQueryTranslator
         /// to detect <c>where c == null</c> patterns.
         /// </summary>
         public string? InnerEntityProperty { get; set; }
+
+        /// <summary>
+        /// After a left join: the alias of its link entity, which
+        /// <see cref="InnerEntityProperty"/> names.
+        /// </summary>
+        public string? LeftJoinAlias { get; set; }
 
         /// <summary>
         /// After an inner join with subsequent operators: maps property names on the

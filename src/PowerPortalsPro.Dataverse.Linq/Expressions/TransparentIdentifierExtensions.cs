@@ -87,16 +87,25 @@ internal static class TransparentIdentifierExtensions
     /// <summary>
     /// Recursively searches link entities to find one with the given alias.
     /// </summary>
-    internal static FetchLinkEntity? FindLinkByAlias(this List<FetchLinkEntity> links, string alias)
+    internal static FetchLinkEntity? FindLinkByAlias(this List<FetchLinkEntity> links, string alias) =>
+        links.FindLinkPath(alias)?[^1];
+
+    /// <summary>
+    /// The links from these down to the one with the alias, outermost first, or null when there's
+    /// none.
+    /// </summary>
+    internal static List<FetchLinkEntity>? FindLinkPath(this List<FetchLinkEntity> links, string alias)
     {
         foreach (var link in links)
         {
             if (link.Alias == alias)
-                return link;
+                return [link];
 
-            var nested = link.Links.FindLinkByAlias(alias);
-            if (nested is not null)
-                return nested;
+            if (link.Links.FindLinkPath(alias) is { } below)
+            {
+                below.Insert(0, link);
+                return below;
+            }
         }
 
         return null;

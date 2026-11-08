@@ -121,6 +121,29 @@ public class EqualsFetchXmlTests : FetchXmlTestBase
     }
 
     [Fact]
+    public void ToFetchXml_WhereEqualsOfAnotherNumberType_Throws()
+    {
+        // A boxed long never equals an int?, where == would convert it.
+        var act = () => Accounts.Where(a => a.NumberOfEmployees.Equals(50L)).ToFetchXml();
+
+        act.Should().Throw<NotSupportedException>();
+    }
+
+    [Fact]
+    public void ToFetchXml_WhereEnumEqualsItsNumber_Throws()
+    {
+        var act = () => Accounts.Where(a => a.AccountRating.Equals(1)).ToFetchXml();
+
+        act.Should().Throw<NotSupportedException>();
+    }
+
+    [Fact]
+    public void ToFetchXml_WhereEnumEqualsItsMember_TranslatesAsEqualityOperator() =>
+        ShouldTranslateAlike(
+            Accounts.Where(a => a.AccountRating.Equals(CustomAccount.AccountRating_Enum.Hot)).ToFetchXml(),
+            Accounts.Where(a => a.AccountRating == CustomAccount.AccountRating_Enum.Hot).ToFetchXml());
+
+    [Fact]
     public void ToFetchXml_WhereEqualsOfAnotherType_Throws()
     {
         // An int? never equals a string; there's no condition to give.
