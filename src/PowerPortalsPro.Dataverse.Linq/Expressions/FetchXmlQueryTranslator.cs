@@ -213,7 +213,25 @@ internal static class FetchXmlQueryTranslator
                     case nameof(Queryable.Distinct):
                         TranslateCore(call.Arguments[0], ctx);
                         ThrowIfSelectingResults(ctx, call.Method.Name);
+
+                        // Dataverse removes duplicates and then takes the first rows; LINQ's
+                        // Take(n).Distinct() takes the first rows and removes duplicates among them.
+                        if (ctx.Query.Top is not null)
+                            throw new NotSupportedException(
+                                "Distinct() after Take() is not supported: Dataverse removes duplicates before it " +
+                                "takes the first rows. Put Distinct() before Take().");
+
+                        // Dataverse de-duplicates the columns the select reads; that matches
+                        // de-duplicating its values only when the values hold the columns as they are.
+                        if (ctx.Projection is { PreservesColumns: false })
+                            throw new NotSupportedException(
+                                "Distinct() can't follow a Select that computes its values from columns it doesn't " +
+                                "also return as they are (a.Name.Substring(0, 1)): Dataverse removes duplicate columns, " +
+                                "not duplicate computed values. Take Distinct() of the columns, then compute the values " +
+                                "after AsEnumerable().");
+
                         ctx.Query.Distinct = true;
+                        ctx.DistinctProjection = ctx.Projection;
                         return;
 
                     case nameof(Queryable.Take):
@@ -357,6 +375,12 @@ internal static class FetchXmlQueryTranslator
             return;
         }
 
+        // Distinct before this select de-duplicates the rows, which its narrower columns would
+        // change; the root's primary key keeps them apart below, which a join can't do.
+        if (ctx.Query.Distinct && (ctx.OuterEntityPath is not null || ctx.JoinMappings is not null))
+            throw new NotSupportedException(
+                "A Select after Distinct() on a join is not supported; apply Distinct() after the Select.");
+
         if (ctx.OuterEntityPath is not null)
         {
             // After a single left join — resolve member accesses through transparent identifiers.
@@ -383,6 +407,11 @@ internal static class FetchXmlQueryTranslator
             // Simple select on root entity
             ApplyProjection(lambda, ProjectionExtensions.RootEntityResolver(
                 lambda.Parameters[0], ctx.Query.EntityLogicalName), ctx);
+
+            // After Distinct(), every entity is a distinct row; its primary key keeps the rows apart
+            // when this select reads fewer columns (Distinct().Select(a => a.Name) gives every name).
+            if (ctx.Query.Distinct && !ctx.Query.AllAttributes)
+                ctx.Query.ApplyColumns([ctx.PrimaryKeyOf(ctx.Query.EntityLogicalName)]);
 
             // Indexer reads give null for a column the row doesn't have, as they do through a join.
             lambda = Expression.Lambda(lambda.Type, lambda.Body.ReadIndexerAsAttributeValue(), lambda.Parameters);
@@ -577,6 +606,17 @@ internal static class FetchXmlQueryTranslator
             throw new NotSupportedException(
                 $"'{operatorName}' can't follow a Select that runs on an earlier Select's results, " +
                 "whose values Dataverse doesn't have. Apply it before those selects, or after AsEnumerable().");
+    }
+
+    /// <summary>
+    /// Throws when a join follows <c>Distinct()</c>: the join's columns would replace the ones
+    /// <c>Distinct()</c> de-duplicated, merging rows LINQ keeps apart.
+    /// </summary>
+    private static void ThrowIfDistinctBeforeJoin(TranslationContext ctx, string operatorName)
+    {
+        if (ctx.Query.Distinct)
+            throw new NotSupportedException(
+                $"'{operatorName}' after Distinct() is not supported; apply Distinct() after the join.");
     }
 
     private static void HandleWhere(MethodCallExpression call, TranslationContext ctx)
@@ -1509,6 +1549,21 @@ internal static class FetchXmlQueryTranslator
         TranslateCore(call.Arguments[0], ctx);
         ThrowIfSelectingResults(ctx, methodName);
 
+        // A count of a select's distinct values counts the distinct rows Dataverse returns: it can
+        // count one column's distinct values, but not several, and it leaves nulls out where LINQ
+        // counts null as a value.
+        if (isCount && ctx.Query.Distinct && ctx.Projection is not null
+            && ReferenceEquals(ctx.DistinctProjection, ctx.Projection))
+        {
+            if (call.Arguments.Count == 2)
+                throw new NotSupportedException(
+                    $"'{methodName}' with a predicate after Distinct() is not supported; filter with Where before the Select.");
+
+            ctx.Query.CountRows = true;
+            ctx.Query.Materializer = null;
+            return;
+        }
+
         if (isCount)
         {
             // Count(predicate) — apply as Where filter
@@ -2432,6 +2487,7 @@ internal static class FetchXmlQueryTranslator
         // the prior Join and populates JoinMappings before we handle this one.
         TranslateCore(call.Arguments[0], ctx);
         ThrowIfSelectingResults(ctx, call.Method.Name);
+        ThrowIfDistinctBeforeJoin(ctx, call.Method.Name);
 
         var (innerLogicalName, innerEntityType) = call.Arguments[1].GetSourceInfoFromType();
         var resultLambda = call.Arguments[4].ExtractLambda();
@@ -2579,6 +2635,7 @@ internal static class FetchXmlQueryTranslator
         {
             TranslateCore(outerSource, ctx);
             ThrowIfSelectingResults(ctx, call.Method.Name);
+            ThrowIfDistinctBeforeJoin(ctx, call.Method.Name);
             var (innerLogicalName2, innerEntityType2) = groupJoinCall.Arguments[1].GetSourceInfoFromType();
             var resultSelector2 = call.Arguments[2].ExtractLambda();
             HandleChainedJoin(
@@ -2865,6 +2922,12 @@ internal static class FetchXmlQueryTranslator
         /// such select has run.
         /// </summary>
         public ProjectedColumns? Projection { get; set; }
+
+        /// <summary>
+        /// The projection <c>Distinct()</c> was applied to: a count of distinct values counts its
+        /// rows only when it's still the last one.
+        /// </summary>
+        public ProjectedColumns? DistinctProjection { get; set; }
 
         /// <summary>
         /// Set once a select has run on an earlier projection's results (see

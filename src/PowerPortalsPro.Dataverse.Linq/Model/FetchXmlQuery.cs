@@ -43,6 +43,12 @@ internal sealed class FetchXmlQuery
     public int? Page { get; set; }
     public bool Distinct { get; set; }
     public bool Aggregate { get; set; }
+
+    /// <summary>
+    /// The query's result is the number of rows it returns, for a count of a select's distinct
+    /// values; the query itself isn't an aggregate.
+    /// </summary>
+    public bool CountRows { get; set; }
     public bool ReturnTotalRecordCount { get; set; }
     public Action<RecordCountArguments>? OnRecordCount { get; set; }
     public Func<RecordCountArguments, Task>? OnRecordCountAsync { get; set; }

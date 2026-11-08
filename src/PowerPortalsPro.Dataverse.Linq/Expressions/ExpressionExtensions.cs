@@ -383,7 +383,7 @@ internal static class ExpressionExtensions
         new AnonymousMemberReducer().Visit(expr);
 
     // The compiler's anonymous types: generated, and named for it (<>f__AnonymousType0, VB$AnonymousType_0).
-    private static bool IsAnonymousType(this Type type) =>
+    internal static bool IsAnonymousType(this Type type) =>
         type.IsDefined(typeof(System.Runtime.CompilerServices.CompilerGeneratedAttribute), inherit: false)
         && type.Name.Contains("AnonymousType");
 

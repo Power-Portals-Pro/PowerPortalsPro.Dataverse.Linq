@@ -345,6 +345,31 @@ public class JoinProjectionFetchXmlTests : FetchXmlTestBase
     }
 
     [Fact]
+    public void ToFetchXml_LeftJoinDistinctOverANullTest_Throws()
+    {
+        // The contact's key is read but not returned, so an account with several contacts would
+        // give the same result once per contact.
+        var act = () => (from a in _service.Queryable<CustomAccount>()
+                         join c in _service.Queryable<CustomContact>()
+                             on a.CustomAccountId equals c.ParentAccount.Id into contacts
+                         from c in contacts.DefaultIfEmpty()
+                         select new { a.Name, HasContact = c != null }).Distinct().ToFetchXml();
+
+        act.Should().Throw<NotSupportedException>();
+    }
+
+    [Fact]
+    public void ToFetchXml_JoinDistinctOverAComputedValue_Throws()
+    {
+        var act = () => (from a in _service.Queryable<CustomAccount>()
+                         join c in _service.Queryable<CustomContact>()
+                             on a.CustomAccountId equals c.ParentAccount.Id
+                         select c.FirstName + " " + c.LastName).Distinct().ToFetchXml();
+
+        act.Should().Throw<NotSupportedException>();
+    }
+
+    [Fact]
     public void ToFetchXml_SelectOverJoinProjectionAcrossTake_RunsOnTheResults()
     {
         var fetchXml = (from a in _service.Queryable<CustomAccount>()

@@ -95,6 +95,40 @@ public partial class JoinProjectionIntegrationTests(ServiceClientFixture fixture
     }
 
     [Fact]
+    public void JoinSelectLinkColumn_DistinctCount_CountsTheValues()
+    {
+        var count = (from a in Service.Queryable<CustomAccount>()
+                     join c in Service.Queryable<CustomContact>()
+                         on a.CustomAccountId equals c.ParentAccount.Id
+                     select c.LastName).Distinct().Count();
+
+        count.Should().Be(5);
+    }
+
+    [Fact]
+    public void LeftJoinDistinctOverANullTest_Throws()
+    {
+        var act = () => (from a in Service.Queryable<CustomAccount>()
+                         join c in Service.Queryable<CustomContact>()
+                             on a.CustomAccountId equals c.ParentAccount.Id into contacts
+                         from c in contacts.DefaultIfEmpty()
+                         select new { a.Name, HasContact = c != null }).Distinct().ToList();
+
+        act.Should().Throw<NotSupportedException>();
+    }
+
+    [Fact]
+    public void JoinDistinctOverAComputedValue_Throws()
+    {
+        var act = () => (from a in Service.Queryable<CustomAccount>()
+                         join c in Service.Queryable<CustomContact>()
+                             on a.CustomAccountId equals c.ParentAccount.Id
+                         select c.FirstName + " " + c.LastName).Distinct().ToList();
+
+        act.Should().Throw<NotSupportedException>();
+    }
+
+    [Fact]
     public void SelectOverJoinProjectionAcrossTake_RunsOnTheResults()
     {
         var results = (from a in Service.Queryable<CustomAccount>()

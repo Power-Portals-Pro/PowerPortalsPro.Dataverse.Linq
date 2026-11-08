@@ -61,6 +61,17 @@ public partial class ScalarProjectionIntegrationTests
         results.Should().BeEquivalentTo(expected);
     }
 
+    [Fact]
+    public async Task CountAsync_SelectDistinct_CountsTheValues()
+    {
+        var count = await Service.Queryable("new_customcontact")
+            .Select(c => c.GetAttributeValue<string>("new_lastname"))
+            .Distinct()
+            .CountAsync();
+
+        count.Should().Be(5);
+    }
+
     // -------------------------------------------------------------------------
     // Entity.Id as the whole projection
     // -------------------------------------------------------------------------

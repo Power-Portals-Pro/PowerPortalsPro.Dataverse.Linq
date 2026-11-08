@@ -589,6 +589,131 @@ public partial class ScalarProjectionIntegrationTests(ServiceClientFixture fixtu
     }
 
     [Fact]
+    public void DistinctOverAComputedValue_Throws()
+    {
+        var act = () => Service.Queryable<CustomContact>()
+            .Select(c => c.FirstName.Substring(0, 6))
+            .Distinct()
+            .ToList();
+
+        act.Should().Throw<NotSupportedException>();
+    }
+
+    [Fact]
+    public void DistinctOverAComputedValueBesideItsColumn_ReturnsEachValueOnce()
+    {
+        var results = Service.Queryable<CustomContact>()
+            .Select(c => new { c.LastName, Initial = c.LastName.Substring(0, 1) })
+            .Distinct()
+            .ToList();
+
+        results.Select(r => r.LastName).Should().BeEquivalentTo(LastNames);
+        results.Should().AllSatisfy(r => r.Initial.Should().Be("L"));
+    }
+
+    [Fact]
+    public void DistinctThenSelect_ReturnsEveryEntitysValue()
+    {
+        // Every contact is a distinct row, so each of the 500 last names comes back.
+        var results = Service.Queryable<CustomContact>()
+            .Distinct()
+            .Select(c => c.LastName)
+            .ToList();
+
+        results.Should().HaveCount(500);
+    }
+
+    [Fact]
+    public void DistinctThenSelect_Count_CountsTheEntities()
+    {
+        var count = Service.Queryable<CustomContact>()
+            .Distinct()
+            .Select(c => c.LastName)
+            .Count();
+
+        count.Should().Be(500);
+    }
+
+    [Fact]
+    public void SelectDistinct_CountWithPredicate_Throws()
+    {
+        var act = () => Service.Queryable<CustomContact>()
+            .Select(c => c.LastName)
+            .Distinct()
+            .Count(n => n != null);
+
+        act.Should().Throw<NotSupportedException>();
+    }
+
+    [Fact]
+    public void DistinctOverANarrowingCast_Throws()
+    {
+        var act = () => Service.Queryable<CustomAccount>()
+            .Select(a => (int)a.CreditLimitMoney.Value)
+            .Distinct()
+            .ToList();
+
+        act.Should().Throw<NotSupportedException>();
+    }
+
+    [Fact]
+    public void DistinctOverAWholeEntity_ReturnsEachEntity()
+    {
+        var results = Service.Queryable<CustomAccount>()
+            .Select(a => new { Account = a })
+            .Distinct()
+            .ToList();
+
+        results.Should().HaveCount(150);
+        results.Select(r => r.Account.Id).Should().OnlyHaveUniqueItems();
+    }
+
+    [Fact]
+    public void DistinctOverAConstant_Throws()
+    {
+        var act = () => Service.Queryable<CustomAccount>()
+            .Select(a => 1)
+            .Distinct()
+            .ToList();
+
+        act.Should().Throw<NotSupportedException>();
+    }
+
+    [Fact]
+    public void DistinctAfterTake_Throws()
+    {
+        var act = () => Service.Queryable<CustomContact>()
+            .Select(c => c.LastName)
+            .Take(10)
+            .Distinct()
+            .ToList();
+
+        act.Should().Throw<NotSupportedException>();
+    }
+
+    [Fact]
+    public void SelectDistinct_Count_CountsTheValues()
+    {
+        var count = Service.Queryable<CustomContact>()
+            .Select(c => c.LastName)
+            .Distinct()
+            .Count();
+
+        count.Should().Be(5);
+    }
+
+    [Fact]
+    public void SelectDistinct_LongCount_CountsTheValues()
+    {
+        var count = Service.Queryable<CustomContact>()
+            .Select(c => c.LastName)
+            .Distinct()
+            .LongCount();
+
+        count.Should().Be(5L);
+    }
+
+    [Fact]
     public void IndexedSelect_Throws()
     {
         var act = () => Service.Queryable<CustomAccount>()

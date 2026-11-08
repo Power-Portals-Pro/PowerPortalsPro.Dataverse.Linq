@@ -84,12 +84,25 @@ internal static class ProjectionExtensions
         : ExpressionVisitor
     {
         private readonly ProjectedColumns _result = new();
+        private readonly ProjectedColumns _unchanged = new();
         private Expression? _body;
+
+        // Whether the node being visited is reached from the body through nothing but anonymous
+        // types, member-init bindings, array initializers and casts that keep the value: it's then
+        // in the result as it is. A constructor (new Initial(a.Name)) may change what it's given.
+        private bool _inResult = true;
 
         public ProjectedColumns Collect(Expression body)
         {
             _body = body;
             Visit(body);
+
+            // Every column read is also in the result unchanged, and so is every entity used whole.
+            // A select that reads no column (a constant) gets one row per record from Dataverse.
+            _result.PreservesColumns = (_result.Columns.Count > 0 || _result.WholeEntities.Count > 0)
+                && _result.WholeEntities.All(_unchanged.WholeEntities.Contains)
+                && _result.Columns.All(entry => _result.WholeEntities.Contains(entry.Key)
+                    || _unchanged.Columns.TryGetValue(entry.Key, out var unchanged) && entry.Value.All(unchanged.Contains));
             return _result;
         }
 
@@ -101,6 +114,8 @@ internal static class ProjectionExtensions
             if (TryResolveAttribute(node, out var entity, out var column))
             {
                 _result.Add(entity.LinkAlias, column);
+                if (_inResult && IsValuePreserving(node))
+                    _unchanged.Add(entity.LinkAlias, column);
 
                 if (node == _body && entity.LinkAlias is null && IsValuePreserving(node))
                     _result.SingleRootColumn = column;
@@ -110,10 +125,24 @@ internal static class ProjectionExtensions
             if (ResolveEntity(node) is { } whole)
             {
                 _result.WholeEntities.Add(ProjectedColumns.KeyOf(whole.LinkAlias));
+                if (_inResult && IsValuePreserving(node))
+                    _unchanged.WholeEntities.Add(ProjectedColumns.KeyOf(whole.LinkAlias));
                 return node;
             }
 
-            return base.Visit(node);
+            var inResult = _inResult;
+            _inResult = inResult && (node is NewExpression { Type: var type } && type.IsAnonymousType()
+                || node is MemberInitExpression
+                || node is NewArrayExpression { NodeType: ExpressionType.NewArrayInit }
+                || node.IsCast(out _) && IsValuePreserving(node));
+            try
+            {
+                return base.Visit(node);
+            }
+            finally
+            {
+                _inResult = inResult;
+            }
         }
 
         protected override Expression VisitMember(MemberExpression node)
@@ -344,6 +373,14 @@ internal sealed class ProjectedColumns
 
     /// <summary>The entities the select needs whole, which get every column.</summary>
     public HashSet<string> WholeEntities { get; } = [];
+
+    /// <summary>
+    /// <c>true</c> when every column the select reads is also in its result unchanged, and so is
+    /// every entity it uses whole: two rows whose columns differ then give different results, so
+    /// Dataverse de-duplicating the columns de-duplicates the results. A value computed from a
+    /// column the result doesn't also hold (<c>a.Name.Substring(0, 1)</c> alone) breaks that.
+    /// </summary>
+    public bool PreservesColumns { get; set; }
 
     /// <summary>
     /// The root column the select reads, when that read is the whole select and its value is the

@@ -1053,6 +1053,181 @@ public class ScalarProjectionFetchXmlTests : FetchXmlTestBase
         act.Should().Throw<NotSupportedException>();
     }
 
+    // -------------------------------------------------------------------------
+    // Distinct over a select's values
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_DistinctOverAComputedValue_Throws()
+    {
+        // Dataverse would de-duplicate the names, not their initials.
+        var act = () => _service.Queryable<CustomAccount>()
+            .Select(a => a.Name.Substring(0, 1))
+            .Distinct()
+            .ToFetchXml();
+
+        act.Should().Throw<NotSupportedException>();
+    }
+
+    [Fact]
+    public void ToFetchXml_DistinctOverAComputedValueBesideItsColumn_Translates()
+    {
+        // The name is in the result too, so distinct names are distinct results.
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Select(a => new { a.Name, Initial = a.Name.Substring(0, 1) })
+            .Distinct()
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" distinct="true">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_DistinctOverANarrowingCast_Throws()
+    {
+        var act = () => _service.Queryable<CustomAccount>()
+            .Select(a => (int)a.CreditLimitMoney.Value)
+            .Distinct()
+            .ToFetchXml();
+
+        act.Should().Throw<NotSupportedException>();
+    }
+
+    [Fact]
+    public void ToFetchXml_DistinctOverAWholeEntity_Translates()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Select(a => new { Account = a })
+            .Distinct()
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" distinct="true">
+              <entity name="new_customaccount">
+                <all-attributes />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_SelectDistinctCount_CountsTheDistinctRows()
+    {
+        // Counted from the distinct rows returned, not as a count of every row.
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .ToFetchXml(q => q.Select(a => a.Name).Distinct().Count());
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" distinct="true">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_DistinctThenSelect_KeepsEachEntitysRow()
+    {
+        // Every entity is a distinct row; its key keeps two accounts with one name apart.
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Distinct()
+            .Select(a => a.Name)
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" distinct="true">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+                <attribute name="new_customaccountid" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_DistinctThenSelectCount_CountsTheEntities()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .ToFetchXml(q => q.Distinct().Select(a => a.Name).Count());
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" distinct="true" aggregate="true">
+              <entity name="new_customaccount">
+                <attribute name="new_customaccountid" alias="count" aggregate="count" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_DistinctOverAConstant_Throws()
+    {
+        // Dataverse would return one row per account, not the one value.
+        var act = () => _service.Queryable<CustomAccount>()
+            .Select(a => 1)
+            .Distinct()
+            .ToFetchXml();
+
+        act.Should().Throw<NotSupportedException>();
+    }
+
+    [Fact]
+    public void ToFetchXml_DistinctOverAConstructedClass_Throws()
+    {
+        // A constructor may change what it's given, so its object isn't known to hold the column.
+        var act = () => _service.Queryable<CustomAccount>()
+            .Select(a => new Stamp(a.Name))
+            .Distinct()
+            .ToFetchXml();
+
+        act.Should().Throw<NotSupportedException>();
+    }
+
+    [Fact]
+    public void ToFetchXml_DistinctAfterTake_Throws()
+    {
+        // Dataverse removes duplicates before it takes the first rows.
+        var act = () => _service.Queryable<CustomAccount>()
+            .Select(a => a.Name)
+            .Take(10)
+            .Distinct()
+            .ToFetchXml();
+
+        act.Should().Throw<NotSupportedException>();
+    }
+
+    [Fact]
+    public void ToFetchXml_DistinctThenJoin_Throws()
+    {
+        var act = () => _service.Queryable<CustomAccount>()
+            .Distinct()
+            .Join(_service.Queryable<CustomContact>(), a => a.CustomAccountId, c => c.ParentAccount.Id,
+                (a, c) => new { a.Name, c.LastName })
+            .ToFetchXml();
+
+        act.Should().Throw<NotSupportedException>();
+    }
+
+    [Fact]
+    public void ToFetchXml_SelectDistinctCountWithPredicate_Throws()
+    {
+        var act = () => _service.Queryable<CustomAccount>()
+            .ToFetchXml(q => q.Select(a => a.Name).Distinct().Count(n => n != null));
+
+        act.Should().Throw<NotSupportedException>();
+    }
+
     [Fact]
     public void ToFetchXml_IndexedSelect_Throws()
     {
