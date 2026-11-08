@@ -661,6 +661,28 @@ public class ScalarProjectionFetchXmlTests : FetchXmlTestBase
         act.Should().Throw<NotSupportedException>();
     }
 
+    // Each would group or test the Name the last select made, which Dataverse doesn't have.
+    public static TheoryData<string, Func<IQueryable<CustomAccount>, string>> OperatorsAfterASelectOnResults => new()
+    {
+        { "GroupBy", q => q.GroupBy(x => x.Name).Select(g => new { g.Key, Count = g.Count() }).ToFetchXml() },
+        { "FirstOrDefault with a predicate", q => q.ToFetchXml(r => r.FirstOrDefault(x => x.Name == "X")) },
+        { "Count with a predicate", q => q.ToFetchXml(r => r.Count(x => x.Name == "X")) },
+    };
+
+    [Theory]
+    [MemberData(nameof(OperatorsAfterASelectOnResults))]
+    public void ToFetchXml_OperatorAfterASelectOnResults_Throws(string operation, Func<IQueryable<CustomAccount>, string> query)
+    {
+        var onResults = _service.Queryable<CustomAccount>()
+            .Select(a => a.Website)
+            .Take(5)
+            .Select(w => new CustomAccount { Name = w.ToUpper() });
+
+        var act = () => query(onResults);
+
+        act.Should().Throw<NotSupportedException>(operation).WithMessage("*runs on an earlier Select's results*");
+    }
+
     [Fact]
     public void ToFetchXml_WhereAfterASelectOnResults_Throws()
     {
@@ -1216,7 +1238,7 @@ public class ScalarProjectionFetchXmlTests : FetchXmlTestBase
                 (a, c) => new { a.Name, c.LastName })
             .ToFetchXml();
 
-        act.Should().Throw<NotSupportedException>();
+        act.Should().Throw<NotSupportedException>().WithMessage("*'Join' after Distinct()*");
     }
 
     [Fact]

@@ -200,7 +200,7 @@ public class OperatorAfterSelectFetchXmlTests : FetchXmlTestBase
             .Where(x => x.Name == x.Upper)
             .ToFetchXml();
 
-        act.Should().Throw<NotSupportedException>();
+        act.Should().Throw<NotSupportedException>().WithMessage("*comparison*");
     }
 
     // -------------------------------------------------------------------------
@@ -282,7 +282,7 @@ public class OperatorAfterSelectFetchXmlTests : FetchXmlTestBase
     {
         var act = () => query(Accounts).ToFetchXml();
 
-        act.Should().Throw<NotSupportedException>(cast);
+        act.Should().Throw<NotSupportedException>(cast).WithMessage("*comparison*");
     }
 
     [Fact]
@@ -565,7 +565,7 @@ public class OperatorAfterSelectFetchXmlTests : FetchXmlTestBase
             .OrderBy(x => x.Key)
             .ToFetchXml();
 
-        act.Should().Throw<NotSupportedException>();
+        act.Should().Throw<NotSupportedException>().WithMessage("*can't follow a Select on groups*");
     }
 
     [Fact]
@@ -601,7 +601,7 @@ public class OperatorAfterSelectFetchXmlTests : FetchXmlTestBase
             .Join(Contacts, x => x.CustomAccountId, c => c.ParentAccount.Id, (x, c) => new { x.Name, c.LastName })
             .ToFetchXml();
 
-        act.Should().Throw<NotSupportedException>();
+        act.Should().Throw<NotSupportedException>().WithMessage("*'Join' can't follow a Select that makes new values*");
     }
 
     // -------------------------------------------------------------------------

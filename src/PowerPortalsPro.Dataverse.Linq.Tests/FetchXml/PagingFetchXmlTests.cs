@@ -295,7 +295,7 @@ public class PagingFetchXmlTests : FetchXmlTestBase
 
         var act = () => query(accounts.Take(5), accounts);
 
-        act.Should().Throw<NotSupportedException>(operation);
+        act.Should().Throw<NotSupportedException>(operation).WithMessage("*after Take()*");
     }
 
     // -------------------------------------------------------------------------

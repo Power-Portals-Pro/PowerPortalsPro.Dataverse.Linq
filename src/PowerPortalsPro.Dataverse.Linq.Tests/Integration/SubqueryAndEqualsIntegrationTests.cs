@@ -218,42 +218,6 @@ public partial class SubqueryAndEqualsIntegrationTests(ServiceClientFixture fixt
     }
 
     [Fact]
-    public void AnyOnJoinedEntityUnderOr_Throws()
-    {
-        var act = () => (from a in Accounts
-                         join c in Contacts on a.CustomAccountId equals c.ParentAccount.Id
-                         where a.Name == "Custom Account 001" || Opportunities.Any(o => o.Contact.Id == c.CustomContactId)
-                         select a.Name).ToList();
-
-        act.Should().Throw<NotSupportedException>().WithMessage("*can only be combined with &&*");
-    }
-
-    [Fact]
-    public void AnyOnEntityJoinedThroughALeftJoin_Throws()
-    {
-        var act = () => (from a in Accounts
-                         join c in Contacts on a.CustomAccountId equals c.ParentAccount.Id into contacts
-                         from c in contacts.DefaultIfEmpty()
-                         join o in Opportunities on c.CustomContactId equals o.Contact.Id
-                         where Contacts.Any(p => p.CustomContactId == o.Contact.Id)
-                         select a.Name).ToList();
-
-        act.Should().Throw<NotSupportedException>().WithMessage("*joined through a left join*");
-    }
-
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public void AnyReadingTheOuterRowOutsideItsJoinCondition_Throws(bool joinConditionFirst)
-    {
-        var act = joinConditionFirst
-            ? () => Contacts.Where(c => Opportunities.Any(o => o.Contact.Id == c.CustomContactId && o.Name == c.LastName)).ToList()
-            : (Func<List<CustomContact>>)(() => Contacts.Where(c => Opportunities.Any(o => o.Name == c.LastName && o.Contact.Id == c.CustomContactId)).ToList());
-
-        act.Should().Throw<NotSupportedException>().WithMessage("*only in its join condition*");
-    }
-
-    [Fact]
     public void AnyOnLeftJoinedEntity_Throws()
     {
         var act = () => (from a in Accounts
@@ -287,19 +251,6 @@ public partial class SubqueryAndEqualsIntegrationTests(ServiceClientFixture fixt
                       select a.NumberOfEmployees).Sum();
 
         result.Should().Be(expected).And.BeGreaterThan(0);
-    }
-
-    [Fact]
-    public void GroupByAfterOrderBy_Throws()
-    {
-        // LINQ returns the groups in the order their keys first appear, which the OrderBy sets.
-        var act = () => Accounts
-            .OrderBy(a => a.Name)
-            .GroupBy(a => a.AccountRating)
-            .Select(g => new { g.Key, Count = g.Count() })
-            .ToList();
-
-        act.Should().Throw<NotSupportedException>().WithMessage("*'GroupBy' after OrderBy*");
     }
 
     [Fact]

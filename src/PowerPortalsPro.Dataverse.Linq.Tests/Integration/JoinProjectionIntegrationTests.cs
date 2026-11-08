@@ -24,32 +24,6 @@ public partial class JoinProjectionIntegrationTests(ServiceClientFixture fixture
     private static readonly string[] LastNames = ["Last1", "Last2", "Last3", "Last4", "Last5"];
 
     [Fact]
-    public void JoinAfterDistinct_Throws()
-    {
-        // The join's columns would replace the ones Distinct() de-duplicated.
-        var act = () => Service.Queryable<CustomAccount>()
-            .Distinct()
-            .Join(Service.Queryable<CustomContact>(), a => a.CustomAccountId, c => c.ParentAccount.Id,
-                (a, c) => new { a.Name, c.LastName })
-            .ToList();
-
-        act.Should().Throw<NotSupportedException>().WithMessage("*'Join' after Distinct()*");
-    }
-
-    [Fact]
-    public void SelectAfterDistinctOnAJoin_Throws()
-    {
-        var act = () => Service.Queryable<CustomAccount>()
-            .Join(Service.Queryable<CustomContact>(), a => a.CustomAccountId, c => c.ParentAccount.Id,
-                (a, c) => new { a, c })
-            .Distinct()
-            .Select(x => x.a.Name)
-            .ToList();
-
-        act.Should().Throw<NotSupportedException>().WithMessage("*Select after Distinct() on a join*");
-    }
-
-    [Fact]
     public void JoinSelectLinkColumn_Distinct_ReturnsEachValueOnce()
     {
         var results = (from a in Service.Queryable<CustomAccount>()

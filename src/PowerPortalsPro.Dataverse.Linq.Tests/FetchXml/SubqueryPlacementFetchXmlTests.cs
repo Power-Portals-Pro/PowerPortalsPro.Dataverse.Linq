@@ -115,7 +115,7 @@ public class SubqueryPlacementFetchXmlTests : FetchXmlTestBase
                          where a.Name == "X" || Opportunities.Any(o => o.Contact.Id == c.CustomContactId)
                          select a.Name).ToFetchXml();
 
-        act.Should().Throw<NotSupportedException>();
+        act.Should().Throw<NotSupportedException>().WithMessage("*can only be combined with &&*");
     }
 
     [Fact]
@@ -128,7 +128,7 @@ public class SubqueryPlacementFetchXmlTests : FetchXmlTestBase
                          where Opportunities.Any(o => o.Contact.Id == c.CustomContactId)
                          select a.Name).ToFetchXml();
 
-        act.Should().Throw<NotSupportedException>();
+        act.Should().Throw<NotSupportedException>().WithMessage("*joined through a left join*");
     }
 
     [Fact]
@@ -139,7 +139,7 @@ public class SubqueryPlacementFetchXmlTests : FetchXmlTestBase
             .Where(c => Opportunities.Any(o => o.Contact.Id == c.CustomContactId && o.Name == c.LastName))
             .ToFetchXml();
 
-        act.Should().Throw<NotSupportedException>();
+        act.Should().Throw<NotSupportedException>().WithMessage("*only in its join condition*");
     }
 
     [Fact]
@@ -153,7 +153,7 @@ public class SubqueryPlacementFetchXmlTests : FetchXmlTestBase
                          where Contacts.Any(p => p.CustomContactId == o.Contact.Id)
                          select a.Name).ToFetchXml();
 
-        act.Should().Throw<NotSupportedException>();
+        act.Should().Throw<NotSupportedException>().WithMessage("*joined through a left join*");
     }
 
     [Fact]
@@ -164,7 +164,7 @@ public class SubqueryPlacementFetchXmlTests : FetchXmlTestBase
             .Where(c => Opportunities.Any(o => o.Name == c.LastName && o.Contact.Id == c.CustomContactId))
             .ToFetchXml();
 
-        act.Should().Throw<NotSupportedException>();
+        act.Should().Throw<NotSupportedException>().WithMessage("*only in its join condition*");
     }
 
     [Fact]

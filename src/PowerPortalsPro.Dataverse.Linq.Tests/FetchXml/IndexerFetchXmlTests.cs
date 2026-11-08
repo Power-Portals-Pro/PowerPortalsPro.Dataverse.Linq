@@ -236,7 +236,7 @@ public class IndexerFetchXmlTests : FetchXmlTestBase
                          join c in Contacts on a.Id equals ((EntityReference)other["parentcustomerid"]).Id
                          select new { Name = (string)a["name"] }).ToFetchXml();
 
-        act.Should().Throw<NotSupportedException>();
+        act.Should().Throw<NotSupportedException>().WithMessage("*join key*");
     }
 
     // -------------------------------------------------------------------------

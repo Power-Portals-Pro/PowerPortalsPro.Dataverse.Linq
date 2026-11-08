@@ -239,29 +239,6 @@ public partial class ScalarProjectionIntegrationTests(ServiceClientFixture fixtu
         act.Should().Throw<NotSupportedException>();
     }
 
-    // Each operator would test or group the Name the last select made, which Dataverse doesn't have.
-    public static TheoryData<string, Func<IQueryable<CustomAccount>, object?>> OperatorsAfterASelectOnResults => new()
-    {
-        { "Where", q => q.Where(x => x.Name == "HTTPS://ACCOUNT001.EXAMPLE.COM").ToList() },
-        { "GroupBy", q => q.GroupBy(x => x.Name).Select(g => new { g.Key, Count = g.Count() }).ToList() },
-        { "FirstOrDefault with a predicate", q => q.FirstOrDefault(x => x.Name == "HTTPS://ACCOUNT001.EXAMPLE.COM") },
-        { "Count with a predicate", q => q.Count(x => x.Name == "HTTPS://ACCOUNT001.EXAMPLE.COM") },
-    };
-
-    [Theory]
-    [MemberData(nameof(OperatorsAfterASelectOnResults))]
-    public void OperatorAfterASelectOnResults_Throws(string operation, Func<IQueryable<CustomAccount>, object?> query)
-    {
-        var onResults = Service.Queryable<CustomAccount>()
-            .Select(a => a.Website)
-            .Take(5)
-            .Select(w => new CustomAccount { Name = w.ToUpper() });
-
-        var act = () => query(onResults);
-
-        act.Should().Throw<NotSupportedException>(operation).WithMessage("*runs on an earlier Select's results*");
-    }
-
     [Fact]
     public void SelectWholeEntityBesideItsColumn_ReturnsTheCompleteEntity()
     {

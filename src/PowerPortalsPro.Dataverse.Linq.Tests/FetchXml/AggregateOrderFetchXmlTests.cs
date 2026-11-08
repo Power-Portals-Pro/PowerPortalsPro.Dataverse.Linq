@@ -58,7 +58,7 @@ public class AggregateOrderFetchXmlTests : FetchXmlTestBase
             .Select(g => new { g.Key, Count = g.Count() })
             .ToFetchXml();
 
-        act.Should().Throw<NotSupportedException>();
+        act.Should().Throw<NotSupportedException>().WithMessage("*'GroupBy' after OrderBy*");
     }
 
     [Fact]
@@ -99,7 +99,7 @@ public class AggregateOrderFetchXmlTests : FetchXmlTestBase
                              on a.CustomAccountId equals c.ParentAccount.Id
                          select new { a, c }).ToFetchXml(q => q.Count());
 
-        act.Should().Throw<NotSupportedException>();
+        act.Should().Throw<NotSupportedException>().WithMessage("*WithFirstRow join whose inner source is ordered*");
     }
 
     [Fact]
@@ -111,6 +111,6 @@ public class AggregateOrderFetchXmlTests : FetchXmlTestBase
                          group c by c.LastName into g
                          select new { g.Key, Count = g.Count() }).ToFetchXml();
 
-        act.Should().Throw<NotSupportedException>();
+        act.Should().Throw<NotSupportedException>().WithMessage("*WithFirstRow join whose inner source is ordered*");
     }
 }
