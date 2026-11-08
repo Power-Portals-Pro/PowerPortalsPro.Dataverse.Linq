@@ -145,6 +145,28 @@ public partial class IndexerIntegrationTests(ServiceClientFixture fixture) : Int
     }
 
     [Fact]
+    public void WhereComparedToCapturedIndexer_ReturnsTheMatch()
+    {
+        var other = new Entity("new_customaccount") { ["new_name"] = "Custom Account 001" };
+
+        var results = Accounts.Where(a => (string)a["new_name"] == (string)other["new_name"]).ToList();
+
+        results.Should().ContainSingle()
+            .Which.GetAttributeValue<string>("new_name").Should().Be("Custom Account 001");
+    }
+
+    [Fact]
+    public void MaxOfCapturedIndexer_Throws()
+    {
+        // LINQ gives the captured 7 for every row; the query's column would give its own maximum.
+        var other = new Entity("new_customaccount") { ["new_numberofemployees"] = 7 };
+
+        var act = () => Accounts.Max(a => (int?)other["new_numberofemployees"]);
+
+        act.Should().Throw<NotSupportedException>();
+    }
+
+    [Fact]
     public void CountWithIndexerPredicate_CountsTheMatches()
     {
         var count = Accounts.Count(a => ((string)a["new_name"]).StartsWith("Custom Account"));

@@ -183,6 +183,63 @@ public class IndexerFetchXmlTests : FetchXmlTestBase
             Accounts.ToFetchXml(q => q.Max(a => a.GetAttributeValue<int?>("numberofemployees"))));
 
     // -------------------------------------------------------------------------
+    // A captured entity is a value, not one of the query's
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_WhereComparedToCapturedIndexer_GeneratesConditionWithItsValue()
+    {
+        var other = new Entity("account") { ["name"] = "Contoso" };
+
+        var fetchXml = Accounts.Where(a => (string)a["name"] == (string)other["name"]).ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical">
+              <entity name="account">
+                <all-attributes />
+                <filter type="and">
+                  <condition attribute="name" operator="eq" value="Contoso" />
+                </filter>
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_MaxOfCapturedIndexer_Throws()
+    {
+        // The selector is the same value on every row, not the query's numberofemployees.
+        var other = new Entity("account") { ["numberofemployees"] = 10 };
+
+        var act = () => Accounts.ToFetchXml(q => q.Max(a => (int?)other["numberofemployees"]));
+
+        act.Should().Throw<NotSupportedException>();
+    }
+
+    [Fact]
+    public void ToFetchXml_MaxOfCapturedGetAttributeValue_Throws()
+    {
+        var other = new Entity("account") { ["numberofemployees"] = 10 };
+
+        var act = () => Accounts.ToFetchXml(q => q.Max(a => other.GetAttributeValue<int?>("numberofemployees")));
+
+        act.Should().Throw<NotSupportedException>();
+    }
+
+    [Fact]
+    public void ToFetchXml_JoinKeyOnCapturedIndexer_Throws()
+    {
+        var other = new Entity("contact") { ["parentcustomerid"] = new EntityReference("account", ParentId) };
+
+        var act = () => (from a in Accounts
+                         join c in Contacts on a.Id equals ((EntityReference)other["parentcustomerid"]).Id
+                         select new { Name = (string)a["name"] }).ToFetchXml();
+
+        act.Should().Throw<NotSupportedException>();
+    }
+
+    // -------------------------------------------------------------------------
     // Joins
     // -------------------------------------------------------------------------
 

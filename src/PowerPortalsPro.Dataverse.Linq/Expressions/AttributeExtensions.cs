@@ -186,12 +186,49 @@ internal static class AttributeExtensions
         return null;
     }
 
+    /// <summary>
+    /// The attribute an expression reads on an entity of the query (see
+    /// <see cref="ResolveAttributeAccess"/>). A read on an entity the lambda captured
+    /// (<c>other["name"]</c>, <c>other.Name</c>) is a value, not a column, and gives null.
+    /// </summary>
     internal static string? GetAttributeName(this Expression expr) =>
-        expr.ResolveAttributeAccess()?.AttributeName;
+        expr.GetAttributeName(primaryKeyResolver: null);
 
+    /// <inheritdoc cref="GetAttributeName(Expression)"/>
     internal static string? GetAttributeName(this Expression expr, Func<string, string>? primaryKeyResolver,
         string? rootEntityLogicalName = null) =>
-        expr.ResolveAttributeAccess(primaryKeyResolver, rootEntityLogicalName)?.AttributeName;
+        expr.ResolveAttributeAccess(primaryKeyResolver, rootEntityLogicalName) is { } access
+        && access.EntityExpression.IsParameterAccess()
+            ? access.AttributeName
+            : null;
+
+    /// <summary>
+    /// Returns true when the expression traces back to a <see cref="ParameterExpression"/>
+    /// (the lambda parameter representing a query entity), as opposed to a captured closure
+    /// variable which would root at a <see cref="ConstantExpression"/>.
+    /// </summary>
+    internal static bool IsParameterAccess(this Expression expr)
+    {
+        while (true)
+        {
+            switch (expr)
+            {
+                case ParameterExpression:
+                    return true;
+                case MemberExpression { Expression: not null } m:
+                    expr = m.Expression;
+                    continue;
+                case UnaryExpression { NodeType: ExpressionType.Convert } c:
+                    expr = c.Operand;
+                    continue;
+                case MethodCallExpression { Object: not null } mc:
+                    expr = mc.Object;
+                    continue;
+                default:
+                    return false;
+            }
+        }
+    }
 
     internal static string GetEntityLogicalName(this Type entityType) =>
         entityType.GetCustomAttribute<EntityLogicalNameAttribute>()?.LogicalName

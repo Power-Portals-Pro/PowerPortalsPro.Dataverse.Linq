@@ -213,6 +213,76 @@ internal static class ExpressionExtensions
     }
 
     /// <summary>
+    /// Returns <c>true</c> when a cast around the expression may change the value it gives: a
+    /// numeric conversion that truncates, wraps or rounds (<c>(int)a.Revenue.Value</c>,
+    /// <c>(byte)a.NumberOfEmployees</c>, <c>(double)a.Revenue.Value</c>), or a conversion method
+    /// of the user's. Lifting to or from Nullable, boxing, unboxing, a reference conversion,
+    /// switching an enum and its number, and a numeric conversion that keeps every value exactly
+    /// (<c>(long?)a.NumberOfEmployees</c>, an int to double) give the value as it compares.
+    /// </summary>
+    internal static bool HasLossyCast(this Expression expr)
+    {
+        while (expr.IsCast(out var cast))
+        {
+            if (NumericCodeOf(cast.Operand.Type) is { } from && NumericCodeOf(cast.Type) is { } to
+                    ? !Holds(to, from)
+                    : cast.Method is not null)
+            {
+                return true;
+            }
+
+            expr = cast.Operand;
+        }
+
+        return false;
+    }
+
+    // The numeric type a value is, under Nullable and an enum; null for any other type.
+    private static TypeCode? NumericCodeOf(Type type)
+    {
+        type = Nullable.GetUnderlyingType(type) ?? type;
+        if (type.IsEnum)
+            type = Enum.GetUnderlyingType(type);
+
+        var code = Type.GetTypeCode(type);
+        return code is >= TypeCode.Char and <= TypeCode.Decimal ? code : null;
+    }
+
+    // Whether every value of one numeric type converts to another exactly. An integer type holds
+    // the integers in its range, decimal holds every integer, and float and double the integers
+    // their significands hold (2^24, 2^53: (float)16777217 is 16777216). A float is a double
+    // exactly; no other fraction converts exactly ((double)0.1m isn't 0.1m).
+    private static bool Holds(TypeCode to, TypeCode from)
+    {
+        if (to == from)
+            return true;
+
+        if (IntegerRange(from) is not var (fromMin, fromMax))
+            return from == TypeCode.Single && to == TypeCode.Double;
+
+        return to switch
+        {
+            TypeCode.Decimal => true,
+            TypeCode.Single => -16_777_216m <= fromMin && fromMax <= 16_777_216m,
+            TypeCode.Double => -9_007_199_254_740_992m <= fromMin && fromMax <= 9_007_199_254_740_992m,
+            _ => IntegerRange(to) is var (toMin, toMax) && toMin <= fromMin && fromMax <= toMax,
+        };
+    }
+
+    private static (decimal Min, decimal Max)? IntegerRange(TypeCode code) => code switch
+    {
+        TypeCode.SByte => (sbyte.MinValue, sbyte.MaxValue),
+        TypeCode.Byte => (byte.MinValue, byte.MaxValue),
+        TypeCode.Int16 => (short.MinValue, short.MaxValue),
+        TypeCode.UInt16 or TypeCode.Char => (ushort.MinValue, ushort.MaxValue),
+        TypeCode.Int32 => (int.MinValue, int.MaxValue),
+        TypeCode.UInt32 => (uint.MinValue, uint.MaxValue),
+        TypeCode.Int64 => (long.MinValue, long.MaxValue),
+        TypeCode.UInt64 => (ulong.MinValue, ulong.MaxValue),
+        _ => null,
+    };
+
+    /// <summary>
     /// Replaces every reference to <paramref name="parameter"/> in the expression with
     /// <paramref name="replacement"/>.
     /// </summary>
@@ -380,14 +450,27 @@ internal static class ExpressionExtensions
     /// anonymous types (the <see cref="NewExpression"/>s that name their members) are reduced.
     /// </summary>
     internal static Expression ReduceAnonymousMemberReads(this Expression expr) =>
-        new AnonymousMemberReducer().Visit(expr);
+        new AnonymousMemberReducer(columnOf: null).Visit(expr);
+
+    /// <summary>
+    /// As <see cref="ReduceAnonymousMemberReads"/>, and also replaces a read of an entity's column
+    /// off the member-init that sets it with the value it's set to: an entity's property stores the
+    /// value as its column, and the entity reads it back. The read may name the member
+    /// (<c>new Account { Name = a.Name }.Name</c>) or the column another member sets: <c>Id</c> after
+    /// <c>AccountId = a.AccountId</c>, <c>["name"]</c> or <c>GetAttributeValue</c> after
+    /// <c>Name = …</c>. A column the member-init doesn't set is left as it is.
+    /// </summary>
+    /// <param name="columnOf">The column a read of an entity's member, indexer or GetAttributeValue names.</param>
+    internal static Expression ReduceCreatedMemberReads(this Expression expr, Func<Expression, string?> columnOf) =>
+        new AnonymousMemberReducer(columnOf).Visit(expr);
 
     // The compiler's anonymous types: generated, and named for it (<>f__AnonymousType0, VB$AnonymousType_0).
     internal static bool IsAnonymousType(this Type type) =>
         type.IsDefined(typeof(System.Runtime.CompilerServices.CompilerGeneratedAttribute), inherit: false)
         && type.Name.Contains("AnonymousType");
 
-    private sealed class AnonymousMemberReducer : ExpressionVisitor
+    // Reduces reads off anonymous types, and, given columnOf, off entity member-inits.
+    private sealed class AnonymousMemberReducer(Func<Expression, string?>? columnOf) : ExpressionVisitor
     {
         protected override Expression VisitMember(MemberExpression node)
         {
@@ -402,7 +485,53 @@ internal static class ExpressionExtensions
                 }
             }
 
-            return node.Update(owner);
+            var read = node.Update(owner);
+            return EntityInitOf(owner) is { } init && ValueSet(init, read, node.Member.Name) is { } value
+                ? value
+                : read;
+        }
+
+        protected override Expression VisitMethodCall(MethodCallExpression node)
+        {
+            var read = (MethodCallExpression)base.VisitMethodCall(node);
+            return EntityInitOf(read.Object) is { } init
+                && read.IsColumnReadCall(out _, out _)
+                && ValueSet(init, read, memberName: null) is { } value
+                    ? value
+                    : read;
+        }
+
+        private MemberInitExpression? EntityInitOf(Expression? owner) =>
+            columnOf is not null
+            && owner is MemberInitExpression { Type: var type } init
+            && typeof(Microsoft.Xrm.Sdk.Entity).IsAssignableFrom(type)
+                ? init
+                : null;
+
+        // The value the member-init last sets the read's member, or its column, to, as the read's type.
+        private Expression? ValueSet(MemberInitExpression init, Expression read, string? memberName)
+        {
+            var bindings = init.Bindings.OfType<MemberAssignment>().ToList();
+            var set = memberName is null ? null : bindings.LastOrDefault(b => b.Member.Name == memberName);
+            if (set is null && columnOf!(read) is { } column)
+                set = bindings.LastOrDefault(b => b.Member is not PropertyInfo { CanRead: false }
+                    && columnOf(Expression.MakeMemberAccess(init, b.Member)) == column);
+
+            if (set is null)
+                return null;
+
+            if (set.Expression.Type == read.Type)
+                return set.Expression;
+
+            // The column's value read as another type: Guid? as Id's Guid, a string as the indexer's object.
+            try
+            {
+                return Expression.Convert(set.Expression, read.Type);
+            }
+            catch (InvalidOperationException)
+            {
+                return null;
+            }
         }
     }
 

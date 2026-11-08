@@ -236,7 +236,9 @@ internal static class FetchXmlQueryTranslator
 
                     case nameof(Queryable.Take):
                         TranslateCore(call.Arguments[0], ctx);
-                        ctx.Query.Top = (int)((ConstantExpression)call.Arguments[1]).Value!;
+                        // Take(5).Take(20) takes 5.
+                        var count = (int)((ConstantExpression)call.Arguments[1]).Value!;
+                        ctx.Query.Top = ctx.Query.Top is { } taken ? Math.Min(taken, count) : count;
                         return;
 
                     case nameof(Queryable.GroupBy):
@@ -372,6 +374,7 @@ internal static class FetchXmlQueryTranslator
             ctx.Projection = null;
             HandleGroupedSelect(lambda, ctx);
             ctx.RowsTransformed = true;
+            ClearRowSelector(ctx);
             return;
         }
 
@@ -463,6 +466,7 @@ internal static class FetchXmlQueryTranslator
                 $"A Select over '{lambda.Parameters[0].Type.Name}' values needs an earlier Select that produces them.");
         ctx.Projection = new ProjectedColumns();
         ctx.SelectsOnResults = true;
+        ClearRowSelector(ctx);
     }
 
     /// <summary>
@@ -478,6 +482,74 @@ internal static class FetchXmlQueryTranslator
         ctx.Query.ApplyProjectedColumns(projected);
         ctx.Projection = projected;
         ctx.RowsTransformed = resolveEntity(lambda.Body.UnwrapConvert()) is null;
+        ctx.RowSelector = lambda;
+        ctx.RowEntityResolver = resolveEntity;
+    }
+
+    /// <summary>
+    /// Forgets the select operators were read through, once its values are no longer the rows':
+    /// after a select on groups or on results, or a GroupBy.
+    /// </summary>
+    private static void ClearRowSelector(TranslationContext ctx)
+    {
+        ctx.RowSelector = null;
+        ctx.RowEntityResolver = null;
+    }
+
+    /// <summary>
+    /// The body of an operator's lambda after a select, as it reads the rows the select ran on:
+    /// after <c>.Select(a =&gt; new { a.Name })</c> or <c>.Select(a =&gt; new Account { Name = a.Name })</c>,
+    /// <c>x =&gt; x.Name == "Contoso"</c> reads <c>a.Name</c>, the column, and after a join's
+    /// <c>select new { a, c }</c>, <c>x.c.LastName</c> reads the joined contact's. A value the
+    /// select computed (<c>Name = "x" + a.Name</c>) is then no column, and doesn't translate,
+    /// rather than testing the column it came from. Its columns resolve on the entities the select
+    /// read (see <see cref="ResolveAttribute"/>). After a select that kept the query's own
+    /// entities, or none, the body is as it was.
+    /// </summary>
+    /// <exception cref="NotSupportedException">
+    /// The select made new values from groups, whose members this can't read back to columns.
+    /// </exception>
+    private static Expression ReadThroughSelect(LambdaExpression lambda, TranslationContext ctx, string operatorName)
+    {
+        if (!ctx.RowsTransformed)
+            return lambda.Body;
+
+        if (ctx.RowSelector is not { } selector)
+            throw new NotSupportedException(
+                $"'{operatorName}' can't follow a Select on groups. Apply it before the Select, or after AsEnumerable().");
+
+        var parameter = lambda.Parameters[0];
+        var selected = selector.Body.Type == parameter.Type
+            ? selector.Body
+            : Expression.Convert(selector.Body, parameter.Type);
+        return lambda.Body
+            .ReplaceParameter(parameter, selected)
+            .ReduceCreatedMemberReads(read => read.ResolveAttributeAccess(ctx.PrimaryKeyOf)?.AttributeName);
+    }
+
+    /// <summary>
+    /// Throws when an operator can't read its lambda through the select before it (see
+    /// <see cref="ReadThroughSelect"/>) and would read the row instead: a join or a GroupBy after
+    /// a select that made new values would key or group on the columns, not on those values.
+    /// </summary>
+    private static void ThrowIfRowsTransformed(TranslationContext ctx, string operatorName)
+    {
+        if (ctx.RowsTransformed)
+            throw new NotSupportedException(
+                $"'{operatorName}' can't follow a Select that makes new values. Apply it before the Select.");
+    }
+
+    /// <summary>
+    /// Throws when an operator follows <c>Take()</c>: Dataverse filters, orders, groups, joins and
+    /// aggregates every row before it takes the first ones, where LINQ applies the operator to
+    /// the rows taken.
+    /// </summary>
+    private static void ThrowIfAfterTake(TranslationContext ctx, string operatorName)
+    {
+        if (ctx.Query.Top is not null)
+            throw new NotSupportedException(
+                $"'{operatorName}' after Take() is not supported: Dataverse applies it to every row before it " +
+                "takes the first ones. Apply it before Take(), or after AsEnumerable().");
     }
 
     /// <summary>
@@ -622,10 +694,13 @@ internal static class FetchXmlQueryTranslator
     private static void HandleWhere(MethodCallExpression call, TranslationContext ctx)
     {
         ThrowIfSelectingResults(ctx, call.Method.Name);
+        ThrowIfAfterTake(ctx, call.Method.Name);
         var lambda = call.Arguments[1].ExtractLambda();
+        var predicate = ReadThroughSelect(lambda, ctx, call.Method.Name);
 
-        // Left-join null filter: where c == null
-        if (ctx.InnerEntityProperty is not null && lambda.IsNullCheck(ctx.InnerEntityProperty))
+        // Left-join null filter: where c == null. After a select, the read-through predicate's
+        // ti.c == null is found among the comparisons instead.
+        if (!ctx.RowsTransformed && ctx.InnerEntityProperty is not null && lambda.IsNullCheck(ctx.InnerEntityProperty))
         {
             var link = ctx.Query.Links[^1];
             var filter = ctx.Query.Filter ??= new FetchFilter();
@@ -640,7 +715,7 @@ internal static class FetchXmlQueryTranslator
 
         // General predicate
         var rootFilter = ctx.Query.Filter ??= new FetchFilter();
-        TranslatePredicate(lambda.Body, rootFilter, ctx);
+        TranslatePredicate(predicate, rootFilter, ctx);
 
         // Collapse unnecessary nesting: if root has exactly one sub-filter and no
         // conditions or links, promote the sub-filter to root level.
@@ -1082,6 +1157,12 @@ internal static class FetchXmlQueryTranslator
             return;
         }
 
+        // The other side reads the row but isn't a column: a computed value, or a cast that changes
+        // it ((int?)a.CreditLimit == a.NumberOfEmployees). Dataverse compares only columns.
+        if (valueExpr.ReferencesAnyParameter())
+            throw new NotSupportedException(
+                $"A comparison with '{attr.Name}' can only be to a value or another column, not to '{valueExpr}'.");
+
         var value = valueExpr.EvaluateValue();
         filter.Conditions.Add(new FetchCondition
         {
@@ -1311,6 +1392,18 @@ internal static class FetchXmlQueryTranslator
     /// </summary>
     private static ResolvedAttribute? ResolveAttribute(Expression expr, TranslationContext ctx)
     {
+        // A cast that truncates or wraps the value ((int)a.Revenue.Value == 3 holds for 3.7)
+        // isn't the column, which a condition would test untruncated.
+        if (expr.HasLossyCast())
+            return null;
+
+        // After a select that made new values, an operator's lambda was read through it (see
+        // ReadThroughSelect), so its columns are on the entities that select read.
+        if (ctx.RowsTransformed && ctx.RowEntityResolver is { } resolveEntity)
+            return expr.TryResolveColumn(resolveEntity, ctx.PrimaryKeyOf, out var entity, out var column)
+                ? new ResolvedAttribute(column, entity.LinkAlias)
+                : null;
+
         if (expr is UnaryExpression { NodeType: ExpressionType.Convert } convert)
             expr = convert.Operand;
 
@@ -1334,39 +1427,8 @@ internal static class FetchXmlQueryTranslator
         // expression traces back to a lambda ParameterExpression (not a captured closure variable).
         // Without this check, captured entity properties like `capturedEntity.PrimaryKeyId`
         // would be incorrectly resolved as query attributes instead of constant values.
-        var access = expr.ResolveAttributeAccess(ctx.PrimaryKeyResolver, ctx.Query.EntityLogicalName);
-        if (access is not null && IsQueryParameterAccess(access.Value.EntityExpression))
-            return new ResolvedAttribute(access.Value.AttributeName, null);
-
-        return null;
-    }
-
-    /// <summary>
-    /// Returns true when the expression traces back to a <see cref="ParameterExpression"/>
-    /// (the lambda parameter representing a query entity), as opposed to a captured closure
-    /// variable which would root at a <see cref="ConstantExpression"/>.
-    /// </summary>
-    private static bool IsQueryParameterAccess(Expression expr)
-    {
-        while (true)
-        {
-            switch (expr)
-            {
-                case ParameterExpression:
-                    return true;
-                case MemberExpression { Expression: not null } m:
-                    expr = m.Expression;
-                    continue;
-                case UnaryExpression { NodeType: ExpressionType.Convert } c:
-                    expr = c.Operand;
-                    continue;
-                case MethodCallExpression { Object: not null } mc:
-                    expr = mc.Object;
-                    continue;
-                default:
-                    return false;
-            }
-        }
+        var name = expr.GetAttributeName(ctx.PrimaryKeyResolver, ctx.Query.EntityLogicalName);
+        return name is not null ? new ResolvedAttribute(name, null) : null;
     }
 
     /// <summary>
@@ -1433,18 +1495,32 @@ internal static class FetchXmlQueryTranslator
     private static JoinEntityInfo? FindJoinMapping(
         Expression entityExpression, Dictionary<string, JoinEntityInfo> joinMappings)
     {
+        // The chain must start at the lambda's parameter, through any casts: a captured entity
+        // named like a join entity (closure.c) is a value, not one of the query's entities.
+        JoinEntityInfo? found = null;
         var current = entityExpression;
-        while (current is MemberExpression me)
+        while (true)
         {
-            if (joinMappings.TryGetValue(me.Member.Name, out var mapping))
-                return mapping;
-            current = me.Expression;
+            if (current is MemberExpression me)
+            {
+                if (found is null && joinMappings.TryGetValue(me.Member.Name, out var mapping))
+                    found = mapping;
+                current = me.Expression;
+            }
+            else if (current is UnaryExpression { NodeType: ExpressionType.Convert } convert)
+            {
+                current = convert.Operand;
+            }
+            else
+            {
+                break;
+            }
         }
 
-        return current is ParameterExpression param
-            && joinMappings.TryGetValue(param.Name!, out var directMapping)
-                ? directMapping
-                : null;
+        if (current is not ParameterExpression param)
+            return null;
+
+        return found ?? (joinMappings.TryGetValue(param.Name!, out var directMapping) ? directMapping : null);
     }
 
     // -------------------------------------------------------------------------
@@ -1454,7 +1530,9 @@ internal static class FetchXmlQueryTranslator
     private static void HandleOrderBy(MethodCallExpression call, TranslationContext ctx)
     {
         ThrowIfSelectingResults(ctx, call.Method.Name);
+        ThrowIfAfterTake(ctx, call.Method.Name);
         var lambda = call.Arguments[1].ExtractLambda();
+        var key = ReadThroughSelect(lambda, ctx, call.Method.Name);
         var descending = call.Method.Name is nameof(Queryable.OrderByDescending)
                                            or nameof(Queryable.ThenByDescending);
 
@@ -1477,7 +1555,7 @@ internal static class FetchXmlQueryTranslator
             }
         }
 
-        var resolved = ResolveAttribute(lambda.Body, ctx)
+        var resolved = ResolveAttribute(key, ctx)
             ?? throw new NotSupportedException(
                 "OrderBy key must resolve to an attribute.");
 
@@ -1502,9 +1580,10 @@ internal static class FetchXmlQueryTranslator
         if (call.Arguments.Count == 2)
         {
             ThrowIfSelectingResults(ctx, call.Method.Name);
+            ThrowIfAfterTake(ctx, call.Method.Name);
             var lambda = call.Arguments[1].ExtractLambda();
             var filter = ctx.Query.Filter ??= new FetchFilter { Type = FilterType.And };
-            TranslatePredicate(lambda.Body, filter, ctx);
+            TranslatePredicate(ReadThroughSelect(lambda, ctx, call.Method.Name), filter, ctx);
         }
 
         ctx.Query.TerminalOperator = call.Method.Name switch
@@ -1516,9 +1595,11 @@ internal static class FetchXmlQueryTranslator
             _ => throw new NotSupportedException($"Unsupported terminal operator '{call.Method.Name}'.")
         };
 
-        // Single needs at least 2 rows to validate uniqueness; First only needs 1
-        ctx.Query.Top = ctx.Query.TerminalOperator is QueryTerminalOperator.Single
-                                                    or QueryTerminalOperator.SingleOrDefault ? 2 : 1;
+        // Single needs at least 2 rows to validate uniqueness; First only needs 1. After Take(1),
+        // Single sees only the one row taken.
+        var top = ctx.Query.TerminalOperator is QueryTerminalOperator.Single
+                                             or QueryTerminalOperator.SingleOrDefault ? 2 : 1;
+        ctx.Query.Top = ctx.Query.Top is { } taken ? Math.Min(taken, top) : top;
     }
 
     // -------------------------------------------------------------------------
@@ -1548,6 +1629,7 @@ internal static class FetchXmlQueryTranslator
         // Recurse into the source expression
         TranslateCore(call.Arguments[0], ctx);
         ThrowIfSelectingResults(ctx, methodName);
+        ThrowIfAfterTake(ctx, methodName);
 
         // A count of a select's distinct values counts the distinct rows Dataverse returns: it can
         // count one column's distinct values, but not several, and it leaves nulls out where LINQ
@@ -1571,7 +1653,7 @@ internal static class FetchXmlQueryTranslator
             {
                 var lambda = call.Arguments[1].ExtractLambda();
                 var filter = ctx.Query.Filter ??= new FetchFilter { Type = FilterType.And };
-                TranslatePredicate(lambda.Body, filter, ctx);
+                TranslatePredicate(ReadThroughSelect(lambda, ctx, methodName), filter, ctx);
             }
 
             // Count uses the entity's primary ID attribute
@@ -1588,15 +1670,20 @@ internal static class FetchXmlQueryTranslator
         {
             // Min(selector), Max(selector), etc. — extract the attribute from the selector
             var lambda = call.Arguments[1].ExtractLambda();
-            var attrName = lambda.Body.GetAttributeName(ctx.PrimaryKeyResolver, ctx.Query.EntityLogicalName)
+            var resolved = ResolveAttribute(ReadThroughSelect(lambda, ctx, methodName), ctx)
                 ?? throw new NotSupportedException(
                     $"Could not resolve attribute for '{methodName}'.");
+
+            // The aggregate goes on the root entity, where a joined column's name would be another column.
+            if (resolved.EntityAlias is not null)
+                throw new NotSupportedException(
+                    $"'{methodName}' of a joined entity's column is not supported; aggregate a column of the root entity.");
 
             ctx.Query.AllAttributes = false;
             ctx.Query.Attributes.Clear();
             ctx.Query.Attributes.Add(new FetchAttribute
             {
-                Name = attrName,
+                Name = resolved.Name,
                 Alias = fetchXmlFunction,
                 Aggregate = fetchXmlFunction
             });
@@ -1673,7 +1760,10 @@ internal static class FetchXmlQueryTranslator
         // Recurse into the source expression
         TranslateCore(call.Arguments[0], ctx);
         ThrowIfSelectingResults(ctx, call.Method.Name);
+        ThrowIfAfterTake(ctx, call.Method.Name);
+        ThrowIfRowsTransformed(ctx, call.Method.Name);
         ctx.Projection = null;
+        ClearRowSelector(ctx);
 
         // The groups are the rows now; the first select on them projects them.
         ctx.RowsTransformed = false;
@@ -2488,6 +2578,8 @@ internal static class FetchXmlQueryTranslator
         TranslateCore(call.Arguments[0], ctx);
         ThrowIfSelectingResults(ctx, call.Method.Name);
         ThrowIfDistinctBeforeJoin(ctx, call.Method.Name);
+        ThrowIfAfterTake(ctx, call.Method.Name);
+        ThrowIfRowsTransformed(ctx, call.Method.Name);
 
         var (innerLogicalName, innerEntityType) = call.Arguments[1].GetSourceInfoFromType();
         var resultLambda = call.Arguments[4].ExtractLambda();
@@ -2636,6 +2728,8 @@ internal static class FetchXmlQueryTranslator
             TranslateCore(outerSource, ctx);
             ThrowIfSelectingResults(ctx, call.Method.Name);
             ThrowIfDistinctBeforeJoin(ctx, call.Method.Name);
+            ThrowIfAfterTake(ctx, call.Method.Name);
+            ThrowIfRowsTransformed(ctx, call.Method.Name);
             var (innerLogicalName2, innerEntityType2) = groupJoinCall.Arguments[1].GetSourceInfoFromType();
             var resultSelector2 = call.Arguments[2].ExtractLambda();
             HandleChainedJoin(
@@ -2942,6 +3036,19 @@ internal static class FetchXmlQueryTranslator
         /// making. A select after it runs on its results, since the row no longer holds them.
         /// </summary>
         public bool RowsTransformed { get; set; }
+
+        /// <summary>
+        /// The last select, when it ran on the rows (the root's or a join's): an operator after it
+        /// reads its lambda through this select's (see <see cref="ReadThroughSelect"/>). Null after a
+        /// select on groups or on results, and when no select has run.
+        /// </summary>
+        public LambdaExpression? RowSelector { get; set; }
+
+        /// <summary>
+        /// The entities <see cref="RowSelector"/> read, as it found them: an operator's lambda read
+        /// through it resolves its columns on the same entities.
+        /// </summary>
+        public MaterializerBuilder.EntityResolver? RowEntityResolver { get; set; }
 
         /// <summary>
         /// The selects already folded with the selects they're on (see FoldSelects), which

@@ -214,6 +214,90 @@ public class PagingFetchXmlTests : FetchXmlTestBase
             """);
     }
 
+    [Theory]
+    [InlineData(5, 20)]
+    [InlineData(20, 5)]
+    public void ToFetchXml_TakeAfterTake_GeneratesTheSmallerTop(int first, int second)
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Take(first)
+            .Take(second)
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" top="5">
+              <entity name="new_customaccount">
+                <all-attributes />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_SingleAfterTakeOne_GeneratesTopOne()
+    {
+        // Single() asks for two rows to find a second, but Take(1) leaves it only one.
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .Take(1)
+            .ToFetchXml(q => q.Single());
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" top="1">
+              <entity name="new_customaccount">
+                <all-attributes />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    [Fact]
+    public void ToFetchXml_SelectAfterTake_GeneratesTopWithTheColumn()
+    {
+        var fetchXml = _service.Queryable<CustomAccount>()
+            .OrderBy(a => a.Name)
+            .Take(5)
+            .Select(a => a.Name)
+            .ToFetchXml();
+
+        AssertFetchXml(fetchXml,
+            """
+            <fetch mapping="logical" top="5">
+              <entity name="new_customaccount">
+                <attribute name="new_name" />
+                <order attribute="new_name" descending="false" />
+              </entity>
+            </fetch>
+            """);
+    }
+
+    public static TheoryData<string, Func<IQueryable<CustomAccount>, IQueryable<CustomAccount>, object?>> OperatorsAfterTake => new()
+    {
+        { "Where", (taken, _) => taken.Where(a => a.Name == "Contoso").ToFetchXml() },
+        { "OrderBy", (taken, _) => taken.OrderBy(a => a.Name).ToFetchXml() },
+        { "Where after Select", (taken, _) => taken.Select(a => new { a.Name }).Where(x => x.Name == "Contoso").ToFetchXml() },
+        { "GroupBy", (taken, _) => taken.GroupBy(a => a.Name).Select(g => new { g.Key, Count = g.Count() }).ToFetchXml() },
+        { "First with a predicate", (taken, _) => taken.ToFetchXml(q => q.First(a => a.Name == "Contoso")) },
+        { "Count", (taken, _) => taken.ToFetchXml(q => q.Count()) },
+        { "Max", (taken, _) => taken.ToFetchXml(q => q.Max(a => a.NumberOfEmployees)) },
+        { "Sum of a Select", (taken, _) => taken.Select(a => a.NumberOfEmployees).ToFetchXml(q => q.Sum()) },
+        { "Join", (taken, all) => taken.Join(all, a => a.CustomAccountId, p => p.ParentAccount.Id, (a, p) => new { a.Name, Parent = p.Name }).ToFetchXml() },
+    };
+
+    [Theory]
+    [MemberData(nameof(OperatorsAfterTake))]
+    public void ToFetchXml_OperatorAfterTake_Throws(
+        string operation, Func<IQueryable<CustomAccount>, IQueryable<CustomAccount>, object?> query)
+    {
+        // Dataverse would apply each to every row, then take the first five.
+        var accounts = _service.Queryable<CustomAccount>();
+
+        var act = () => query(accounts.Take(5), accounts);
+
+        act.Should().Throw<NotSupportedException>(operation);
+    }
+
     // -------------------------------------------------------------------------
     // WithPage
     // -------------------------------------------------------------------------

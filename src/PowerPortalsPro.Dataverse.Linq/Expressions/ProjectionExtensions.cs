@@ -42,6 +42,45 @@ internal static class ProjectionExtensions
         new ProjectedColumnCollector(resolveEntity, primaryKeyOf).Collect(lambda.Body);
 
     /// <summary>
+    /// Resolves a read of one column on an entity <paramref name="resolveEntity"/> finds, under any
+    /// casts around it: a property with [AttributeLogicalName] (and its <c>.Id</c> /
+    /// <c>.Value</c>), <c>GetAttributeValue</c>, the indexer, or <see cref="Entity.Id"/> as the
+    /// entity's primary key. A select's columns and an operator's read through it (see
+    /// FetchXmlQueryTranslator.ReadThroughSelect) resolve alike.
+    /// </summary>
+    internal static bool TryResolveColumn(
+        this Expression expr, MaterializerBuilder.EntityResolver resolveEntity, Func<string, string> primaryKeyOf,
+        out MaterializerBuilder.ResolvedEntity entity, [NotNullWhen(true)] out string? column)
+    {
+        expr = expr.UnwrapConvert();
+
+        // Entity.Id is the primary key of the entity it's read on, which for an unbound entity
+        // only that entity's resolution names; nothing else needs the key looked up.
+        var owner = expr is MemberExpression { Member.Name: nameof(Entity.Id), Expression: { } idOwner }
+            ? resolveEntity(idOwner.UnwrapConvert())
+            : null;
+
+        if (expr.ResolveAttributeAccess(owner is null ? null : primaryKeyOf, LogicalNameOf(owner)) is { } access
+            && resolveEntity(access.EntityExpression.UnwrapConvert()) is { } accessed)
+        {
+            (entity, column) = (accessed, access.AttributeName);
+            return true;
+        }
+
+        (entity, column) = (default, null);
+        return false;
+    }
+
+    /// <summary>
+    /// The logical name of an entity the query resolved: its type's, or for an unbound entity the
+    /// one its resolution names.
+    /// </summary>
+    private static string? LogicalNameOf(MaterializerBuilder.ResolvedEntity? entity) =>
+        entity is { } resolved
+            ? resolved.EntityType.GetCustomAttribute<EntityLogicalNameAttribute>()?.LogicalName ?? resolved.LogicalName
+            : null;
+
+    /// <summary>
     /// Requests the columns a select reads: an entity it uses whole gets every column, one it reads
     /// columns of gets those, and one it doesn't touch gets none (the root's rows still come back,
     /// keyed by their primary key). A column already requested, by a projection this one is
@@ -111,7 +150,7 @@ internal static class ProjectionExtensions
             if (node is null)
                 return node;
 
-            if (TryResolveAttribute(node, out var entity, out var column))
+            if (node.TryResolveColumn(resolveEntity, primaryKeyOf, out var entity, out var column))
             {
                 _result.Add(entity.LinkAlias, column);
                 if (_inResult && IsValuePreserving(node))
@@ -185,33 +224,6 @@ internal static class ProjectionExtensions
             return base.VisitMethodCall(node);
         }
 
-        /// <summary>
-        /// Resolves a read of one column on an entity of the query: a property with
-        /// [AttributeLogicalName] (and its <c>.Id</c> / <c>.Value</c>), <c>GetAttributeValue</c>,
-        /// the indexer, or <see cref="Entity.Id"/> as the entity's primary key.
-        /// </summary>
-        private bool TryResolveAttribute(
-            Expression expr, out MaterializerBuilder.ResolvedEntity entity, [NotNullWhen(true)] out string? column)
-        {
-            expr = Unwrap(expr)!;
-
-            // Entity.Id is the primary key of the entity it's read on, which for an unbound entity
-            // only that entity's resolution names; nothing else needs the key looked up.
-            var owner = expr is MemberExpression { Member.Name: nameof(Entity.Id), Expression: { } idOwner }
-                ? ResolveEntity(idOwner)
-                : null;
-
-            if (expr.ResolveAttributeAccess(owner is null ? null : primaryKeyOf, LogicalNameOf(owner)) is { } access
-                && ResolveEntity(access.EntityExpression) is { } accessed)
-            {
-                (entity, column) = (accessed, access.AttributeName);
-                return true;
-            }
-
-            (entity, column) = (default, null);
-            return false;
-        }
-
         // A joined row is there when its primary key is; the root's rows always are.
         private void RequireRow(MaterializerBuilder.ResolvedEntity entity)
         {
@@ -224,13 +236,8 @@ internal static class ProjectionExtensions
                 _result.WholeEntities.Add(entity.LinkAlias);
         }
 
-        private static string? LogicalNameOf(MaterializerBuilder.ResolvedEntity? entity) =>
-            entity is { } resolved
-                ? resolved.EntityType.GetCustomAttribute<EntityLogicalNameAttribute>()?.LogicalName ?? resolved.LogicalName
-                : null;
-
         private MaterializerBuilder.ResolvedEntity? ResolveEntity(Expression? expr) =>
-            Unwrap(expr) is { } unwrapped ? resolveEntity(unwrapped) : null;
+            expr is null ? null : resolveEntity(expr.UnwrapConvert());
 
         // A cast that lifts to or from Nullable, boxes or unboxes ((int?)e["count"]), or switches an
         // enum and its underlying type leaves the column's value as it is. A numeric one doesn't:
@@ -262,9 +269,7 @@ internal static class ProjectionExtensions
 
         private static Type UnderlyingOf(Type type) => type.IsEnum ? Enum.GetUnderlyingType(type) : type;
 
-        private static bool IsNull(Expression expr) => Unwrap(expr) is ConstantExpression { Value: null };
-
-        private static Expression? Unwrap(Expression? expr) => expr?.UnwrapConvert();
+        private static bool IsNull(Expression expr) => expr.UnwrapConvert() is ConstantExpression { Value: null };
     }
 
     /// <summary>

@@ -12,6 +12,7 @@ namespace PowerPortalsPro.Dataverse.Linq.Tests.FetchXml;
 /// <c>CaptureFetchXml</c> callback, and the global
 /// <see cref="DataverseQueryDiagnostics"/> hook.
 /// </summary>
+[Collection(GlobalDiagnosticsCollection.Name)]
 public class CaptureFetchXmlTests : FetchXmlTestBase
 {
     // -------------------------------------------------------------------------

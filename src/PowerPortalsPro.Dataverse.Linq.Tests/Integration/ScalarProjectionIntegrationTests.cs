@@ -551,14 +551,21 @@ public partial class ScalarProjectionIntegrationTests(ServiceClientFixture fixtu
     [Fact]
     public void SelectAfterATransformingSelectAcrossWhere_KeepsTheFirstsValues()
     {
-        var expected = Service.Queryable<CustomAccount>().Select(a => a.Name).ToList()
+        var expected = Service.Queryable<CustomAccount>()
+            .Where(a => a.Website.StartsWith("https://empty"))
+            .Select(a => a.Name)
+            .ToList()
             .Select(n => n.ToUpper());
 
+        // The Where tests Website, which the select copies from its column; the last select
+        // reads the upper-cased names off the first's results.
         var results = Service.Queryable<CustomAccount>()
-            .Select(a => new CustomAccount { Name = a.Name.ToUpper() })
-            .Where(x => x.Name != null)
+            .Select(a => new CustomAccount { Name = a.Name.ToUpper(), Website = a.Website })
+            .Where(x => x.Website.StartsWith("https://empty"))
             .Select(x => x.Name)
             .ToList();
+
+        results.Should().HaveCount(50);
 
         results.Should().BeEquivalentTo(expected);
     }
