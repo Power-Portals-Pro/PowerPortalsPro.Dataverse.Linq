@@ -3,19 +3,50 @@ name: Publish NuGet Package
 on:
   workflow_dispatch:
 
+# Publishes to NuGet.org with Trusted Publishing, which needs:
+#   - a Trusted Publishing policy on nuget.org, owned by the account that owns the package, naming
+#     this repository (Power-Portals-Pro/PowerPortalsPro.Dataverse.Linq) and this workflow
+#     (publish.yml);
+#   - the NUGET_USER repository secret: that account's nuget.org profile name, not its email.
+#
+# Each job states what it needs. Only the push job can mint the OIDC token nuget.org trades for a
+# push key, and it runs only the steps a push needs: the build job, which restores packages and
+# runs their MSBuild targets, can't, and nor can the release job's third-party action.
 permissions:
-  contents: write
+  contents: read
+
+# Two publishes at once would race to stamp and push CHANGELOG.md. A run started while another is
+# going waits for it.
+concurrency:
+  group: publish
+  cancel-in-progress: false
 
 jobs:
-  publish:
+  build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      notes: ${{ steps.notes.outputs.notes }}
 
     steps:
+      # The release job commits the CHANGELOG back to the branch this ran from, which a tag
+      # can't take. Stop here, before anything is published, rather than after the push.
+      - name: Check the workflow ran from a branch
+        run: |
+          if [[ "$GITHUB_REF" != refs/heads/* ]]; then
+            echo "::error::Run this workflow from a branch, not $GITHUB_REF."
+            exit 1
+          fi
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+          # Nothing here pushes; don't leave the token in .git/config while package restores and
+          # their MSBuild targets run.
+          persist-credentials: false
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
@@ -62,14 +93,103 @@ jobs:
       - name: Pack
         run: dotnet pack src/PowerPortalsPro.Dataverse.Linq/PowerPortalsPro.Dataverse.Linq.csproj -c Release -p:Version=${{ steps.version.outputs.version }} --no-build --output ./nupkg
 
+      - name: Upload NuGet package as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nupkg
+          path: ./nupkg/*.nupkg
+          # A pack that produced nothing fails here, not after the push job has its token.
+          if-no-files-found: error
+          # A re-run uploads the same name again.
+          overwrite: true
+
+  push:
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      # Lets the runner mint OIDC tokens. NuGet.org's Trusted Publishing trades one for a
+      # short-lived API key (the NuGet login step below), so no key is stored to rotate.
+      id-token: write
+
+    steps:
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Download NuGet package
+        uses: actions/download-artifact@v4
+        with:
+          name: nupkg
+          path: ./nupkg
+
+      # Trusted Publishing: the job's OIDC token is exchanged for an API key that lasts an hour,
+      # so no long-lived key is stored. The nuget.org policy names this repository and
+      # publish.yml. NUGET_USER is the nuget.org account (profile name, not email) that owns
+      # the policy.
+      - name: Log in to NuGet.org
+        id: nuget-login
+        # Pinned to a commit rather than the movable v1 tag: this job can mint the OIDC token the
+        # nuget.org policy trusts.
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
+        with:
+          user: ${{ secrets.NUGET_USER }}
+
       - name: Push to NuGet.org
-        run: dotnet nuget push ./nupkg/PowerPortalsPro.Dataverse.Linq.${{ steps.version.outputs.version }}.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate --no-symbols
+        env:
+          NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
+        run: dotnet nuget push ./nupkg/PowerPortalsPro.Dataverse.Linq.${{ needs.build.outputs.version }}.nupkg --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate --no-symbols
+
+  release:
+    runs-on: ubuntu-latest
+    needs: [build, push]
+    permissions:
+      # Pushes the CHANGELOG commit and creates the release.
+      contents: write
+
+    steps:
+      # The branch as it is now, not the commit the run started from: a re-run after the
+      # CHANGELOG commit was pushed then finds it, rather than stamping the version again on an
+      # older commit that the push would reject.
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+
+      - name: Download NuGet package
+        uses: actions/download-artifact@v4
+        with:
+          name: nupkg
+          path: ./nupkg
 
       - name: Stamp CHANGELOG with released version
         shell: bash
+        env:
+          # Through the environment, not interpolated into the script: the notes are free text.
+          RELEASED_NOTES: ${{ needs.build.outputs.notes }}
         run: |
           DATE=$(date +%Y-%m-%d)
-          VERSION=${{ steps.version.outputs.version }}
+          VERSION=${{ needs.build.outputs.version }}
+
+          if grep -qF "## [$VERSION]" CHANGELOG.md; then
+            echo "CHANGELOG already has a section for $VERSION; leaving it."
+            exit 0
+          fi
+
+          # The heading files everything under [Unreleased] under this version, so it must be what
+          # this version released: notes added since the build ran would otherwise be filed under
+          # a release that doesn't contain them, and never reach a later one.
+          CURRENT_NOTES=$(awk '
+            /^## \[Unreleased\]/ { capture = 1; next }
+            /^## \[/            { capture = 0 }
+            capture
+          ' CHANGELOG.md | sed '/./,$!d')
+
+          if [ "$CURRENT_NOTES" != "$RELEASED_NOTES" ]; then
+            echo "::error::CHANGELOG's [Unreleased] notes changed after v$VERSION was built. It is published; add its '## [$VERSION] - $DATE' heading above the notes it released by hand."
+            exit 1
+          fi
 
           # Promote the hand-written [Unreleased] notes to a versioned section by inserting
           # a version heading directly beneath [Unreleased], which leaves the existing notes
@@ -86,13 +206,15 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add CHANGELOG.md
-          git diff --cached --quiet || git commit -m "Update CHANGELOG for v${{ steps.version.outputs.version }}"
+          git diff --cached --quiet || git commit -m "Update CHANGELOG for v${{ needs.build.outputs.version }}"
+          git pull --rebase
           git push
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        # Pinned to a commit: a third-party action running with a token that can write the repo.
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
-          tag_name: v${{ steps.version.outputs.version }}
-          name: v${{ steps.version.outputs.version }}
-          body: ${{ steps.notes.outputs.notes }}
-          files: ./nupkg/PowerPortalsPro.Dataverse.Linq.${{ steps.version.outputs.version }}.nupkg
+          tag_name: v${{ needs.build.outputs.version }}
+          name: v${{ needs.build.outputs.version }}
+          body: ${{ needs.build.outputs.notes }}
+          files: ./nupkg/PowerPortalsPro.Dataverse.Linq.${{ needs.build.outputs.version }}.nupkg
