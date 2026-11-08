@@ -166,9 +166,21 @@ internal static class ExpressionExtensions
         return finder.Found;
     }
 
-    private sealed class FreeParameterFinder : ExpressionVisitor
+    /// <summary>
+    /// Returns <c>true</c> when the expression references a parameter other than
+    /// <paramref name="parameter"/> that no lambda inside it declares: a subquery's predicate
+    /// reading the outer query's row.
+    /// </summary>
+    internal static bool ReferencesParameterOtherThan(this Expression expr, ParameterExpression parameter)
     {
-        private readonly HashSet<ParameterExpression> _declared = [];
+        var finder = new FreeParameterFinder(parameter);
+        finder.Visit(expr);
+        return finder.Found;
+    }
+
+    private sealed class FreeParameterFinder(ParameterExpression? allowed = null) : ExpressionVisitor
+    {
+        private readonly HashSet<ParameterExpression> _declared = allowed is null ? [] : [allowed];
 
         internal bool Found { get; private set; }
 

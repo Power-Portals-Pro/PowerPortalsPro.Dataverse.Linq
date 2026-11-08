@@ -757,7 +757,7 @@ internal static class FetchXmlQueryTranslator
         if (!ctx.RowsTransformed && ctx.InnerEntityProperty is not null && lambda.IsNullCheck(ctx.InnerEntityProperty))
         {
             var link = ctx.Query.Links[^1];
-            var filter = ctx.Query.Filter ??= new FetchFilter();
+            var filter = RootAndFilter(ctx);
             filter.Conditions.Add(new FetchCondition
             {
                 EntityAlias = link.Alias,
@@ -768,7 +768,7 @@ internal static class FetchXmlQueryTranslator
         }
 
         // General predicate
-        var rootFilter = ctx.Query.Filter ??= new FetchFilter();
+        var rootFilter = RootAndFilter(ctx);
         TranslatePredicate(predicate, rootFilter, ctx);
 
         // Collapse unnecessary nesting: if root has exactly one sub-filter and no
@@ -785,6 +785,30 @@ internal static class FetchXmlQueryTranslator
             foreach (var l in child.Links)
                 rootFilter.Links.Add(l);
         }
+    }
+
+    /// <summary>
+    /// The query's filter, as the AND a predicate's conditions are added to. A Where whose predicate
+    /// is an <c>||</c> leaves the root filter that OR (see <see cref="HandleWhere"/>); a later
+    /// predicate is ANDed with it, not added to it: <c>Where(a =&gt; X || Y).Where(a =&gt; Z)</c>
+    /// is <c>(X || Y) &amp;&amp; Z</c>.
+    /// </summary>
+    private static FetchFilter RootAndFilter(TranslationContext ctx)
+    {
+        var root = ctx.Query.Filter ??= new FetchFilter { Type = FilterType.And };
+        if (root.Type == FilterType.And)
+            return root;
+
+        var earlier = new FetchFilter { Type = root.Type };
+        earlier.Conditions.AddRange(root.Conditions);
+        earlier.Filters.AddRange(root.Filters);
+        earlier.Links.AddRange(root.Links);
+        root.Conditions.Clear();
+        root.Filters.Clear();
+        root.Links.Clear();
+        root.Type = FilterType.And;
+        root.Filters.Add(earlier);
+        return root;
     }
 
     private static void TranslatePredicate(Expression expr, FetchFilter filter, TranslationContext ctx, bool negated = false)
@@ -905,6 +929,7 @@ internal static class FetchXmlQueryTranslator
                     || (equalsCall.Method.DeclaringType == typeof(object)
                         && equalsCall.Object is { } eqObj
                         && eqObj.Type.IsGenericType
+                        && Nullable.GetUnderlyingType(eqObj.Type) is null
                         && eqObj.Type != typeof(string)
                         && ResolveAttribute(eqObj, ctx) is not null)):
                 {
@@ -943,16 +968,23 @@ internal static class FetchXmlQueryTranslator
                     return;
                 }
 
+            // x.Attr.Equals(value), Equals(x.Attr, value), string.Equals(x.Attr, value[, comparison])
+            // → as x.Attr == value. Dataverse compares text without case, as it does for ==.
+            case MethodCallExpression { Method.Name: "Equals" } valueEqualsCall
+                when TryRewriteEquals(valueEqualsCall) is { } equality:
+                TranslatePredicate(equality, filter, ctx, negated);
+                return;
+
             // Queryable.Any(source, predicate) → link-type="any" / negated → "not any"
             case MethodCallExpression { Method: { Name: "Any", DeclaringType: var anyDeclType } } anyCall
                 when anyDeclType == typeof(Queryable) && anyCall.Arguments.Count == 2:
-                filter.Links.Add(BuildSubqueryLink(anyCall, negated ? "not any" : "any", negateConditions: false, ctx.PrimaryKeyResolver));
+                AddSubqueryLink(anyCall, negated ? "not any" : "any", negateConditions: false, filter, ctx);
                 return;
 
             // Queryable.All(source, predicate) → link-type="all" / negated → "not all"
             case MethodCallExpression { Method: { Name: "All", DeclaringType: var allDeclType } } allCall
                 when allDeclType == typeof(Queryable) && allCall.Arguments.Count == 2:
-                filter.Links.Add(BuildSubqueryLink(allCall, negated ? "not all" : "all", negateConditions: true, ctx.PrimaryKeyResolver));
+                AddSubqueryLink(allCall, negated ? "not all" : "all", negateConditions: true, filter, ctx);
                 return;
 
             // ServiceClientExtensions.Exists(source, predicate) → link-type="exists"
@@ -961,9 +993,9 @@ internal static class FetchXmlQueryTranslator
             case MethodCallExpression { Method: { Name: "Exists", DeclaringType: var existsDeclType } } existsCall
                 when existsDeclType == typeof(ServiceClientExtensions) && existsCall.Arguments.Count == 2:
                 if (negated)
-                    filter.Links.Add(BuildSubqueryLink(existsCall, "not any", negateConditions: false, ctx.PrimaryKeyResolver));
+                    AddSubqueryLink(existsCall, "not any", negateConditions: false, filter, ctx);
                 else
-                    HandleEntityLevelLinkPredicate(existsCall, ctx, "exists");
+                    AddEntityLevelLink(existsCall, "exists", filter, ctx);
                 return;
 
             // ServiceClientExtensions.In(source, predicate) → link-type="in"
@@ -972,9 +1004,9 @@ internal static class FetchXmlQueryTranslator
             case MethodCallExpression { Method: { Name: "In", DeclaringType: var inDeclType } } inCall
                 when inDeclType == typeof(ServiceClientExtensions) && inCall.Arguments.Count == 2:
                 if (negated)
-                    filter.Links.Add(BuildSubqueryLink(inCall, "not any", negateConditions: false, ctx.PrimaryKeyResolver));
+                    AddSubqueryLink(inCall, "not any", negateConditions: false, filter, ctx);
                 else
-                    HandleEntityLevelLinkPredicate(inCall, ctx, "in");
+                    AddEntityLevelLink(inCall, "in", filter, ctx);
                 return;
 
             // && → AND filter (flatten if parent is already AND)
@@ -1322,17 +1354,92 @@ internal static class FetchXmlQueryTranslator
     }
 
     /// <summary>
-    /// Translates a subquery call (e.g. <c>Exists</c> or <c>In</c>) into a
-    /// <see cref="FetchLinkEntity"/> with the specified <paramref name="linkType"/>
-    /// added as a direct child of the entity (not inside a filter).
+    /// Adds a subquery (<c>Any</c>, <c>All</c>, or a negated <c>Exists</c> or <c>In</c>) to the
+    /// filter as a link-entity of <paramref name="linkType"/>. A filter's link-entity links from the
+    /// entity that holds the filter, so one correlated with a joined entity goes in that entity's
+    /// filter (see <see cref="FilterOf"/>).
     /// </summary>
-    private static void HandleEntityLevelLinkPredicate(
-        MethodCallExpression call, TranslationContext ctx, string linkType)
+    private static void AddSubqueryLink(
+        MethodCallExpression call, string linkType, bool negateConditions, FetchFilter filter, TranslationContext ctx)
     {
-        var linkEntity = BuildSubqueryLink(
-            call, linkType,
-            negateConditions: false, ctx.PrimaryKeyResolver);
-        ctx.Query.Links.Add(linkEntity);
+        var (link, outerAlias) = BuildSubqueryLink(call, linkType, negateConditions, ctx);
+        FilterOf(outerAlias, filter, ctx, call.Method.Name).Links.Add(link);
+    }
+
+    /// <summary>
+    /// Adds <c>Exists</c> or <c>In</c> as a link-entity of <paramref name="linkType"/> beside the
+    /// entity's other links, which Dataverse ANDs with the whole query. Under <c>||</c>, or in a
+    /// subquery's filter, it stays in its filter as an <c>any</c> link, which tests the same there:
+    /// beside the links, <c>a.Name == "X" || Exists(…)</c> was <c>a.Name == "X" &amp;&amp; Exists(…)</c>.
+    /// </summary>
+    private static void AddEntityLevelLink(
+        MethodCallExpression call, string linkType, FetchFilter filter, TranslationContext ctx)
+    {
+        if (!IsTopLevelAnd(filter, ctx))
+        {
+            AddSubqueryLink(call, "any", negateConditions: false, filter, ctx);
+            return;
+        }
+
+        var (link, outerAlias) = BuildSubqueryLink(call, linkType, negateConditions: false, ctx);
+        var links = outerAlias is null ? ctx.Query.Links : JoinedLinkOf(outerAlias, ctx, call.Method.Name).Links;
+        links.Add(link);
+    }
+
+    /// <summary>
+    /// Whether a condition added to <paramref name="filter"/> is ANDed with the whole query: the
+    /// filter is the query's own, an AND.
+    /// </summary>
+    private static bool IsTopLevelAnd(FetchFilter filter, TranslationContext ctx) =>
+        ReferenceEquals(filter, ctx.Query.Filter) && filter.Type == FilterType.And;
+
+    /// <summary>
+    /// The filter a subquery correlated with the entity of <paramref name="outerAlias"/> goes in:
+    /// <paramref name="filter"/> for the root, or the joined entity's own filter. That filter
+    /// limits which joined rows match, which limits the query's rows only for an inner join, and
+    /// only when the subquery is ANDed with the whole query.
+    /// </summary>
+    private static FetchFilter FilterOf(string? outerAlias, FetchFilter filter, TranslationContext ctx, string operatorName)
+    {
+        if (outerAlias is null)
+            return filter;
+
+        if (!IsTopLevelAnd(filter, ctx))
+            throw new NotSupportedException(
+                $"{operatorName}() on a joined entity can only be combined with && at the top of the predicate.");
+
+        return JoinedLinkOf(outerAlias, ctx, operatorName).Filter ??= new FetchFilter { Type = FilterType.And };
+    }
+
+    // The joined entity a subquery correlates with, inner-joined all the way from the root.
+    private static FetchLinkEntity JoinedLinkOf(string alias, TranslationContext ctx, string operatorName)
+    {
+        var path = LinkPath(ctx.Query.Links, alias)
+            ?? throw new NotSupportedException($"Could not find the joined entity '{alias}' for {operatorName}().");
+
+        // A left join's filter keeps its rows that don't match, and a WithFirstRow join's picks
+        // which row is first; neither filters the query's rows, nor does any join under one.
+        if (path.FirstOrDefault(link => link.LinkType != "inner") is { } notInner)
+            throw new NotSupportedException(
+                $"{operatorName}() on an entity joined through a {(notInner.LinkType == "outer" ? "left join" : "WithFirstRow join")} " +
+                "is not supported; correlate it with the root entity or one inner-joined to it.");
+
+        return path[^1];
+    }
+
+    // The links from the root down to the one with the alias, or null when there's none.
+    private static List<FetchLinkEntity>? LinkPath(List<FetchLinkEntity> links, string alias)
+    {
+        foreach (var link in links)
+        {
+            if (link.Alias == alias)
+                return [link];
+
+            if (LinkPath(link.Links, alias) is { } below)
+                return [link, .. below];
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -1340,33 +1447,32 @@ internal static class FetchXmlQueryTranslator
     /// Extracts inner entity info, splits conditions into join vs filter,
     /// creates the link entity, and translates filter conditions.
     /// </summary>
-    private static FetchLinkEntity BuildSubqueryLink(
-        MethodCallExpression call, string linkType,
-        bool negateConditions, Func<string, string>? primaryKeyResolver)
+    /// <returns>
+    /// The link-entity, and the alias of the joined entity its join condition reads, or null for
+    /// the root.
+    /// </returns>
+    private static (FetchLinkEntity Link, string? OuterAlias) BuildSubqueryLink(
+        MethodCallExpression call, string linkType, bool negateConditions, TranslationContext ctx)
     {
         var (innerLogicalName, _) = call.Arguments[0].GetSourceInfoFromType();
         var lambda = call.Arguments[1].ExtractLambda();
         var innerParam = lambda.Parameters[0];
 
-        // Flatten AndAlso chain and separate join vs filter conditions.
+        // Flatten the AndAlso chain. Only the join condition reads the outer row: the link-entity's
+        // filter has only the subquery's own columns, so o.Name == c.LastName would read the
+        // opportunity's column of that name.
         var allConditions = lambda.Body.FlattenAndAlso();
-        string? from = null, to = null;
-        var filterConditions = new List<Expression>();
+        var outerConditions = allConditions.Where(c => c.ReferencesParameterOtherThan(innerParam)).ToList();
+        var filterConditions = allConditions.Except(outerConditions).ToList();
 
-        foreach (var condition in allConditions)
-        {
-            if (from is null && TryExtractJoinCondition(condition, innerParam, out var f, out var t, primaryKeyResolver))
-            {
-                from = f;
-                to = t;
-            }
-            else
-            {
-                filterConditions.Add(condition);
-            }
-        }
+        if (outerConditions.Count > 1)
+            throw new NotSupportedException(
+                $"{call.Method.Name}() can read the outer row only in its join condition, not in " +
+                string.Join(" and ", outerConditions.Select(c => $"'{c}'")) + ".");
 
-        if (from is null || to is null)
+        if (outerConditions is not [var joinCondition]
+            || !TryExtractJoinCondition(joinCondition, innerParam, ctx, out var from, out var to)
+            || to is not { } outer)
             throw new NotSupportedException(
                 $"{call.Method.Name}() predicate must contain a join condition that compares an inner entity " +
                 "attribute to an outer entity attribute (e.g. a.PrimaryContactId.Id == contact.ContactId).");
@@ -1375,8 +1481,8 @@ internal static class FetchXmlQueryTranslator
         {
             Name = innerLogicalName,
             From = from,
-            To = to,
-            Alias = innerParam.Name!,
+            To = outer.Name,
+            Alias = UniqueLinkAlias(innerParam.Name!, ctx),
             LinkType = linkType
         };
 
@@ -1385,52 +1491,103 @@ internal static class FetchXmlQueryTranslator
         {
             linkEntity.Filter = new FetchFilter { Type = FilterType.And };
             var innerQuery = new FetchXmlQuery { EntityLogicalName = innerLogicalName };
-            var innerCtx = new TranslationContext(innerQuery, innerParam.Type);
+            var innerCtx = new TranslationContext(innerQuery, innerParam.Type) { Service = ctx.Service, Aliases = ctx.Aliases };
             foreach (var fc in filterConditions)
                 TranslatePredicate(fc, linkEntity.Filter, innerCtx, negated: negateConditions);
         }
 
-        return linkEntity;
+        return (linkEntity, outer.EntityAlias);
     }
 
     /// <summary>
-    /// Checks whether a binary Equal expression represents a join condition
-    /// (one side references the inner parameter, the other references the outer).
-    /// Returns the inner attribute as <paramref name="from"/> and the outer as <paramref name="to"/>.
+    /// Checks whether a binary Equal expression represents a join condition (one side reads the
+    /// inner parameter's column, the other a column of the outer row). Returns the inner column as
+    /// <paramref name="from"/>, and the outer one as <paramref name="to"/>, resolved as the outer
+    /// query resolves its columns, so it names the joined entity it's on.
     /// </summary>
     private static bool TryExtractJoinCondition(
-        Expression condition, ParameterExpression innerParam,
-        out string from, out string to,
-        Func<string, string>? primaryKeyResolver = null)
+        Expression condition, ParameterExpression innerParam, TranslationContext ctx,
+        [NotNullWhen(true)] out string? from, [NotNullWhen(true)] out ResolvedAttribute? to)
     {
-        from = null!;
-        to = null!;
+        (from, to) = (null, null);
 
         if (condition is not BinaryExpression { NodeType: ExpressionType.Equal } binary)
             return false;
 
-        var leftAttr = binary.Left.GetAttributeName(primaryKeyResolver);
-        var rightAttr = binary.Right.GetAttributeName(primaryKeyResolver);
-        if (leftAttr is null || rightAttr is null)
+        var (inner, outer) = (binary.Left.ReferencesParameter(innerParam), binary.Right.ReferencesParameter(innerParam)) switch
+        {
+            (true, false) => (binary.Left, binary.Right),
+            (false, true) => (binary.Right, binary.Left),
+            _ => ((Expression?)null, (Expression?)null),
+        };
+
+        if (inner is null || outer is null)
             return false;
 
-        var leftRefsInner = binary.Left.ReferencesParameter(innerParam);
-        var rightRefsInner = binary.Right.ReferencesParameter(innerParam);
+        from = inner.GetAttributeName(ctx.PrimaryKeyResolver);
+        to = ResolveAttribute(outer, ctx);
+        return from is not null && to is not null;
+    }
 
-        if (leftRefsInner && !rightRefsInner)
+    /// <summary>
+    /// Rewrites a call to <c>Equals</c> that compares two values as <c>==</c>:
+    /// <c>x.Name.Equals("X")</c>, <c>x["name"].Equals("X")</c>, <c>x.Count.Equals(5)</c>,
+    /// <c>Equals(x.Name, "X")</c>, <c>string.Equals(x.Name, "X", StringComparison.OrdinalIgnoreCase)</c>.
+    /// Dataverse compares text without case, as == translates; a comparison that asks for case
+    /// throws. Null when the call isn't one, or its values can't be compared.
+    /// </summary>
+    private static BinaryExpression? TryRewriteEquals(MethodCallExpression call)
+    {
+        var comparison = call.Arguments.Count > 0 && call.Arguments[^1].Type == typeof(StringComparison);
+        var values = call switch
         {
-            from = leftAttr;
-            to = rightAttr;
-            return true;
-        }
-        if (rightRefsInner && !leftRefsInner)
+            { Object: { } instance, Arguments.Count: var count } when count == (comparison ? 2 : 1)
+                => (instance, call.Arguments[0]),
+            { Object: null, Method.DeclaringType: var type, Arguments.Count: var count }
+                when (type == typeof(object) || type == typeof(string)) && count == (comparison ? 3 : 2)
+                => (call.Arguments[0], call.Arguments[1]),
+            _ => ((Expression?)null, (Expression?)null),
+        };
+
+        if (values is not ({ } left, { } right))
+            return null;
+
+        // Dataverse compares text without case: a comparison that asks for case can't be kept.
+        if (comparison
+            && (StringComparison)Convert.ToInt32(call.Arguments[^1].EvaluateValue()) is var asked
+            && asked is not (StringComparison.OrdinalIgnoreCase or StringComparison.CurrentCultureIgnoreCase
+                or StringComparison.InvariantCultureIgnoreCase))
         {
-            from = rightAttr;
-            to = leftAttr;
-            return true;
+            throw new NotSupportedException(
+                $"Equals with StringComparison.{asked} is not supported: Dataverse compares text without case. " +
+                "Use an IgnoreCase comparison, or compare after AsEnumerable().");
         }
 
-        return false;
+        // Equals(object) boxes its argument; compare the value it was given.
+        left = Unboxed(left);
+        right = Unboxed(right);
+
+        try
+        {
+            if (left.Type != right.Type)
+            {
+                if (left.Type.IsAssignableFrom(right.Type) || Nullable.GetUnderlyingType(left.Type) == right.Type)
+                    right = Expression.Convert(right, left.Type);
+                else
+                    left = Expression.Convert(left, right.Type);
+            }
+
+            return Expression.Equal(left, right);
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+
+        static Expression Unboxed(Expression expr) =>
+            expr is UnaryExpression { NodeType: ExpressionType.Convert, Operand: var operand } && expr.Type == typeof(object)
+                ? operand
+                : expr;
     }
 
     // -------------------------------------------------------------------------
@@ -1643,7 +1800,7 @@ internal static class FetchXmlQueryTranslator
             ThrowIfAfterTake(ctx, call.Method.Name);
             BindKeptEntity(ctx, call.Arguments[1]);
             var lambda = call.Arguments[1].ExtractLambda();
-            var filter = ctx.Query.Filter ??= new FetchFilter { Type = FilterType.And };
+            var filter = RootAndFilter(ctx);
             TranslatePredicate(ReadThroughSelect(lambda, ctx, call.Method.Name), filter, ctx);
         }
 
@@ -1715,7 +1872,7 @@ internal static class FetchXmlQueryTranslator
             if (call.Arguments.Count == 2)
             {
                 var lambda = call.Arguments[1].ExtractLambda();
-                var filter = ctx.Query.Filter ??= new FetchFilter { Type = FilterType.And };
+                var filter = RootAndFilter(ctx);
                 TranslatePredicate(ReadThroughSelect(lambda, ctx, methodName), filter, ctx);
             }
 
@@ -1789,12 +1946,58 @@ internal static class FetchXmlQueryTranslator
             }
         }
 
+        DropOrdersForAggregate(ctx, methodName);
         ctx.Query.Aggregate = true;
         ctx.Query.Materializer = null;
 
         // See ClearLinkProjectedColumns call in HandleGroupBy: a composed source may
         // have projected whole link entities, which is invalid in an aggregate query.
         ClearLinkProjectedColumns(ctx.Query.Links);
+    }
+
+    /// <summary>
+    /// Drops the orders of the rows an aggregate reads: Dataverse rejects an order on a column in
+    /// an aggregate query, and the rows' order doesn't change a count, sum or maximum
+    /// (<c>OrderBy(a =&gt; a.Name).Count()</c>). A WithFirstRow join's order picks which joined row
+    /// each one reads, which an aggregate query can't express, so that throws. An order on an
+    /// aggregate's alias stays.
+    /// </summary>
+    private static void DropOrdersForAggregate(TranslationContext ctx, string operatorName)
+    {
+        if (ctx.Query.Orders.Any(order => order.Alias is null && order.EntityAlias is { } alias
+                && ctx.Query.Links.FindLinkByAlias(alias) is { LinkType: "matchfirstrowusingcrossapply" }))
+        {
+            throw new NotSupportedException(
+                $"'{operatorName}' over a WithFirstRow join whose inner source is ordered is not supported: an " +
+                "aggregate query can't order its rows, and the order picks each joined row. Aggregate after " +
+                "AsEnumerable(), or remove the inner OrderBy.");
+        }
+
+        ctx.Query.Orders.RemoveAll(order => order.Alias is null);
+        DropColumnOrders(ctx.Query.Links);
+
+        static void DropColumnOrders(List<FetchLinkEntity> links)
+        {
+            foreach (var link in links)
+            {
+                link.Orders.RemoveAll(order => order.Alias is null);
+                DropColumnOrders(link.Links);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Throws when GroupBy follows an order: LINQ returns the groups in the order their keys first
+    /// appear, which follows it, and, over a WithFirstRow join, the order picks each joined row.
+    /// An aggregate query can't order by a column, only by a key or aggregate after the select.
+    /// </summary>
+    private static void ThrowIfOrderedBeforeGroupBy(TranslationContext ctx, string operatorName)
+    {
+        if (ctx.Query.Orders.Any(order => order.Alias is null))
+            throw new NotSupportedException(
+                $"'{operatorName}' after OrderBy, or over a WithFirstRow join whose inner source is ordered, is not " +
+                "supported: Dataverse can't order an aggregate query's rows. Order the groups after the Select " +
+                "(orderby g.Key), or group after AsEnumerable().");
     }
 
     /// <summary>
@@ -1838,6 +2041,7 @@ internal static class FetchXmlQueryTranslator
         // Extract key selector
         var keySelector = call.Arguments[1].ExtractLambda();
 
+        ThrowIfOrderedBeforeGroupBy(ctx, call.Method.Name);
         ctx.IsGrouped = true;
         ctx.Query.Aggregate = true;
         ctx.Query.AllAttributes = false;
@@ -2685,7 +2889,7 @@ internal static class FetchXmlQueryTranslator
             Name = innerLogicalName,
             From = innerKeyAttr,
             To = outerKeyAttr,
-            Alias = resultLambda.Parameters[1].Name!,
+            Alias = UniqueLinkAlias(resultLambda.Parameters[1].Name!, ctx),
             LinkType = linkType
         };
         ctx.Query.Links.Add(link);
@@ -2736,7 +2940,7 @@ internal static class FetchXmlQueryTranslator
             Name = innerLogicalName,
             From = innerKeyAttr,
             To = outerKeyResolved.Name,
-            Alias = UniqueLinkAlias(resultLambda.Parameters[1].Name!, ctx.Query.Links),
+            Alias = UniqueLinkAlias(resultLambda.Parameters[1].Name!, ctx),
             LinkType = linkType
         };
         if (innerSource is not null)
@@ -2777,16 +2981,18 @@ internal static class FetchXmlQueryTranslator
     }
 
     /// <summary>
-    /// The alias a joined entity's link gets: its range variable's name, or, when the query
-    /// already has a link by that name (<c>from x in contacts join c in …</c>, where
-    /// <c>contacts</c> joined its own <c>c</c>), that name numbered. Its join mapping, under the
-    /// range variable's name, carries the alias.
+    /// The alias a link gets, which it reserves: its range variable's name, or, when the query
+    /// already has a link by that name, a join's or a subquery's (<c>from x in contacts join c in …</c>,
+    /// where <c>contacts</c> joined its own <c>c</c>), that name numbered. A join's mapping, under
+    /// the range variable's name, carries the alias.
     /// </summary>
-    private static string UniqueLinkAlias(string name, List<FetchLinkEntity> links)
+    private static string UniqueLinkAlias(string name, TranslationContext ctx)
     {
         var alias = name;
-        for (var i = 1; links.FindLinkByAlias(alias) is not null; i++)
+        for (var i = 1; ctx.Aliases.Contains(alias); i++)
             alias = $"{name}{i}";
+
+        ctx.Aliases.Add(alias);
         return alias;
     }
 
@@ -2846,7 +3052,7 @@ internal static class FetchXmlQueryTranslator
             Name = innerLogicalName,
             From = innerKeyAttr,
             To = outerKeyAttr,
-            Alias = resultSelector.Parameters[1].Name!,
+            Alias = UniqueLinkAlias(resultSelector.Parameters[1].Name!, ctx),
             LinkType = "outer"
         });
         var outerPath = resultSelector.Parameters[0].Type.FindOuterPropertyPath(outerEntityType);
@@ -3142,6 +3348,12 @@ internal static class FetchXmlQueryTranslator
         /// (see <see cref="BindKeptEntity"/>). Null after any other select, and when none has run.
         /// </summary>
         public JoinEntityInfo? KeptEntity { get; set; }
+
+        /// <summary>
+        /// The link aliases the query uses, its joins' and its subqueries', shared with the
+        /// contexts its subqueries translate in: a new link's alias mustn't repeat one.
+        /// </summary>
+        public HashSet<string> Aliases { get; init; } = [];
 
         /// <summary>
         /// The selects already folded with the selects they're on (see FoldSelects), which
