@@ -98,7 +98,7 @@ internal class DataverseQueryProviderAsync<T> : DataverseQueryProvider<T>, IAsyn
         FetchXmlQuery query, CancellationToken cancellationToken)
     {
         var entities = await RetrieveQueryAsync(query, cancellationToken);
-        return ExtractAggregateResult<TElement>(entities, query.TerminalOperator);
+        return ExtractAggregateResult<TElement>(entities, query);
     }
 
     private async Task<List<Entity>> RetrieveQueryAsync(FetchXmlQuery query, CancellationToken cancellationToken)

@@ -1,6 +1,7 @@
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using PowerPortalsPro.Dataverse.Linq.Model;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq.Expressions;
 using System.Reflection;
 
@@ -176,8 +177,9 @@ internal static class FetchXmlQueryTranslator
                 switch (call.Method.Name)
                 {
                     case nameof(Queryable.Select):
-                        TranslateCore(call.Arguments[0], ctx);
-                        HandleSelect(call, ctx);
+                        var select = ctx.FoldedSelects.Contains(call) ? call : FoldSelects(call, ctx.FoldedSelects);
+                        TranslateCore(select.Arguments[0], ctx);
+                        HandleSelect(select, ctx, followsSelect: IsQueryableSelect(select.Arguments[0]));
                         return;
 
                     case nameof(Queryable.Where):
@@ -210,12 +212,33 @@ internal static class FetchXmlQueryTranslator
 
                     case nameof(Queryable.Distinct):
                         TranslateCore(call.Arguments[0], ctx);
+                        ThrowIfSelectingResults(ctx, call.Method.Name);
+
+                        // Dataverse removes duplicates and then takes the first rows; LINQ's
+                        // Take(n).Distinct() takes the first rows and removes duplicates among them.
+                        if (ctx.Query.Top is not null)
+                            throw new NotSupportedException(
+                                "Distinct() after Take() is not supported: Dataverse removes duplicates before it " +
+                                "takes the first rows. Put Distinct() before Take().");
+
+                        // Dataverse de-duplicates the columns the select reads; that matches
+                        // de-duplicating its values only when the values hold the columns as they are.
+                        if (ctx.Projection is { PreservesColumns: false })
+                            throw new NotSupportedException(
+                                "Distinct() can't follow a Select that computes its values from columns it doesn't " +
+                                "also return as they are (a.Name.Substring(0, 1)): Dataverse removes duplicate columns, " +
+                                "not duplicate computed values. Take Distinct() of the columns, then compute the values " +
+                                "after AsEnumerable().");
+
                         ctx.Query.Distinct = true;
+                        ctx.DistinctProjection = ctx.Projection;
                         return;
 
                     case nameof(Queryable.Take):
                         TranslateCore(call.Arguments[0], ctx);
-                        ctx.Query.Top = (int)((ConstantExpression)call.Arguments[1]).Value!;
+                        // Take(5).Take(20) takes 5.
+                        var count = (int)((ConstantExpression)call.Arguments[1]).Value!;
+                        ctx.Query.Top = ctx.Query.Top is { } taken ? Math.Min(taken, count) : count;
                         return;
 
                     case nameof(Queryable.GroupBy):
@@ -320,44 +343,70 @@ internal static class FetchXmlQueryTranslator
     // Select — extract attribute columns + compile projector
     // -------------------------------------------------------------------------
 
-    private static void HandleSelect(MethodCallExpression call, TranslationContext ctx)
+    /// <param name="followsSelect">
+    /// The select's source is another select it couldn't be folded into, whose results it runs on.
+    /// </param>
+    private static void HandleSelect(MethodCallExpression call, TranslationContext ctx, bool followsSelect)
     {
         var lambda = call.Arguments[1].ExtractLambda();
+        if (lambda.Parameters.Count != 1)
+            throw new NotSupportedException("The Select overload that passes each element's index is not supported.");
+
+        BindKeptEntity(ctx, call.Arguments[1]);
+
+        // A hook registered before this select runs on its values, so it can only be one for the
+        // type this select produces; otherwise it would be skipped.
+        if (ctx.Query.OnAfterMaterialize is { } hook && hook.GetType().GetGenericArguments()[1] != lambda.ReturnType)
+            throw new NotSupportedException(
+                "OnAfterMaterialize must follow the last Select, whose values it receives.");
+
+        // A select on an earlier select's results — a grouped one's, a join's or the root's — runs on
+        // those results, as LINQ runs it: when it follows that select directly but couldn't be
+        // folded into it (see FoldSelects), when the earlier select made something other than the
+        // query's own entities (.Select(a => new Account { Name = a.Name.ToUpper() }).Take(5)
+        // .Select(x => x.Name) keeps the upper-cased names), or once an earlier select has.
+        if (followsSelect || ctx.SelectsOnResults || ctx.RowsTransformed)
+        {
+            SelectOnResults(lambda, ctx);
+            return;
+        }
 
         if (ctx.IsGrouped)
         {
+            ctx.Projection = null;
             HandleGroupedSelect(lambda, ctx);
+            ctx.RowsTransformed = true;
+            ClearRowSelector(ctx);
             return;
         }
+
+        // Distinct before this select de-duplicates the rows, which its narrower columns would
+        // change; the root's primary key keeps them apart below, which a join can't do.
+        // A join's select that kept the root (select a) leaves the root's rows, which select as a
+        // query on the root does.
+        var keptRoot = ctx.KeptEntity is { LinkAlias: null };
+
+        if (ctx.Query.Distinct && !keptRoot && (ctx.OuterEntityPath is not null || ctx.JoinMappings is not null))
+            throw new NotSupportedException(
+                "A Select after Distinct() on a join is not supported; apply Distinct() after the Select.");
 
         if (ctx.OuterEntityPath is not null)
         {
             // After a single left join — resolve member accesses through transparent identifiers.
             // OuterEntityPath is cleared by HandleChainedLeftJoin, so this path is only
             // reached for single (non-chained) left joins.
-            var outerColumns = lambda.ExtractColumnsViaPath(ctx.OuterEntityPath);
-            IReadOnlyList<string>? innerColumns = ctx.InnerEntityProperty is not null
-                ? lambda.ExtractInnerColumnsViaProperty(ctx.InnerEntityProperty,
-                    () => ctx.PrimaryKeyOf(ctx.Query.Links[^1].Name))
-                : null;
-            var wholeInner = ctx.InnerEntityProperty is not null
-                && lambda.ReferencesWholeInnerEntity(ctx.InnerEntityProperty);
-            ApplyLeftJoinColumns(ctx.Query, outerColumns, innerColumns, wholeInner);
-
-            var leftJoinResolver = CreateLeftJoinResolver(
+            var resolveEntity = CreateLeftJoinResolver(
                 lambda.Parameters[0], ctx.OuterEntityPath!, ctx.OuterEntityType!,
-                ctx.InnerEntityProperty, ctx.Query.Links[^1].Alias!,
+                ctx.InnerEntityProperty, LeftJoinedLink(ctx).Alias!,
                 ctx.InnerEntityProperty is not null
                     ? lambda.Parameters[0].Type.GetProperty(ctx.InnerEntityProperty)?.PropertyType
                     : null,
-                ctx.Query.EntityLogicalName, ctx.Query.Links[^1].Name);
-            // Build materializer (new path)
+                ctx.Query.EntityLogicalName, LeftJoinedLink(ctx).Name);
+            ApplyProjection(lambda, resolveEntity, ctx, onJoin: true);
             ctx.Query.Materializer = MaterializerBuilder.BuildJoinMaterializer(
-                lambda,
-                expr => leftJoinResolver(expr) is { } r ? (r.LinkAlias, r.EntityType, r.LogicalName) : null,
-                ctx.PrimaryKeyResolver);
+                lambda, resolveEntity, ctx.PrimaryKeyResolver);
         }
-        else if (ctx.JoinMappings is not null)
+        else if (ctx.JoinMappings is not null && !keptRoot)
         {
             // After an inner join or chained left join with transparent identifier
             HandleJoinSelect(lambda, ctx);
@@ -365,9 +414,16 @@ internal static class FetchXmlQueryTranslator
         else
         {
             // Simple select on root entity
-            var columns = lambda.Body.ExtractColumns();
-            if (columns is { Count: > 0 })
-                ctx.Query.ApplyColumns(columns);
+            ApplyProjection(lambda, ProjectionExtensions.RootEntityResolver(
+                lambda.Parameters[0], ctx.Query.EntityLogicalName), ctx, onJoin: keptRoot);
+
+            // After Distinct(), every entity is a distinct row; its primary key keeps the rows apart
+            // when this select reads fewer columns (Distinct().Select(a => a.Name) gives every name).
+            if (ctx.Query.Distinct && !ctx.Query.AllAttributes)
+                ctx.Query.ApplyColumns([ctx.PrimaryKeyOf(ctx.Query.EntityLogicalName)]);
+
+            // Indexer reads give null for a column the row doesn't have, as they do through a join.
+            lambda = Expression.Lambda(lambda.Type, lambda.Body.ReadIndexerAsAttributeValue(), lambda.Parameters);
 
             // Check for CountChildren() calls in the projection
             var rowAggregates = lambda.Body.ExtractRowAggregates();
@@ -396,209 +452,322 @@ internal static class FetchXmlQueryTranslator
         }
     }
 
+    /// <summary>
+    /// Runs a select on the results of the select before it, reading no column itself: the earlier
+    /// select's columns stand. Every select after it runs on results too.
+    /// </summary>
+    private static void SelectOnResults(LambdaExpression lambda, TranslationContext ctx)
+    {
+        // The hook would run after this select rather than before it, where it was placed.
+        if (ctx.Query.OnAfterMaterialize is not null)
+            throw new NotSupportedException(
+                "OnAfterMaterialize must follow the last Select, whose values it receives.");
+
+        if (lambda.Body.CountChildrenCalls() > 0)
+            throw new NotSupportedException(
+                "CountChildren() can only be selected on the entity a query reads, not on an earlier Select's results.");
+
+        ctx.Query.Materializer = ctx.Query.Materializer?.ThenSelect(lambda)
+            ?? throw new NotSupportedException(
+                $"A Select over '{lambda.Parameters[0].Type.Name}' values needs an earlier Select that produces them.");
+        ctx.Projection = new ProjectedColumns();
+        ctx.SelectsOnResults = true;
+        ClearRowSelector(ctx);
+    }
+
+    /// <summary>
+    /// Requests the columns a select reads, on whichever entities <paramref name="resolveEntity"/>
+    /// finds in it, and keeps what it read for an aggregate that follows. Notes whether the select
+    /// made something other than one of the query's own entities, which a later select can't
+    /// re-read from the row.
+    /// </summary>
+    /// <param name="onJoin">
+    /// The select is on a join's rows: one that keeps an entity whole makes that entity the rows
+    /// (see <see cref="TranslationContext.KeptEntity"/>).
+    /// </param>
+    private static void ApplyProjection(
+        LambdaExpression lambda, MaterializerBuilder.EntityResolver resolveEntity, TranslationContext ctx,
+        bool onJoin)
+    {
+        var projected = lambda.ExtractProjectedColumns(resolveEntity, ctx.PrimaryKeyOf);
+        ctx.Query.ApplyProjectedColumns(projected);
+        ctx.Projection = projected;
+        var kept = resolveEntity(lambda.Body.UnwrapConvert());
+        ctx.RowsTransformed = kept is null;
+        ctx.RowSelector = lambda;
+        ctx.RowEntityResolver = resolveEntity;
+        ctx.KeptEntity = null;
+
+        if (onJoin && kept is { } entity)
+        {
+            ctx.KeptEntity = JoinEntityInfo.Of(entity);
+
+            // The rows are that entity now, not the join's rows or a left join's transparent
+            // identifiers. The join's range variables are out of scope: operators after it find
+            // their columns by the names BindKeptEntity gives the entity, and a join's new ones.
+            ctx.JoinMappings = new Dictionary<string, JoinEntityInfo>();
+            ctx.OuterEntityPath = null;
+            ctx.OuterEntityType = null;
+            ctx.InnerEntityProperty = null;
+            ctx.LeftJoinAlias = null;
+        }
+    }
+
+    /// <summary>
+    /// The left join a single left join's transparent identifiers name: an Exists after it adds a
+    /// link of its own, so the last link added isn't necessarily it.
+    /// </summary>
+    private static FetchLinkEntity LeftJoinedLink(TranslationContext ctx) =>
+        ctx.LeftJoinAlias is { } alias && ctx.Query.Links.FindLinkByAlias(alias) is { } link
+            ? link
+            : throw new InvalidOperationException("The query has no left join to resolve against.");
+
+    /// <summary>
+    /// Binds the parameter of each lambda to the entity a join's select kept whole, when there is
+    /// one: after <c>select c</c>, <c>x =&gt; x.FirstName</c> reads the contact's column whatever
+    /// the lambda names it, and after <c>select a</c>, <c>c =&gt; c.Name</c> reads the account's,
+    /// not the joined contact's. The rows are that entity, so the name can mean nothing else.
+    /// </summary>
+    /// <param name="lambdaArguments">
+    /// The operator's arguments whose lambda takes a row as its first parameter.
+    /// </param>
+    private static void BindKeptEntity(TranslationContext ctx, params Expression[] lambdaArguments)
+    {
+        if (ctx.KeptEntity is not { } kept)
+            return;
+
+        var mappings = ctx.JoinMappings is null
+            ? new Dictionary<string, JoinEntityInfo>()
+            : new Dictionary<string, JoinEntityInfo>(ctx.JoinMappings);
+        foreach (var argument in lambdaArguments)
+        {
+            if (argument.ExtractLambda().Parameters is [{ Name: { } name }, ..])
+                mappings[name] = kept;
+        }
+
+        ctx.JoinMappings = mappings;
+    }
+
+    /// <summary>
+    /// Forgets the select operators were read through, once its values are no longer the rows':
+    /// after a select on groups or on results, or a GroupBy.
+    /// </summary>
+    private static void ClearRowSelector(TranslationContext ctx)
+    {
+        ctx.RowSelector = null;
+        ctx.RowEntityResolver = null;
+        ctx.KeptEntity = null;
+    }
+
+    /// <summary>
+    /// The body of an operator's lambda after a select, as it reads the rows the select ran on:
+    /// after <c>.Select(a =&gt; new { a.Name })</c> or <c>.Select(a =&gt; new Account { Name = a.Name })</c>,
+    /// <c>x =&gt; x.Name == "Contoso"</c> reads <c>a.Name</c>, the column, and after a join's
+    /// <c>select new { a, c }</c>, <c>x.c.LastName</c> reads the joined contact's. A value the
+    /// select computed (<c>Name = "x" + a.Name</c>) is then no column, and doesn't translate,
+    /// rather than testing the column it came from. Its columns resolve on the entities the select
+    /// read (see <see cref="ResolveAttribute"/>). After a select that kept the query's own
+    /// entities, or none, the body is as it was.
+    /// </summary>
+    /// <exception cref="NotSupportedException">
+    /// The select made new values from groups, whose members this can't read back to columns.
+    /// </exception>
+    private static Expression ReadThroughSelect(LambdaExpression lambda, TranslationContext ctx, string operatorName)
+    {
+        if (!ctx.RowsTransformed)
+            return lambda.Body;
+
+        if (ctx.RowSelector is not { } selector)
+            throw new NotSupportedException(
+                $"'{operatorName}' can't follow a Select on groups. Apply it before the Select, or after AsEnumerable().");
+
+        var parameter = lambda.Parameters[0];
+        var selected = selector.Body.Type == parameter.Type
+            ? selector.Body
+            : Expression.Convert(selector.Body, parameter.Type);
+        return lambda.Body
+            .ReplaceParameter(parameter, selected)
+            .ReduceCreatedMemberReads(read => read.ResolveAttributeAccess(ctx.PrimaryKeyOf)?.AttributeName);
+    }
+
+    /// <summary>
+    /// Throws when an operator can't read its lambda through the select before it (see
+    /// <see cref="ReadThroughSelect"/>) and would read the row instead: a join or a GroupBy after
+    /// a select that made new values would key or group on the columns, not on those values.
+    /// </summary>
+    private static void ThrowIfRowsTransformed(TranslationContext ctx, string operatorName)
+    {
+        if (ctx.RowsTransformed)
+            throw new NotSupportedException(
+                $"'{operatorName}' can't follow a Select that makes new values. Apply it before the Select.");
+    }
+
+    /// <summary>
+    /// Throws when an operator follows <c>Take()</c>: Dataverse filters, orders, groups, joins and
+    /// aggregates every row before it takes the first ones, where LINQ applies the operator to
+    /// the rows taken.
+    /// </summary>
+    private static void ThrowIfAfterTake(TranslationContext ctx, string operatorName)
+    {
+        if (ctx.Query.Top is not null)
+            throw new NotSupportedException(
+                $"'{operatorName}' after Take() is not supported: Dataverse applies it to every row before it " +
+                "takes the first ones. Apply it before Take(), or after AsEnumerable().");
+    }
+
+    /// <summary>
+    /// Folds <c>source.Select(f).Select(g)</c> into <c>source.Select(x =&gt; g(f(x)))</c>, so the
+    /// second select is read against the columns of the rows the first runs on, an entity or a
+    /// join's: <c>.Select(a =&gt; new { a.Name, a.Website }).Select(x =&gt; x.Name)</c> reads only
+    /// <c>name</c>, and <c>.Select(a =&gt; a.NumberOfEmployees).Select(n =&gt; n + 1).Sum()</c> is
+    /// known to sum a computed value rather than the column. A grouped select isn't folded: its
+    /// body is read as the aggregates and keys it projects. A select that isn't folded runs on
+    /// the first one's results instead, which gives the same values. Like any provider that prunes
+    /// a projection, a fold doesn't evaluate the parts of <c>f</c> that <c>g</c> doesn't use, so
+    /// those can't throw, and evaluates the rest in <c>g</c>'s order rather than <c>f</c>'s.
+    /// </summary>
+    /// <param name="select">A select, perhaps on others.</param>
+    /// <param name="folded">
+    /// Receives each select of the folded chain, so translating the chain doesn't fold it again.
+    /// </param>
+    /// <returns>The select the chain folds into, or the outermost one left unfolded.</returns>
+    private static MethodCallExpression FoldSelects(MethodCallExpression select, HashSet<Expression> folded)
+    {
+        // Fold the selects below first, so a chain of them folds from its source up.
+        if (IsQueryableSelect(select.Arguments[0]))
+        {
+            var source = FoldSelects((MethodCallExpression)select.Arguments[0], folded);
+            select = TryFoldSelectPair(source, select, out var pair)
+                ? pair
+                : select.Update(select.Object, [source, select.Arguments[1]]);
+        }
+
+        folded.Add(select);
+        return select;
+    }
+
+    private static bool IsQueryableSelect(Expression expr) =>
+        expr is MethodCallExpression { Method: { Name: nameof(Queryable.Select), DeclaringType: var type } }
+        && type == typeof(Queryable);
+
+    private static bool TryFoldSelectPair(
+        MethodCallExpression inner, MethodCallExpression outer, [NotNullWhen(true)] out MethodCallExpression? folded)
+    {
+        folded = null;
+        var innerLambda = inner.Arguments[1].ExtractLambda();
+        var outerLambda = outer.Arguments[1].ExtractLambda();
+        if (innerLambda.Parameters.Count != 1
+            || outerLambda.Parameters.Count != 1
+            || innerLambda.Parameters[0].Type is { IsGenericType: true } group
+                && group.GetGenericTypeDefinition() == typeof(IGrouping<,>))
+        {
+            return false;
+        }
+
+        // f is reduced first, so reducing the folded body only reduces g's reads of f's members
+        // and leaves f's own nodes as they are, for the check below to find.
+        var outerParameter = outerLambda.Parameters[0];
+        var innerBody = innerLambda.Body.ReduceAnonymousMemberReads();
+
+        // A select to a wider type keeps its body's own type (Select<Entity, object>(a => a.Name)
+        // has a string body), so it's cast to g's parameter type.
+        var inlined = innerBody.Type == outerParameter.Type
+            ? innerBody
+            : Expression.Convert(innerBody, outerParameter.Type);
+        var body = outerLambda.Body
+            .ReplaceParameter(outerParameter, inlined)
+            .ReduceAnonymousMemberReads();
+
+        // Inlined, each part of f that does work (a call, a new object) must still run at most
+        // once: Guid.NewGuid() run twice gives two values, and an object made twice is two
+        // objects. A part inside a nested lambda may run any number of times. A part that only
+        // reads a value can be repeated.
+        // An entity made by a member-init is only data, so making it once per member read doesn't
+        // split an object that's used whole; the work inside it, a call in a binding, is still
+        // counted each time. Another class's constructor may do work of its own.
+        if (body.EvaluatesAnyMoreThanOnce(
+                inlined.WorkingParts(),
+                onlyReadsMember: owner => owner is MemberInitExpression { Type: var type }
+                    && typeof(Entity).IsAssignableFrom(type)))
+        {
+            return false;
+        }
+
+        // A row aggregate is recognized only as a member of the select's own new { }; the fold
+        // mustn't move one out of it (x => x.Children, where Children = a.CountChildren()).
+        if (body.CountChildrenCalls() != (body.ExtractRowAggregates()?.Count ?? 0))
+            return false;
+
+        var sourceType = innerLambda.Parameters[0].Type;
+        var lambda = Expression.Lambda(
+            typeof(Func<,>).MakeGenericType(sourceType, outerLambda.ReturnType), body, innerLambda.Parameters);
+        folded = Expression.Call(
+            typeof(Queryable), nameof(Queryable.Select),
+            [sourceType, outerLambda.ReturnType],
+            inner.Arguments[0],
+            Expression.Quote(lambda));
+        return true;
+    }
+
     private static void HandleJoinSelect(LambdaExpression lambda, TranslationContext ctx)
     {
         // A Select fully (re)defines the projection. When this query was composed on top
         // of an earlier projection (e.g. a prior `select c` that set AllAttributes on a
         // link), that earlier projection must not leak through — otherwise a link's
         // AllAttributes would suppress the narrower columns this Select requests. Clear
-        // link projections up front; the loop below repopulates them from this lambda.
+        // link projections up front; the columns this lambda reads repopulate them.
         // (In a single-pass query this runs once on links that have no columns yet, so
         // it is a no-op there.)
         ClearLinkProjectedColumns(ctx.Query.Links);
 
-        // Collect columns keyed by entity alias ("" = root entity)
-        var columnsByAlias = new Dictionary<string, List<string>>();
-        var wholeEntityAliases = new HashSet<string>();
-
-        // A bare-parameter body (e.g. the folded result selector (c, o) => c) projects a
-        // whole entity but yields no projection arguments. Treat the body itself as the
-        // single argument so the whole-entity reference below is detected.
-        var projectionArgs = lambda.Body.GetProjectionArguments().ToList();
-        if (projectionArgs.Count == 0)
-            projectionArgs.Add(lambda.Body);
-
-        foreach (var arg in projectionArgs)
-        {
-            // Try attribute resolution first — if it succeeds, it's a property access
-            var resolved = ResolveAttribute(arg, ctx);
-            if (resolved is not null)
-            {
-                var key = resolved.Value.EntityAlias ?? string.Empty;
-                if (!columnsByAlias.TryGetValue(key, out var list))
-                {
-                    list = [];
-                    columnsByAlias[key] = list;
-                }
-                list.Add(resolved.Value.Name);
-                continue;
-            }
-
-            // Check if it's a whole entity reference (not a property on it)
-            var wholeEntity = ResolveWholeJoinEntity(arg, ctx.JoinMappings!);
-            if (wholeEntity is not null)
-            {
-                wholeEntityAliases.Add(wholeEntity);
-                continue;
-            }
-
-            // Walk into sub-expressions for nested projections
-            CollectJoinAttributesByAlias(arg, ctx, columnsByAlias);
-        }
-
-        foreach (var (alias, columns) in columnsByAlias)
-        {
-            if (alias == string.Empty)
-                ctx.Query.ApplyColumns(columns);
-            else
-            {
-                var link = ctx.Query.Links.FindLinkByAlias(alias);
-                if (link is not null)
-                    foreach (var col in columns)
-                        link.Attributes.Add(new FetchAttribute { Name = col });
-            }
-        }
-
-        // Set all-attributes for whole entity references
-        foreach (var alias in wholeEntityAliases)
-        {
-            if (alias == string.Empty)
-            {
-                // Root entity — keep all-attributes (don't call ApplyColumns)
-            }
-            else
-            {
-                var link = ctx.Query.Links.FindLinkByAlias(alias);
-                if (link is not null)
-                    link.AllAttributes = true;
-            }
-        }
-
-        // Build materializer (new path)
-        var joinResolver = CreateJoinResolver(ctx.JoinMappings!);
+        var resolveEntity = CreateJoinResolver(ctx.JoinMappings!);
+        ApplyProjection(lambda, resolveEntity, ctx, onJoin: true);
         ctx.Query.Materializer = MaterializerBuilder.BuildJoinMaterializer(
-            lambda,
-            expr => joinResolver(expr) is { } r ? (r.LinkAlias, r.EntityType, r.LogicalName) : null,
-            ctx.PrimaryKeyResolver);
-    }
-
-    /// <summary>
-    /// Returns the join entity alias if the expression is a whole entity reference
-    /// (e.g. <c>ti.pa</c> in a join projection), or null if it's a property access.
-    /// Returns "" for the root entity.
-    /// </summary>
-    private static string? ResolveWholeJoinEntity(
-        Expression expr, Dictionary<string, JoinEntityInfo> joinMappings)
-    {
-        var current = expr;
-        while (current is MemberExpression me)
-        {
-            if (joinMappings.TryGetValue(me.Member.Name, out var mapping))
-                return mapping.LinkAlias ?? string.Empty;
-            current = me.Expression;
-        }
-
-        if (current is ParameterExpression param
-            && joinMappings.TryGetValue(param.Name!, out var directMapping))
-            return directMapping.LinkAlias ?? string.Empty;
-
-        return null;
-    }
-
-    /// <summary>
-    /// Recursively walks an expression to find all attribute references in a join
-    /// projection, keyed by entity alias (null for root entity).
-    /// </summary>
-    private static void CollectJoinAttributesByAlias(
-        Expression expr, TranslationContext ctx,
-        Dictionary<string, List<string>> columnsByAlias)
-    {
-        var resolved = ResolveAttribute(expr, ctx);
-        if (resolved is not null)
-        {
-            var key = resolved.Value.EntityAlias ?? string.Empty;
-            if (!columnsByAlias.TryGetValue(key, out var list))
-            {
-                list = [];
-                columnsByAlias[key] = list;
-            }
-            list.Add(resolved.Value.Name);
-            return;
-        }
-
-        // Walk into sub-expressions to find nested attribute references
-        switch (expr)
-        {
-            case MethodCallExpression mc:
-                if (mc.Object is not null)
-                    CollectJoinAttributesByAlias(mc.Object, ctx, columnsByAlias);
-                foreach (var a in mc.Arguments)
-                    CollectJoinAttributesByAlias(a, ctx, columnsByAlias);
-                break;
-
-            case BinaryExpression binary:
-                CollectJoinAttributesByAlias(binary.Left, ctx, columnsByAlias);
-                CollectJoinAttributesByAlias(binary.Right, ctx, columnsByAlias);
-                break;
-
-            case UnaryExpression unary:
-                CollectJoinAttributesByAlias(unary.Operand, ctx, columnsByAlias);
-                break;
-
-            case NewArrayExpression newArray:
-                foreach (var element in newArray.Expressions)
-                    CollectJoinAttributesByAlias(element, ctx, columnsByAlias);
-                break;
-
-            case ConditionalExpression conditional:
-                CollectJoinAttributesByAlias(conditional.Test, ctx, columnsByAlias);
-                CollectJoinAttributesByAlias(conditional.IfTrue, ctx, columnsByAlias);
-                CollectJoinAttributesByAlias(conditional.IfFalse, ctx, columnsByAlias);
-                break;
-
-            // Leaf nodes that carry no attribute references
-            case ConstantExpression:
-            case ParameterExpression:
-            case DefaultExpression:
-                break;
-
-            // MemberExpression that didn't resolve to an attribute (e.g. closure variable,
-            // non-entity property) — walk into the inner expression if present.
-            case MemberExpression me:
-                if (me.Expression is not null)
-                    CollectJoinAttributesByAlias(me.Expression, ctx, columnsByAlias);
-                break;
-
-            case NewExpression ne:
-                foreach (var arg in ne.Arguments)
-                    CollectJoinAttributesByAlias(arg, ctx, columnsByAlias);
-                break;
-
-            case MemberInitExpression memberInit:
-                foreach (var binding in memberInit.Bindings)
-                    if (binding is MemberAssignment assignment)
-                        CollectJoinAttributesByAlias(assignment.Expression, ctx, columnsByAlias);
-                break;
-
-            default:
-                throw new NotSupportedException(
-                    $"Unsupported expression type '{expr.NodeType}' in join projection.");
-        }
+            lambda, resolveEntity, ctx.PrimaryKeyResolver);
     }
 
     // -------------------------------------------------------------------------
     // Where — predicate translation
     // -------------------------------------------------------------------------
 
+    /// <summary>
+    /// Throws when an operator would translate a lambda against the row after a select has run on
+    /// an earlier projection's results (see <see cref="MaterializerInfo.ThenSelect"/>): the lambda's
+    /// parameter is then that select's value, which Dataverse never sees.
+    /// </summary>
+    private static void ThrowIfSelectingResults(TranslationContext ctx, string operatorName)
+    {
+        if (ctx.SelectsOnResults)
+            throw new NotSupportedException(
+                $"'{operatorName}' can't follow a Select that runs on an earlier Select's results, " +
+                "whose values Dataverse doesn't have. Apply it before those selects, or after AsEnumerable().");
+    }
+
+    /// <summary>
+    /// Throws when a join follows <c>Distinct()</c>: the join's columns would replace the ones
+    /// <c>Distinct()</c> de-duplicated, merging rows LINQ keeps apart.
+    /// </summary>
+    private static void ThrowIfDistinctBeforeJoin(TranslationContext ctx, string operatorName)
+    {
+        if (ctx.Query.Distinct)
+            throw new NotSupportedException(
+                $"'{operatorName}' after Distinct() is not supported; apply Distinct() after the join.");
+    }
+
     private static void HandleWhere(MethodCallExpression call, TranslationContext ctx)
     {
+        ThrowIfSelectingResults(ctx, call.Method.Name);
+        ThrowIfAfterTake(ctx, call.Method.Name);
+        BindKeptEntity(ctx, call.Arguments[1]);
         var lambda = call.Arguments[1].ExtractLambda();
+        var predicate = ReadThroughSelect(lambda, ctx, call.Method.Name);
 
-        // Left-join null filter: where c == null
-        if (ctx.InnerEntityProperty is not null && lambda.IsNullCheck(ctx.InnerEntityProperty))
+        // Left-join null filter: where c == null. After a select, the read-through predicate's
+        // ti.c == null is found among the comparisons instead.
+        if (!ctx.RowsTransformed && ctx.InnerEntityProperty is not null && lambda.IsNullCheck(ctx.InnerEntityProperty))
         {
-            var link = ctx.Query.Links[^1];
-            var filter = ctx.Query.Filter ??= new FetchFilter();
+            var link = LeftJoinedLink(ctx);
+            var filter = RootAndFilter(ctx);
             filter.Conditions.Add(new FetchCondition
             {
                 EntityAlias = link.Alias,
@@ -609,8 +778,8 @@ internal static class FetchXmlQueryTranslator
         }
 
         // General predicate
-        var rootFilter = ctx.Query.Filter ??= new FetchFilter();
-        TranslatePredicate(lambda.Body, rootFilter, ctx);
+        var rootFilter = RootAndFilter(ctx);
+        TranslatePredicate(predicate, rootFilter, ctx);
 
         // Collapse unnecessary nesting: if root has exactly one sub-filter and no
         // conditions or links, promote the sub-filter to root level.
@@ -626,6 +795,30 @@ internal static class FetchXmlQueryTranslator
             foreach (var l in child.Links)
                 rootFilter.Links.Add(l);
         }
+    }
+
+    /// <summary>
+    /// The query's filter, as the AND a predicate's conditions are added to. A Where whose predicate
+    /// is an <c>||</c> leaves the root filter that OR (see <see cref="HandleWhere"/>); a later
+    /// predicate is ANDed with it, not added to it: <c>Where(a =&gt; X || Y).Where(a =&gt; Z)</c>
+    /// is <c>(X || Y) &amp;&amp; Z</c>.
+    /// </summary>
+    private static FetchFilter RootAndFilter(TranslationContext ctx)
+    {
+        var root = ctx.Query.Filter ??= new FetchFilter { Type = FilterType.And };
+        if (root.Type == FilterType.And)
+            return root;
+
+        var earlier = new FetchFilter { Type = root.Type };
+        earlier.Conditions.AddRange(root.Conditions);
+        earlier.Filters.AddRange(root.Filters);
+        earlier.Links.AddRange(root.Links);
+        root.Conditions.Clear();
+        root.Filters.Clear();
+        root.Links.Clear();
+        root.Type = FilterType.And;
+        root.Filters.Add(earlier);
+        return root;
     }
 
     private static void TranslatePredicate(Expression expr, FetchFilter filter, TranslationContext ctx, bool negated = false)
@@ -746,6 +939,7 @@ internal static class FetchXmlQueryTranslator
                     || (equalsCall.Method.DeclaringType == typeof(object)
                         && equalsCall.Object is { } eqObj
                         && eqObj.Type.IsGenericType
+                        && Nullable.GetUnderlyingType(eqObj.Type) is null
                         && eqObj.Type != typeof(string)
                         && ResolveAttribute(eqObj, ctx) is not null)):
                 {
@@ -784,16 +978,23 @@ internal static class FetchXmlQueryTranslator
                     return;
                 }
 
+            // x.Attr.Equals(value), Equals(x.Attr, value), string.Equals(x.Attr, value[, comparison])
+            // → as x.Attr == value. Dataverse compares text without case, as it does for ==.
+            case MethodCallExpression { Method.Name: "Equals" } valueEqualsCall
+                when TryRewriteEquals(valueEqualsCall) is { } equality:
+                TranslatePredicate(equality, filter, ctx, negated);
+                return;
+
             // Queryable.Any(source, predicate) → link-type="any" / negated → "not any"
             case MethodCallExpression { Method: { Name: "Any", DeclaringType: var anyDeclType } } anyCall
                 when anyDeclType == typeof(Queryable) && anyCall.Arguments.Count == 2:
-                filter.Links.Add(BuildSubqueryLink(anyCall, negated ? "not any" : "any", negateConditions: false, ctx.PrimaryKeyResolver));
+                AddSubqueryLink(anyCall, negated ? "not any" : "any", negateConditions: false, filter, ctx);
                 return;
 
             // Queryable.All(source, predicate) → link-type="all" / negated → "not all"
             case MethodCallExpression { Method: { Name: "All", DeclaringType: var allDeclType } } allCall
                 when allDeclType == typeof(Queryable) && allCall.Arguments.Count == 2:
-                filter.Links.Add(BuildSubqueryLink(allCall, negated ? "not all" : "all", negateConditions: true, ctx.PrimaryKeyResolver));
+                AddSubqueryLink(allCall, negated ? "not all" : "all", negateConditions: true, filter, ctx);
                 return;
 
             // ServiceClientExtensions.Exists(source, predicate) → link-type="exists"
@@ -802,9 +1003,9 @@ internal static class FetchXmlQueryTranslator
             case MethodCallExpression { Method: { Name: "Exists", DeclaringType: var existsDeclType } } existsCall
                 when existsDeclType == typeof(ServiceClientExtensions) && existsCall.Arguments.Count == 2:
                 if (negated)
-                    filter.Links.Add(BuildSubqueryLink(existsCall, "not any", negateConditions: false, ctx.PrimaryKeyResolver));
+                    AddSubqueryLink(existsCall, "not any", negateConditions: false, filter, ctx);
                 else
-                    HandleEntityLevelLinkPredicate(existsCall, ctx, "exists");
+                    AddEntityLevelLink(existsCall, "exists", filter, ctx);
                 return;
 
             // ServiceClientExtensions.In(source, predicate) → link-type="in"
@@ -813,9 +1014,9 @@ internal static class FetchXmlQueryTranslator
             case MethodCallExpression { Method: { Name: "In", DeclaringType: var inDeclType } } inCall
                 when inDeclType == typeof(ServiceClientExtensions) && inCall.Arguments.Count == 2:
                 if (negated)
-                    filter.Links.Add(BuildSubqueryLink(inCall, "not any", negateConditions: false, ctx.PrimaryKeyResolver));
+                    AddSubqueryLink(inCall, "not any", negateConditions: false, filter, ctx);
                 else
-                    HandleEntityLevelLinkPredicate(inCall, ctx, "in");
+                    AddEntityLevelLink(inCall, "in", filter, ctx);
                 return;
 
             // && → AND filter (flatten if parent is already AND)
@@ -1052,6 +1253,12 @@ internal static class FetchXmlQueryTranslator
             return;
         }
 
+        // The other side reads the row but isn't a column: a computed value, or a cast that changes
+        // it ((int?)a.CreditLimit == a.NumberOfEmployees). Dataverse compares only columns.
+        if (valueExpr.ReferencesAnyParameter())
+            throw new NotSupportedException(
+                $"A comparison with '{attr.Name}' can only be to a value or another column, not to '{valueExpr}'.");
+
         var value = valueExpr.EvaluateValue();
         filter.Conditions.Add(new FetchCondition
         {
@@ -1080,7 +1287,7 @@ internal static class FetchXmlQueryTranslator
             || name != ctx.InnerEntityProperty)
             return false;
 
-        var link = ctx.Query.Links[^1];
+        var link = LeftJoinedLink(ctx);
         filter.Conditions.Add(new FetchCondition
         {
             EntityAlias = link.Alias,
@@ -1157,17 +1364,84 @@ internal static class FetchXmlQueryTranslator
     }
 
     /// <summary>
-    /// Translates a subquery call (e.g. <c>Exists</c> or <c>In</c>) into a
-    /// <see cref="FetchLinkEntity"/> with the specified <paramref name="linkType"/>
-    /// added as a direct child of the entity (not inside a filter).
+    /// Adds a subquery (<c>Any</c>, <c>All</c>, or a negated <c>Exists</c> or <c>In</c>) to the
+    /// filter as a link-entity of <paramref name="linkType"/>. A filter's link-entity links from the
+    /// entity that holds the filter, so one correlated with a joined entity goes in that entity's
+    /// filter (see <see cref="FilterOf"/>).
     /// </summary>
-    private static void HandleEntityLevelLinkPredicate(
-        MethodCallExpression call, TranslationContext ctx, string linkType)
+    private static void AddSubqueryLink(
+        MethodCallExpression call, string linkType, bool negateConditions, FetchFilter filter, TranslationContext ctx)
     {
-        var linkEntity = BuildSubqueryLink(
-            call, linkType,
-            negateConditions: false, ctx.PrimaryKeyResolver);
-        ctx.Query.Links.Add(linkEntity);
+        var (link, outerAlias) = BuildSubqueryLink(call, linkType, negateConditions, ctx);
+        FilterOf(outerAlias, filter, ctx, call.Method.Name).Links.Add(link);
+    }
+
+    /// <summary>
+    /// Adds <c>Exists</c> or <c>In</c> as a link-entity of <paramref name="linkType"/> beside the
+    /// entity's other links, which Dataverse ANDs with the whole query. Under <c>||</c>, or in a
+    /// subquery's filter, it stays in its filter as an <c>any</c> link, which tests the same there:
+    /// beside the links, <c>a.Name == "X" || Exists(…)</c> was <c>a.Name == "X" &amp;&amp; Exists(…)</c>.
+    /// </summary>
+    private static void AddEntityLevelLink(
+        MethodCallExpression call, string linkType, FetchFilter filter, TranslationContext ctx)
+    {
+        if (!IsTopLevelAnd(filter, ctx))
+        {
+            AddSubqueryLink(call, "any", negateConditions: false, filter, ctx);
+            return;
+        }
+
+        var (link, outerAlias) = BuildSubqueryLink(call, linkType, negateConditions: false, ctx);
+        var links = outerAlias is null ? ctx.Query.Links : JoinedLinkOf(outerAlias, ctx, call.Method.Name).Links;
+        links.Add(link);
+    }
+
+    /// <summary>
+    /// Whether a condition added to <paramref name="filter"/> is ANDed with the whole query: the
+    /// filter is the query's own, an AND.
+    /// </summary>
+    private static bool IsTopLevelAnd(FetchFilter filter, TranslationContext ctx) =>
+        ReferenceEquals(filter, ctx.Query.Filter) && filter.Type == FilterType.And;
+
+    /// <summary>
+    /// The filter a subquery correlated with the entity of <paramref name="outerAlias"/> goes in:
+    /// <paramref name="filter"/> for the root, or the joined entity's own filter. That filter
+    /// limits which joined rows match, which limits the query's rows only for an inner join, and
+    /// only when the subquery is ANDed with the whole query.
+    /// </summary>
+    private static FetchFilter FilterOf(string? outerAlias, FetchFilter filter, TranslationContext ctx, string operatorName)
+    {
+        if (outerAlias is null)
+            return filter;
+
+        if (!IsTopLevelAnd(filter, ctx))
+            throw new NotSupportedException(
+                $"{operatorName}() on a joined entity can only be combined with && at the top of the predicate.");
+
+        return JoinedLinkOf(outerAlias, ctx, operatorName).Filter ??= new FetchFilter { Type = FilterType.And };
+    }
+
+    // The joined entity a subquery correlates with, inner-joined all the way from the root.
+    private static FetchLinkEntity JoinedLinkOf(string alias, TranslationContext ctx, string operatorName)
+    {
+        var path = ctx.Query.Links.FindLinkPath(alias)
+            ?? throw new NotSupportedException($"Could not find the joined entity '{alias}' for {operatorName}().");
+
+        // A left join's filter keeps its rows that don't match, and a WithFirstRow join's picks
+        // which row is first; neither filters the query's rows, nor does any join under one.
+        if (path.FirstOrDefault(link => link.LinkType != "inner") is { } notInner)
+            throw new NotSupportedException(
+                $"{operatorName}() on an entity joined through a {DescribeLinkType(notInner.LinkType)} " +
+                "is not supported; correlate it with the root entity or one inner-joined to it.");
+
+        return path[^1];
+
+        static string DescribeLinkType(string? linkType) => linkType switch
+        {
+            "outer" => "left join",
+            "matchfirstrowusingcrossapply" => "WithFirstRow join",
+            _ => $"'{linkType}' link",
+        };
     }
 
     /// <summary>
@@ -1175,33 +1449,33 @@ internal static class FetchXmlQueryTranslator
     /// Extracts inner entity info, splits conditions into join vs filter,
     /// creates the link entity, and translates filter conditions.
     /// </summary>
-    private static FetchLinkEntity BuildSubqueryLink(
-        MethodCallExpression call, string linkType,
-        bool negateConditions, Func<string, string>? primaryKeyResolver)
+    /// <returns>
+    /// The link-entity, and the alias of the joined entity its join condition reads, or null for
+    /// the root.
+    /// </returns>
+    private static (FetchLinkEntity Link, string? OuterAlias) BuildSubqueryLink(
+        MethodCallExpression call, string linkType, bool negateConditions, TranslationContext ctx)
     {
         var (innerLogicalName, _) = call.Arguments[0].GetSourceInfoFromType();
         var lambda = call.Arguments[1].ExtractLambda();
         var innerParam = lambda.Parameters[0];
 
-        // Flatten AndAlso chain and separate join vs filter conditions.
-        var allConditions = lambda.Body.FlattenAndAlso();
-        string? from = null, to = null;
+        // Flatten the AndAlso chain. Only the join condition reads the outer row: the link-entity's
+        // filter has only the subquery's own columns, so o.Name == c.LastName would read the
+        // opportunity's column of that name.
+        var outerConditions = new List<Expression>();
         var filterConditions = new List<Expression>();
+        foreach (var condition in lambda.Body.FlattenAndAlso())
+            (condition.ReferencesParameterOtherThan(innerParam) ? outerConditions : filterConditions).Add(condition);
 
-        foreach (var condition in allConditions)
-        {
-            if (from is null && TryExtractJoinCondition(condition, innerParam, out var f, out var t, primaryKeyResolver))
-            {
-                from = f;
-                to = t;
-            }
-            else
-            {
-                filterConditions.Add(condition);
-            }
-        }
+        if (outerConditions.Count > 1)
+            throw new NotSupportedException(
+                $"{call.Method.Name}() can read the outer row only in its join condition, not in " +
+                string.Join(" and ", outerConditions.Select(c => $"'{c}'")) + ".");
 
-        if (from is null || to is null)
+        if (outerConditions is not [var joinCondition]
+            || !TryExtractJoinCondition(joinCondition, innerParam, ctx, out var from, out var to)
+            || to is not { } outer)
             throw new NotSupportedException(
                 $"{call.Method.Name}() predicate must contain a join condition that compares an inner entity " +
                 "attribute to an outer entity attribute (e.g. a.PrimaryContactId.Id == contact.ContactId).");
@@ -1210,8 +1484,8 @@ internal static class FetchXmlQueryTranslator
         {
             Name = innerLogicalName,
             From = from,
-            To = to,
-            Alias = innerParam.Name!,
+            To = outer.Name,
+            Alias = UniqueLinkAlias(innerParam.Name!, ctx),
             LinkType = linkType
         };
 
@@ -1220,52 +1494,115 @@ internal static class FetchXmlQueryTranslator
         {
             linkEntity.Filter = new FetchFilter { Type = FilterType.And };
             var innerQuery = new FetchXmlQuery { EntityLogicalName = innerLogicalName };
-            var innerCtx = new TranslationContext(innerQuery, innerParam.Type);
+            var innerCtx = new TranslationContext(innerQuery, innerParam.Type) { Service = ctx.Service, Aliases = ctx.Aliases };
             foreach (var fc in filterConditions)
                 TranslatePredicate(fc, linkEntity.Filter, innerCtx, negated: negateConditions);
         }
 
-        return linkEntity;
+        return (linkEntity, outer.EntityAlias);
     }
 
     /// <summary>
-    /// Checks whether a binary Equal expression represents a join condition
-    /// (one side references the inner parameter, the other references the outer).
-    /// Returns the inner attribute as <paramref name="from"/> and the outer as <paramref name="to"/>.
+    /// Checks whether a binary Equal expression represents a join condition (one side reads the
+    /// inner parameter's column, the other a column of the outer row). Returns the inner column as
+    /// <paramref name="from"/>, and the outer one as <paramref name="to"/>, resolved as the outer
+    /// query resolves its columns, so it names the joined entity it's on.
     /// </summary>
     private static bool TryExtractJoinCondition(
-        Expression condition, ParameterExpression innerParam,
-        out string from, out string to,
-        Func<string, string>? primaryKeyResolver = null)
+        Expression condition, ParameterExpression innerParam, TranslationContext ctx,
+        [NotNullWhen(true)] out string? from, [NotNullWhen(true)] out ResolvedAttribute? to)
     {
-        from = null!;
-        to = null!;
+        (from, to) = (null, null);
 
         if (condition is not BinaryExpression { NodeType: ExpressionType.Equal } binary)
             return false;
 
-        var leftAttr = binary.Left.GetAttributeName(primaryKeyResolver);
-        var rightAttr = binary.Right.GetAttributeName(primaryKeyResolver);
-        if (leftAttr is null || rightAttr is null)
+        var (inner, outer) = (binary.Left.ReferencesParameter(innerParam), binary.Right.ReferencesParameter(innerParam)) switch
+        {
+            (true, false) => (binary.Left, binary.Right),
+            (false, true) => (binary.Right, binary.Left),
+            _ => ((Expression?)null, (Expression?)null),
+        };
+
+        if (inner is null || outer is null)
             return false;
 
-        var leftRefsInner = binary.Left.ReferencesParameter(innerParam);
-        var rightRefsInner = binary.Right.ReferencesParameter(innerParam);
+        from = inner.GetAttributeName(ctx.PrimaryKeyResolver);
+        to = ResolveAttribute(outer, ctx);
+        return from is not null && to is not null;
+    }
 
-        if (leftRefsInner && !rightRefsInner)
+    /// <summary>
+    /// Rewrites a call to <c>Equals</c> that compares two values as <c>==</c>:
+    /// <c>x.Name.Equals("X")</c>, <c>x["name"].Equals("X")</c>, <c>x.Count.Equals(5)</c>,
+    /// <c>Equals(x.Name, "X")</c>, <c>string.Equals(x.Name, "X", StringComparison.OrdinalIgnoreCase)</c>.
+    /// Dataverse compares text without case. Equals without a comparison translates so, as == does,
+    /// though .NET would compare case: the provider's text comparisons all follow Dataverse's. One
+    /// that asks for case by name (StringComparison.Ordinal) throws rather than being ignored.
+    /// Null when the call isn't one, or its values can't be compared.
+    /// </summary>
+    private static BinaryExpression? TryRewriteEquals(MethodCallExpression call)
+    {
+        var comparison = call.Arguments.Count > 0 && call.Arguments[^1].Type == typeof(StringComparison);
+        var values = call switch
         {
-            from = leftAttr;
-            to = rightAttr;
-            return true;
-        }
-        if (rightRefsInner && !leftRefsInner)
+            { Object: { } instance, Arguments.Count: var count } when count == (comparison ? 2 : 1)
+                => (instance, call.Arguments[0]),
+            { Object: null, Method.DeclaringType: var type, Arguments.Count: var count }
+                when (type == typeof(object) || type == typeof(string)) && count == (comparison ? 3 : 2)
+                => (call.Arguments[0], call.Arguments[1]),
+            _ => ((Expression?)null, (Expression?)null),
+        };
+
+        if (values is not ({ } left, { } right))
+            return null;
+
+        // Dataverse compares text without case: a comparison that asks for case can't be kept.
+        if (comparison
+            && (StringComparison)Convert.ToInt32(call.Arguments[^1].EvaluateValue()) is var asked
+            && asked is not (StringComparison.OrdinalIgnoreCase or StringComparison.CurrentCultureIgnoreCase
+                or StringComparison.InvariantCultureIgnoreCase))
         {
-            from = rightAttr;
-            to = leftAttr;
-            return true;
+            throw new NotSupportedException(
+                $"Equals with StringComparison.{asked} is not supported: Dataverse compares text without case. " +
+                "Use an IgnoreCase comparison, or compare after AsEnumerable().");
         }
 
-        return false;
+        // Equals(object) boxes its argument; compare the value it was given.
+        left = Unboxed(left);
+        right = Unboxed(right);
+
+        // A boxed value equals only one of its own type: x.NumberOfEmployees.Equals(5L) and an
+        // enum's Equals(1) are always false, where == would convert.
+        var (leftValue, rightValue) = (ValueTypeOf(left.Type), ValueTypeOf(right.Type));
+        if (leftValue is not null && rightValue is not null && leftValue != rightValue)
+            throw new NotSupportedException(
+                $"Equals of a {leftValue.Name} and a {rightValue.Name} is always false; compare values of one type.");
+
+        try
+        {
+            if (left.Type != right.Type)
+            {
+                if (left.Type.IsAssignableFrom(right.Type) || Nullable.GetUnderlyingType(left.Type) == right.Type)
+                    right = Expression.Convert(right, left.Type);
+                else
+                    left = Expression.Convert(left, right.Type);
+            }
+
+            return Expression.Equal(left, right);
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+
+        static Type? ValueTypeOf(Type type) =>
+            Nullable.GetUnderlyingType(type) ?? (type.IsValueType ? type : null);
+
+        static Expression Unboxed(Expression expr) =>
+            expr is UnaryExpression { NodeType: ExpressionType.Convert, Operand: var operand } && expr.Type == typeof(object)
+                ? operand
+                : expr;
     }
 
     // -------------------------------------------------------------------------
@@ -1281,6 +1618,18 @@ internal static class FetchXmlQueryTranslator
     /// </summary>
     private static ResolvedAttribute? ResolveAttribute(Expression expr, TranslationContext ctx)
     {
+        // A cast that truncates or wraps the value ((int)a.Revenue.Value == 3 holds for 3.7)
+        // isn't the column, which a condition would test untruncated.
+        if (expr.HasLossyCast())
+            return null;
+
+        // After a select that made new values, an operator's lambda was read through it (see
+        // ReadThroughSelect), so its columns are on the entities that select read.
+        if (ctx.RowsTransformed && ctx.RowEntityResolver is { } resolveEntity)
+            return expr.TryResolveColumn(resolveEntity, ctx.PrimaryKeyOf, out var entity, out var column)
+                ? new ResolvedAttribute(column, entity.LinkAlias)
+                : null;
+
         if (expr is UnaryExpression { NodeType: ExpressionType.Convert } convert)
             expr = convert.Operand;
 
@@ -1300,43 +1649,17 @@ internal static class FetchXmlQueryTranslator
                 return leftResult;
         }
 
+        // After a join's select kept a joined entity (select c), every row lambda names it (see
+        // BindKeptEntity); a read the join's names don't find isn't the root's.
+        if (ctx.KeptEntity is { LinkAlias: not null })
+            return null;
+
         // Simple (non-join) resolution — resolve the attribute access and verify the entity
         // expression traces back to a lambda ParameterExpression (not a captured closure variable).
         // Without this check, captured entity properties like `capturedEntity.PrimaryKeyId`
         // would be incorrectly resolved as query attributes instead of constant values.
-        var access = expr.ResolveAttributeAccess(ctx.PrimaryKeyResolver, ctx.Query.EntityLogicalName);
-        if (access is not null && IsQueryParameterAccess(access.Value.EntityExpression))
-            return new ResolvedAttribute(access.Value.AttributeName, null);
-
-        return null;
-    }
-
-    /// <summary>
-    /// Returns true when the expression traces back to a <see cref="ParameterExpression"/>
-    /// (the lambda parameter representing a query entity), as opposed to a captured closure
-    /// variable which would root at a <see cref="ConstantExpression"/>.
-    /// </summary>
-    private static bool IsQueryParameterAccess(Expression expr)
-    {
-        while (true)
-        {
-            switch (expr)
-            {
-                case ParameterExpression:
-                    return true;
-                case MemberExpression { Expression: not null } m:
-                    expr = m.Expression;
-                    continue;
-                case UnaryExpression { NodeType: ExpressionType.Convert } c:
-                    expr = c.Operand;
-                    continue;
-                case MethodCallExpression { Object: not null } mc:
-                    expr = mc.Object;
-                    continue;
-                default:
-                    return false;
-            }
-        }
+        var name = expr.GetAttributeName(ctx.PrimaryKeyResolver, ctx.Query.EntityLogicalName);
+        return name is not null ? new ResolvedAttribute(name, null) : null;
     }
 
     /// <summary>
@@ -1360,7 +1683,7 @@ internal static class FetchXmlQueryTranslator
         // Check if the access is on the inner entity (link entity)
         if (ctx.InnerEntityProperty is not null && entityExpr.IsInnerEntityAccess(ctx.InnerEntityProperty))
         {
-            var linkAlias = ctx.Query.Links[^1].Alias;
+            var linkAlias = LeftJoinedLink(ctx).Alias;
             return new ResolvedAttribute(access.Value.AttributeName, linkAlias);
         }
 
@@ -1403,18 +1726,32 @@ internal static class FetchXmlQueryTranslator
     private static JoinEntityInfo? FindJoinMapping(
         Expression entityExpression, Dictionary<string, JoinEntityInfo> joinMappings)
     {
+        // The chain must start at the lambda's parameter, through any casts: a captured entity
+        // named like a join entity (closure.c) is a value, not one of the query's entities.
+        JoinEntityInfo? found = null;
         var current = entityExpression;
-        while (current is MemberExpression me)
+        while (true)
         {
-            if (joinMappings.TryGetValue(me.Member.Name, out var mapping))
-                return mapping;
-            current = me.Expression;
+            if (current is MemberExpression me)
+            {
+                if (found is null && joinMappings.TryGetValue(me.Member.Name, out var mapping))
+                    found = mapping;
+                current = me.Expression;
+            }
+            else if (current is UnaryExpression { NodeType: ExpressionType.Convert } convert)
+            {
+                current = convert.Operand;
+            }
+            else
+            {
+                break;
+            }
         }
 
-        return current is ParameterExpression param
-            && joinMappings.TryGetValue(param.Name!, out var directMapping)
-                ? directMapping
-                : null;
+        if (current is not ParameterExpression param)
+            return null;
+
+        return found ?? (joinMappings.TryGetValue(param.Name!, out var directMapping) ? directMapping : null);
     }
 
     // -------------------------------------------------------------------------
@@ -1423,7 +1760,11 @@ internal static class FetchXmlQueryTranslator
 
     private static void HandleOrderBy(MethodCallExpression call, TranslationContext ctx)
     {
+        ThrowIfSelectingResults(ctx, call.Method.Name);
+        ThrowIfAfterTake(ctx, call.Method.Name);
+        BindKeptEntity(ctx, call.Arguments[1]);
         var lambda = call.Arguments[1].ExtractLambda();
+        var key = ReadThroughSelect(lambda, ctx, call.Method.Name);
         var descending = call.Method.Name is nameof(Queryable.OrderByDescending)
                                            or nameof(Queryable.ThenByDescending);
 
@@ -1446,7 +1787,7 @@ internal static class FetchXmlQueryTranslator
             }
         }
 
-        var resolved = ResolveAttribute(lambda.Body, ctx)
+        var resolved = ResolveAttribute(key, ctx)
             ?? throw new NotSupportedException(
                 "OrderBy key must resolve to an attribute.");
 
@@ -1470,9 +1811,12 @@ internal static class FetchXmlQueryTranslator
         // If the overload includes a predicate (2 arguments), apply it as a Where filter
         if (call.Arguments.Count == 2)
         {
+            ThrowIfSelectingResults(ctx, call.Method.Name);
+            ThrowIfAfterTake(ctx, call.Method.Name);
+            BindKeptEntity(ctx, call.Arguments[1]);
             var lambda = call.Arguments[1].ExtractLambda();
-            var filter = ctx.Query.Filter ??= new FetchFilter { Type = FilterType.And };
-            TranslatePredicate(lambda.Body, filter, ctx);
+            var filter = RootAndFilter(ctx);
+            TranslatePredicate(ReadThroughSelect(lambda, ctx, call.Method.Name), filter, ctx);
         }
 
         ctx.Query.TerminalOperator = call.Method.Name switch
@@ -1484,9 +1828,11 @@ internal static class FetchXmlQueryTranslator
             _ => throw new NotSupportedException($"Unsupported terminal operator '{call.Method.Name}'.")
         };
 
-        // Single needs at least 2 rows to validate uniqueness; First only needs 1
-        ctx.Query.Top = ctx.Query.TerminalOperator is QueryTerminalOperator.Single
-                                                    or QueryTerminalOperator.SingleOrDefault ? 2 : 1;
+        // Single needs at least 2 rows to validate uniqueness; First only needs 1. After Take(1),
+        // Single sees only the one row taken.
+        var top = ctx.Query.TerminalOperator is QueryTerminalOperator.Single
+                                             or QueryTerminalOperator.SingleOrDefault ? 2 : 1;
+        ctx.Query.Top = ctx.Query.Top is { } taken ? Math.Min(taken, top) : top;
     }
 
     // -------------------------------------------------------------------------
@@ -1515,6 +1861,25 @@ internal static class FetchXmlQueryTranslator
 
         // Recurse into the source expression
         TranslateCore(call.Arguments[0], ctx);
+        ThrowIfSelectingResults(ctx, methodName);
+        ThrowIfAfterTake(ctx, methodName);
+        if (call.Arguments.Count == 2)
+            BindKeptEntity(ctx, call.Arguments[1]);
+
+        // A count of a select's distinct values counts the distinct rows Dataverse returns: it can
+        // count one column's distinct values, but not several, and it leaves nulls out where LINQ
+        // counts null as a value.
+        if (isCount && ctx.Query.Distinct && ctx.Projection is not null
+            && ReferenceEquals(ctx.DistinctProjection, ctx.Projection))
+        {
+            if (call.Arguments.Count == 2)
+                throw new NotSupportedException(
+                    $"'{methodName}' with a predicate after Distinct() is not supported; filter with Where before the Select.");
+
+            ctx.Query.CountRows = true;
+            ctx.Query.Materializer = null;
+            return;
+        }
 
         if (isCount)
         {
@@ -1522,8 +1887,8 @@ internal static class FetchXmlQueryTranslator
             if (call.Arguments.Count == 2)
             {
                 var lambda = call.Arguments[1].ExtractLambda();
-                var filter = ctx.Query.Filter ??= new FetchFilter { Type = FilterType.And };
-                TranslatePredicate(lambda.Body, filter, ctx);
+                var filter = RootAndFilter(ctx);
+                TranslatePredicate(ReadThroughSelect(lambda, ctx, methodName), filter, ctx);
             }
 
             // Count uses the entity's primary ID attribute
@@ -1540,15 +1905,20 @@ internal static class FetchXmlQueryTranslator
         {
             // Min(selector), Max(selector), etc. — extract the attribute from the selector
             var lambda = call.Arguments[1].ExtractLambda();
-            var attrName = lambda.Body.GetAttributeName(ctx.PrimaryKeyResolver, ctx.Query.EntityLogicalName)
+            var resolved = ResolveAttribute(ReadThroughSelect(lambda, ctx, methodName), ctx)
                 ?? throw new NotSupportedException(
                     $"Could not resolve attribute for '{methodName}'.");
+
+            // The aggregate goes on the root entity, where a joined column's name would be another column.
+            if (resolved.EntityAlias is not null)
+                throw new NotSupportedException(
+                    $"'{methodName}' of a joined entity's column is not supported; aggregate a column of the root entity.");
 
             ctx.Query.AllAttributes = false;
             ctx.Query.Attributes.Clear();
             ctx.Query.Attributes.Add(new FetchAttribute
             {
-                Name = attrName,
+                Name = resolved.Name,
                 Alias = fetchXmlFunction,
                 Aggregate = fetchXmlFunction
             });
@@ -1556,23 +1926,84 @@ internal static class FetchXmlQueryTranslator
         else
         {
             // No-selector (e.g. .Select(a => a.Prop).Min())
-            // The preceding Select should have populated Attributes with a single column.
-            if (ctx.Query.Attributes.Count != 1)
-                throw new NotSupportedException(
-                    $"'{methodName}' without a selector requires exactly one column. " +
-                    "Use a Select to project a single column, or use the overload with a selector.");
+            // The preceding Select must read one root column whose value it is unchanged: a
+            // computed one (a.Prop + 1) or a cast ((int)a.Money.Value) reads one column too, but
+            // aggregating the column would drop the computation.
+            var notSupported = new NotSupportedException(
+                $"'{methodName}' without a selector requires exactly one column. " +
+                "Use a Select to project a single column, or use the overload with a selector.");
 
-            var attr = ctx.Query.Attributes[0];
-            attr.Alias = fetchXmlFunction;
-            attr.Aggregate = fetchXmlFunction;
+            // Distinct leaves Min and Max as they are, but the server would sum or average every row.
+            if (ctx.Query.Distinct && methodName is nameof(Queryable.Sum) or nameof(Queryable.Average))
+                throw new NotSupportedException(
+                    $"'{methodName}' of distinct values is not supported; Dataverse would aggregate every row.");
+
+            if (ctx.Projection is { } projection)
+            {
+                var column = projection.SingleRootColumn ?? throw notSupported;
+                ctx.Query.AllAttributes = false;
+                ctx.Query.Attributes.Clear();
+                ctx.Query.Attributes.Add(new FetchAttribute
+                {
+                    Name = column,
+                    Alias = fetchXmlFunction,
+                    Aggregate = fetchXmlFunction
+                });
+            }
+            else
+            {
+                if (ctx.Query.Attributes.Count != 1)
+                    throw notSupported;
+
+                var attr = ctx.Query.Attributes[0];
+                attr.Alias = fetchXmlFunction;
+                attr.Aggregate = fetchXmlFunction;
+            }
         }
 
+        DropOrdersForAggregate(ctx, methodName);
         ctx.Query.Aggregate = true;
         ctx.Query.Materializer = null;
 
         // See ClearLinkProjectedColumns call in HandleGroupBy: a composed source may
         // have projected whole link entities, which is invalid in an aggregate query.
         ClearLinkProjectedColumns(ctx.Query.Links);
+    }
+
+    /// <summary>
+    /// Drops the orders of the rows an aggregate reads: Dataverse rejects an order on a column in
+    /// an aggregate query, and the rows' order doesn't change a count, sum or maximum
+    /// (<c>OrderBy(a =&gt; a.Name).Count()</c>). A WithFirstRow join's order picks which joined row
+    /// each one reads, which an aggregate query can't express, so that throws. An order on an
+    /// aggregate's alias stays. Every column order is the root's, a joined column's by its
+    /// entityname; a link entity's orders are only grouped selects' aliases.
+    /// </summary>
+    private static void DropOrdersForAggregate(TranslationContext ctx, string operatorName)
+    {
+        if (ctx.Query.Orders.Any(order => order.Alias is null && order.EntityAlias is { } alias
+                && ctx.Query.Links.FindLinkByAlias(alias) is { LinkType: "matchfirstrowusingcrossapply" }))
+        {
+            throw new NotSupportedException(
+                $"'{operatorName}' over a WithFirstRow join whose inner source is ordered is not supported: an " +
+                "aggregate query can't order its rows, and the order picks each joined row. Aggregate after " +
+                "AsEnumerable(), or remove the inner OrderBy.");
+        }
+
+        ctx.Query.Orders.RemoveAll(order => order.Alias is null);
+    }
+
+    /// <summary>
+    /// Throws when GroupBy follows an order: LINQ returns the groups in the order their keys first
+    /// appear, which follows it, and, over a WithFirstRow join, the order picks each joined row.
+    /// An aggregate query can't order by a column, only by a key or aggregate after the select.
+    /// </summary>
+    private static void ThrowIfOrderedBeforeGroupBy(TranslationContext ctx, string operatorName)
+    {
+        if (ctx.Query.Orders.Any(order => order.Alias is null))
+            throw new NotSupportedException(
+                $"'{operatorName}' after OrderBy, or over a WithFirstRow join whose inner source is ordered, is not " +
+                "supported: Dataverse can't order an aggregate query's rows. Order the groups after the Select " +
+                "(orderby g.Key), or group after AsEnumerable().");
     }
 
     /// <summary>
@@ -1600,10 +2031,23 @@ internal static class FetchXmlQueryTranslator
     {
         // Recurse into the source expression
         TranslateCore(call.Arguments[0], ctx);
+        ThrowIfSelectingResults(ctx, call.Method.Name);
+        ThrowIfAfterTake(ctx, call.Method.Name);
+        ThrowIfRowsTransformed(ctx, call.Method.Name);
+
+        // The key and element selectors take a row; a result selector takes the key and its rows.
+        BindKeptEntity(ctx, [.. call.Arguments.Skip(1).Take(2)
+            .Where(a => a is UnaryExpression { NodeType: ExpressionType.Quote, Operand: LambdaExpression { Parameters.Count: 1 } })]);
+        ctx.Projection = null;
+        ClearRowSelector(ctx);
+
+        // The groups are the rows now; the first select on them projects them.
+        ctx.RowsTransformed = false;
 
         // Extract key selector
         var keySelector = call.Arguments[1].ExtractLambda();
 
+        ThrowIfOrderedBeforeGroupBy(ctx, call.Method.Name);
         ctx.IsGrouped = true;
         ctx.Query.Aggregate = true;
         ctx.Query.AllAttributes = false;
@@ -1632,8 +2076,7 @@ internal static class FetchXmlQueryTranslator
             for (var i = 0; i < compositeKey.Arguments.Count; i++)
             {
                 var member = compositeKey.Members[i];
-                var propName = member is MethodInfo { Name: ['g', 'e', 't', '_', ..] } getter
-                    ? getter.Name[4..] : member.Name;
+                var propName = member.GetInitializedMemberName();
                 var (attrName, dateGrouping) = ResolveGroupKey(compositeKey.Arguments[i], ctx);
                 var resolved = ResolveAttribute(compositeKey.Arguments[i], ctx);
                 ctx.GroupKeyProperties.Add(new GroupKeyProperty(propName, attrName, dateGrouping, resolved?.EntityAlias));
@@ -1694,8 +2137,7 @@ internal static class FetchXmlQueryTranslator
             for (var i = 0; i < ne.Arguments.Count; i++)
             {
                 var member = ne.Members[i];
-                var propName = member is MethodInfo { Name: ['g', 'e', 't', '_', ..] } getter
-                    ? getter.Name[4..] : member.Name;
+                var propName = member.GetInitializedMemberName();
 
                 var mapping = ResolveElementToJoinEntity(ne.Arguments[i], joinMappings);
                 if (mapping is not null)
@@ -1722,7 +2164,7 @@ internal static class FetchXmlQueryTranslator
             // Match the range-variable name anywhere in the member chain. Chained joins
             // produce nested transparent identifiers (e.g. ti.ti1.c2), so the entity
             // member's parent is not necessarily the parameter itself — consistent with
-            // how ResolveJoinAttribute / ResolveWholeJoinEntity walk the chain.
+            // how ResolveJoinAttribute walks the chain.
             if (joinMappings.TryGetValue(me.Member.Name, out var mapping))
                 return mapping;
             current = me.Expression;
@@ -1760,8 +2202,7 @@ internal static class FetchXmlQueryTranslator
             argExpressions = ne.Arguments.ToArray();
             if (ne.Members is not null)
             {
-                memberNames = ne.Members.Select(m => m is MethodInfo { Name: ['g', 'e', 't', '_', ..] } getter
-                    ? getter.Name[4..] : m.Name).ToArray();
+                memberNames = ne.Members.Select(m => m.GetInitializedMemberName()).ToArray();
                 memberTypes = ne.Members.Select(m => m is PropertyInfo pi ? pi.PropertyType
                     : m is MethodInfo mi ? mi.ReturnType
                     : throw new NotSupportedException($"Unexpected member type: {m.GetType().Name}")).ToArray();
@@ -2412,6 +2853,13 @@ internal static class FetchXmlQueryTranslator
         // Recurse into the outer source first — for chained joins this processes
         // the prior Join and populates JoinMappings before we handle this one.
         TranslateCore(call.Arguments[0], ctx);
+        ThrowIfSelectingResults(ctx, call.Method.Name);
+        ThrowIfDistinctBeforeJoin(ctx, call.Method.Name);
+        ThrowIfAfterTake(ctx, call.Method.Name);
+        ThrowIfRowsTransformed(ctx, call.Method.Name);
+
+        // The outer key selector and the result selector's first parameter take an outer row.
+        BindKeptEntity(ctx, call.Arguments[2], call.Arguments[4]);
 
         var (innerLogicalName, innerEntityType) = call.Arguments[1].GetSourceInfoFromType();
         var resultLambda = call.Arguments[4].ExtractLambda();
@@ -2447,7 +2895,7 @@ internal static class FetchXmlQueryTranslator
             Name = innerLogicalName,
             From = innerKeyAttr,
             To = outerKeyAttr,
-            Alias = resultLambda.Parameters[1].Name!,
+            Alias = UniqueLinkAlias(resultLambda.Parameters[1].Name!, ctx),
             LinkType = linkType
         };
         ctx.Query.Links.Add(link);
@@ -2498,7 +2946,7 @@ internal static class FetchXmlQueryTranslator
             Name = innerLogicalName,
             From = innerKeyAttr,
             To = outerKeyResolved.Name,
-            Alias = resultLambda.Parameters[1].Name!,
+            Alias = UniqueLinkAlias(resultLambda.Parameters[1].Name!, ctx),
             LinkType = linkType
         };
         if (innerSource is not null)
@@ -2527,14 +2975,32 @@ internal static class FetchXmlQueryTranslator
         };
 
         ctx.JoinMappings = updatedMappings;
+        ctx.KeptEntity = null;
 
         // Clear single-left-join context — chained joins use JoinMappings exclusively
         ctx.OuterEntityPath = null;
         ctx.OuterEntityType = null;
         ctx.InnerEntityProperty = null;
+        ctx.LeftJoinAlias = null;
 
         if (!resultLambda.IsTransparentIdentifier())
             HandleJoinSelect(resultLambda, ctx);
+    }
+
+    /// <summary>
+    /// The alias a link gets, which it reserves: its range variable's name, or, when the query
+    /// already has a link by that name, a join's or a subquery's (<c>from x in contacts join c in …</c>,
+    /// where <c>contacts</c> joined its own <c>c</c>), that name numbered. A join's mapping, under
+    /// the range variable's name, carries the alias.
+    /// </summary>
+    private static string UniqueLinkAlias(string name, TranslationContext ctx)
+    {
+        var alias = name;
+        for (var i = 1; ctx.Aliases.Contains(alias); i++)
+            alias = $"{name}{i}";
+
+        ctx.Aliases.Add(alias);
+        return alias;
     }
 
     // -------------------------------------------------------------------------
@@ -2558,6 +3024,11 @@ internal static class FetchXmlQueryTranslator
         if (outerSource is MethodCallExpression)
         {
             TranslateCore(outerSource, ctx);
+            ThrowIfSelectingResults(ctx, call.Method.Name);
+            ThrowIfDistinctBeforeJoin(ctx, call.Method.Name);
+            ThrowIfAfterTake(ctx, call.Method.Name);
+            ThrowIfRowsTransformed(ctx, call.Method.Name);
+            BindKeptEntity(ctx, groupJoinCall.Arguments[2], groupJoinCall.Arguments[4]);
             var (innerLogicalName2, innerEntityType2) = groupJoinCall.Arguments[1].GetSourceInfoFromType();
             var resultSelector2 = call.Arguments[2].ExtractLambda();
             HandleChainedJoin(
@@ -2588,7 +3059,7 @@ internal static class FetchXmlQueryTranslator
             Name = innerLogicalName,
             From = innerKeyAttr,
             To = outerKeyAttr,
-            Alias = resultSelector.Parameters[1].Name!,
+            Alias = UniqueLinkAlias(resultSelector.Parameters[1].Name!, ctx),
             LinkType = "outer"
         });
         var outerPath = resultSelector.Parameters[0].Type.FindOuterPropertyPath(outerEntityType);
@@ -2596,40 +3067,21 @@ internal static class FetchXmlQueryTranslator
         if (outerPath is null)
             return;
 
-        // Try to extract columns directly from the result selector.
-        // If the selector IS the final projection (select folded in), this succeeds.
-        // If it's a transparent-identifier wrapper, no columns are found and we
-        // set up context for subsequent Select/Where instead.
-        var columns = resultSelector.ExtractColumnsViaPath(outerPath);
-        var innerParam = resultSelector.Parameters[1];
-
         // A transparent-identifier wrapper (all arguments are parameters) means further
         // operators follow. A real projection (not a TI) means the select was folded in.
         var isFoldedProjection = !resultSelector.IsTransparentIdentifier();
-        var referencesInner = isFoldedProjection && resultSelector.Body.GetProjectionArguments()
-            .Any(a => ReferencesParameter(a, innerParam));
 
         if (isFoldedProjection)
         {
             // Select folded into SelectMany — handle projection here
-            var foldedInnerColumns = referencesInner
-                ? ExtractColumnsFromParameter(resultSelector.Body, innerParam,
-                    () => ctx.PrimaryKeyOf(innerLogicalName))
-                : null;
-            ApplyLeftJoinColumns(ctx.Query, columns,
-                foldedInnerColumns is { Count: > 0 } ? foldedInnerColumns : null,
-                wholeInner: referencesInner && (foldedInnerColumns is null or { Count: 0 }));
-
-            var foldedResolver = CreateFoldedLeftJoinResolver(
+            var innerParam = resultSelector.Parameters[1];
+            var resolveEntity = CreateFoldedLeftJoinResolver(
                 resultSelector.Parameters[0], outerPath, outerEntityType,
                 innerParam, ctx.Query.Links[^1].Alias!,
                 outerLogicalName, innerLogicalName);
-            // Build materializer (new path)
+            ApplyProjection(resultSelector, resolveEntity, ctx, onJoin: true);
             ctx.Query.Materializer = MaterializerBuilder.BuildJoinMaterializer(
-                resultSelector,
-                expr => foldedResolver(expr) is { } r ? (r.LinkAlias, r.EntityType, r.LogicalName) : null,
-                ctx.PrimaryKeyResolver,
-                innerDirectParam: innerParam);
+                resultSelector, resolveEntity, ctx.PrimaryKeyResolver, innerDirectParam: innerParam);
         }
         else
         {
@@ -2640,6 +3092,7 @@ internal static class FetchXmlQueryTranslator
             ctx.OuterEntityPath = resultSelector.ReturnType.FindOuterPropertyPath(outerEntityType);
 
             // Identify the inner entity property in the TI for null-check detection.
+            ctx.LeftJoinAlias = ctx.Query.Links[^1].Alias;
             var tiInnerParam = resultSelector.Parameters[1];
             foreach (var prop in resultSelector.ReturnType.GetProperties())
             {
@@ -2712,165 +3165,51 @@ internal static class FetchXmlQueryTranslator
         return null;
     }
 
-    /// <summary>
-    /// Returns <c>true</c> when <paramref name="expr"/> or any nested projection argument
-    /// references <paramref name="param"/> (directly or via property access).
-    /// </summary>
-    private static bool ReferencesParameter(Expression expr, ParameterExpression param)
-    {
-        if (expr is ParameterExpression p && p == param) return true;
-        if (expr is MemberExpression me && me.Expression is ParameterExpression mp && mp == param) return true;
-        if (expr is NewExpression or MemberInitExpression)
-            return expr.GetProjectionArguments().Any(a => ReferencesParameter(a, param));
-        if (expr is ConditionalExpression conditional)
-            return ReferencesParameter(conditional.IfTrue, param)
-                || ReferencesParameter(conditional.IfFalse, param);
-        if (expr is UnaryExpression { NodeType: ExpressionType.Convert } unary)
-            return ReferencesParameter(unary.Operand, param);
-        if (expr is MethodCallExpression mc)
-        {
-            if (mc.Object is not null && ReferencesParameter(mc.Object, param))
-                return true;
-            return mc.Arguments.Any(a => ReferencesParameter(a, param));
-        }
-        if (expr is ConstantExpression or DefaultExpression or MemberExpression or ParameterExpression)
-            return false;
-        throw new NotSupportedException(
-            $"Unsupported expression type '{expr.NodeType}' in projection. " +
-            $"Column references inside '{expr.NodeType}' expressions cannot be extracted.");
-    }
-
-    /// <summary>
-    /// Extracts attribute logical names from direct property accesses on a parameter
-    /// (e.g. <c>d.FirstName</c> where <c>d</c> is the inner entity parameter), as well
-    /// as <c>d.GetAttributeValue&lt;T&gt;(name)</c> calls. Recurses into nested projections.
-    /// </summary>
-    /// <param name="resolveIdColumn">
-    /// Resolves the primary key column of the entity <paramref name="param"/> refers to. Used for
-    /// <see cref="Entity.Id"/> on an unbound entity, which has no [AttributeLogicalName]; invoked
-    /// only when such an access is found, since resolving may require a metadata request.
-    /// </param>
-    private static List<string> ExtractColumnsFromParameter(
-        Expression body, ParameterExpression param, Func<string>? resolveIdColumn = null)
-    {
-        var columns = new List<string>();
-        foreach (var arg in body.GetProjectionArguments())
-            ExtractFromExpr(arg, param, columns, resolveIdColumn);
-        return columns;
-    }
-
-    private static void ExtractFromExpr(
-        Expression arg, ParameterExpression param, List<string> columns, Func<string>? resolveIdColumn)
-    {
-        if (arg is MemberExpression { Member: PropertyInfo prop, Expression: ParameterExpression p }
-            && p == param)
-        {
-            var name = prop.GetCustomAttribute<AttributeLogicalNameAttribute>()?.LogicalName;
-            if (name is null && prop.Name == nameof(Entity.Id) && p.Type == typeof(Entity))
-                name = resolveIdColumn?.Invoke();
-            if (name is not null)
-                columns.Add(name);
-            return;
-        }
-
-        if (arg.IsGetAttributeValueCall(out var attrName, out var entityExpr)
-            && entityExpr is ParameterExpression op && op == param)
-        {
-            columns.Add(attrName);
-            return;
-        }
-
-        switch (arg)
-        {
-            case NewExpression or MemberInitExpression:
-                columns.AddRange(ExtractColumnsFromParameter(arg, param, resolveIdColumn));
-                break;
-            case ConditionalExpression conditional:
-                ExtractFromExpr(conditional.IfTrue, param, columns, resolveIdColumn);
-                ExtractFromExpr(conditional.IfFalse, param, columns, resolveIdColumn);
-                break;
-            case UnaryExpression { NodeType: ExpressionType.Convert } unary:
-                ExtractFromExpr(unary.Operand, param, columns, resolveIdColumn);
-                break;
-            case MethodCallExpression mc:
-                if (mc.Object is not null)
-                    ExtractFromExpr(mc.Object, param, columns, resolveIdColumn);
-                foreach (var ca in mc.Arguments)
-                    ExtractFromExpr(ca, param, columns, resolveIdColumn);
-                break;
-            case ConstantExpression or DefaultExpression or MemberExpression or ParameterExpression:
-                break;
-            default:
-                throw new NotSupportedException(
-                    $"Unsupported expression type '{arg.NodeType}' in projection. " +
-                    $"Column references inside '{arg.NodeType}' expressions cannot be extracted.");
-        }
-    }
-
-    /// <summary>
-    /// Applies outer and inner column lists to the query and its last link entity.
-    /// Shared between HandleSelect (left-join branch) and HandleSelectMany (folded branch).
-    /// </summary>
-    private static void ApplyLeftJoinColumns(
-        FetchXmlQuery query,
-        IReadOnlyList<string>? outerColumns,
-        IReadOnlyList<string>? innerColumns,
-        bool wholeInner)
-    {
-        if (outerColumns is { Count: > 0 })
-            query.ApplyColumns(outerColumns);
-
-        var link = query.Links[^1];
-        if (wholeInner)
-        {
-            link.AllAttributes = true;
-        }
-        else if (innerColumns is { Count: > 0 })
-        {
-            foreach (var col in innerColumns)
-                link.Attributes.Add(new FetchAttribute { Name = col });
-        }
-    }
-
     // -------------------------------------------------------------------------
     // Entity resolution helpers for materializer building
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Identifies which entity (root or linked) an expression refers to.
-    /// <c>LinkAlias</c> is <c>null</c> for the root entity.
-    /// </summary>
-    private readonly record struct EntityResolution(string? LinkAlias, Type EntityType, string? LogicalName = null);
-
-    /// <summary>
     /// Creates an entity resolver for inner-join scenarios using the JoinMappings dictionary.
-    /// Walks the member chain to find a mapping key.
+    /// An entity is a join parameter (<c>(a, c) =&gt; ...</c>) or a transparent identifier's member
+    /// named for one (<c>ti.a</c>, <c>ti2.ti1.a</c>). Only the entity itself resolves: a column of
+    /// it (<c>ti.a.Website</c>) or a value derived from one (<c>ti.a.Website.Length</c>) does not.
     /// </summary>
-    private static Func<Expression, EntityResolution?> CreateJoinResolver(
+    private static MaterializerBuilder.EntityResolver CreateJoinResolver(
         Dictionary<string, JoinEntityInfo> joinMappings)
     {
         return expr =>
         {
-            var current = expr;
-            while (current is MemberExpression me)
+            var name = expr switch
             {
-                if (joinMappings.TryGetValue(me.Member.Name, out var mapping))
-                    return new EntityResolution(mapping.LinkAlias, mapping.EntityType, mapping.LogicalName);
-                current = me.Expression;
-            }
+                MemberExpression { Member.Name: var memberName, Expression: { } owner } member
+                    when typeof(Entity).IsAssignableFrom(member.Type) && IsTransparentIdentifierChain(owner)
+                    => memberName,
+                ParameterExpression { Name: { } parameterName } parameter
+                    when typeof(Entity).IsAssignableFrom(parameter.Type)
+                    => parameterName,
+                _ => null,
+            };
 
-            if (current is ParameterExpression param
-                && joinMappings.TryGetValue(param.Name!, out var directMapping))
-                return new EntityResolution(directMapping.LinkAlias, directMapping.EntityType, directMapping.LogicalName);
+            return name is not null && joinMappings.TryGetValue(name, out var mapping)
+                ? new MaterializerBuilder.ResolvedEntity(mapping.LinkAlias, mapping.EntityType, mapping.LogicalName)
+                : null;
+        };
 
-            return null;
+        // The lambda's parameter, or a chain of transparent identifiers from it: no entity on the way.
+        static bool IsTransparentIdentifierChain(Expression expr) => expr switch
+        {
+            ParameterExpression => true,
+            MemberExpression { Expression: { } owner } member =>
+                !typeof(Entity).IsAssignableFrom(member.Type) && IsTransparentIdentifierChain(owner),
+            _ => false,
         };
     }
 
     /// <summary>
     /// Creates an entity resolver for left-join scenarios (TI path for outer, property for inner).
     /// </summary>
-    private static Func<Expression, EntityResolution?> CreateLeftJoinResolver(
+    private static MaterializerBuilder.EntityResolver CreateLeftJoinResolver(
         ParameterExpression originalParam,
         string[] outerPath,
         Type outerEntityType,
@@ -2884,14 +3223,14 @@ internal static class FetchXmlQueryTranslator
         {
             // Outer entity via TI path
             if (expr.IsOuterEntityAccess(outerPath, originalParam))
-                return new EntityResolution(null, outerEntityType, outerLogicalName);
+                return new MaterializerBuilder.ResolvedEntity(null, outerEntityType, outerLogicalName);
 
             // Inner entity via property: ti.innerProp
             if (innerPropertyName is not null
                 && expr is MemberExpression { Member.Name: var name, Expression: ParameterExpression p }
                 && p == originalParam
                 && name == innerPropertyName)
-                return new EntityResolution(innerAlias, innerEntityType ?? expr.Type, innerLogicalName);
+                return new MaterializerBuilder.ResolvedEntity(innerAlias, innerEntityType ?? expr.Type, innerLogicalName);
 
             return null;
         };
@@ -2901,7 +3240,7 @@ internal static class FetchXmlQueryTranslator
     /// Creates an entity resolver for folded left-join scenarios (TI path for outer,
     /// direct parameter for inner).
     /// </summary>
-    private static Func<Expression, EntityResolution?> CreateFoldedLeftJoinResolver(
+    private static MaterializerBuilder.EntityResolver CreateFoldedLeftJoinResolver(
         ParameterExpression outerTiParam,
         string[] outerPath,
         Type outerEntityType,
@@ -2914,11 +3253,11 @@ internal static class FetchXmlQueryTranslator
         {
             // Outer entity via TI path
             if (expr.IsOuterEntityAccess(outerPath, outerTiParam))
-                return new EntityResolution(null, outerEntityType, outerLogicalName);
+                return new MaterializerBuilder.ResolvedEntity(null, outerEntityType, outerLogicalName);
 
             // Inner entity via direct parameter
             if (expr is ParameterExpression p && p == innerParam)
-                return new EntityResolution(innerAlias, innerParam.Type, innerLogicalName);
+                return new MaterializerBuilder.ResolvedEntity(innerAlias, innerParam.Type, innerLogicalName);
 
             return null;
         };
@@ -2972,6 +3311,65 @@ internal static class FetchXmlQueryTranslator
         }
 
         /// <summary>
+        /// What the last select read, set by every select but a grouped one; an aggregate without
+        /// a selector aggregates its <see cref="ProjectedColumns.SingleRootColumn"/>. Null when no
+        /// such select has run.
+        /// </summary>
+        public ProjectedColumns? Projection { get; set; }
+
+        /// <summary>
+        /// The projection <c>Distinct()</c> was applied to: a count of distinct values counts its
+        /// rows only when it's still the last one.
+        /// </summary>
+        public ProjectedColumns? DistinctProjection { get; set; }
+
+        /// <summary>
+        /// Set once a select has run on an earlier projection's results (see
+        /// <see cref="MaterializerInfo.ThenSelect"/>): every select after it does too, since the
+        /// rows it would otherwise re-read are no longer what the query yields.
+        /// </summary>
+        public bool SelectsOnResults { get; set; }
+
+        /// <summary>
+        /// Set when the last select (on the root, a join or groups) made something other than one
+        /// of the query's own entities: a value, an anonymous object, or an entity of its own
+        /// making. A select after it runs on its results, since the row no longer holds them.
+        /// </summary>
+        public bool RowsTransformed { get; set; }
+
+        /// <summary>
+        /// The last select, when it ran on the rows (the root's or a join's): an operator after it
+        /// reads its lambda through this select's (see <see cref="ReadThroughSelect"/>). Null after a
+        /// select on groups or on results, and when no select has run.
+        /// </summary>
+        public LambdaExpression? RowSelector { get; set; }
+
+        /// <summary>
+        /// The entities <see cref="RowSelector"/> read, as it found them: an operator's lambda read
+        /// through it resolves its columns on the same entities.
+        /// </summary>
+        public MaterializerBuilder.EntityResolver? RowEntityResolver { get; set; }
+
+        /// <summary>
+        /// The join entity the last select kept whole (<c>select c</c>), which the rows now are: an
+        /// operator's lambda after it takes that entity as its parameter, whatever it names it
+        /// (see <see cref="BindKeptEntity"/>). Null after any other select, and when none has run.
+        /// </summary>
+        public JoinEntityInfo? KeptEntity { get; set; }
+
+        /// <summary>
+        /// The link aliases the query uses, its joins' and its subqueries', shared with the
+        /// contexts its subqueries translate in: a new link's alias mustn't repeat one.
+        /// </summary>
+        public HashSet<string> Aliases { get; init; } = [];
+
+        /// <summary>
+        /// The selects already folded with the selects they're on (see FoldSelects), which
+        /// translating them must not fold again.
+        /// </summary>
+        public HashSet<Expression> FoldedSelects { get; } = [];
+
+        /// <summary>
         /// After a left join: the CLR type of the outer (root) entity.
         /// </summary>
         public Type? OuterEntityType { get; set; }
@@ -2990,6 +3388,12 @@ internal static class FetchXmlQueryTranslator
         /// to detect <c>where c == null</c> patterns.
         /// </summary>
         public string? InnerEntityProperty { get; set; }
+
+        /// <summary>
+        /// After a left join: the alias of its link entity, which
+        /// <see cref="InnerEntityProperty"/> names.
+        /// </summary>
+        public string? LeftJoinAlias { get; set; }
 
         /// <summary>
         /// After an inner join with subsequent operators: maps property names on the
@@ -3038,6 +3442,14 @@ internal static class FetchXmlQueryTranslator
 
     private sealed class JoinEntityInfo
     {
+        /// <summary>The entity a select or materializer resolved, as a join names it.</summary>
+        public static JoinEntityInfo Of(MaterializerBuilder.ResolvedEntity entity) => new()
+        {
+            EntityType = entity.EntityType,
+            LogicalName = entity.LogicalName,
+            LinkAlias = entity.LinkAlias,
+        };
+
         public required Type EntityType { get; init; }
 
         /// <summary>

@@ -51,7 +51,7 @@ internal class DataverseQueryProvider<T> : IQueryProvider where T : Entity
 
         // Aggregate terminal operator (Min, Max, Sum, Average, Count)
         if (query.TerminalOperator.IsAggregate())
-            return ExtractAggregateResult<TResult>(entities, query.TerminalOperator);
+            return ExtractAggregateResult<TResult>(entities, query);
 
         // Scalar terminal operator (First, Single, etc.)
         if (query.TerminalOperator.IsScalar())
@@ -191,6 +191,42 @@ internal class DataverseQueryProvider<T> : IQueryProvider where T : Entity
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// An aggregate query's result: the aggregate Dataverse computed, or, for a count of a select's
+    /// distinct values (<see cref="FetchXmlQuery.CountRows"/>), the number of distinct rows.
+    /// </summary>
+    protected static TResult ExtractAggregateResult<TResult>(List<Entity> entities, FetchXmlQuery query) =>
+        query.CountRows
+            ? CountDistinctRows<TResult>(entities)
+            : ExtractAggregateResult<TResult>(entities, query.TerminalOperator);
+
+    /// <summary>
+    /// The number of distinct rows, as <c>Count</c>'s <see cref="int"/> or <c>LongCount</c>'s
+    /// <see cref="long"/>. A distinct query paged without an order can return a row on two pages,
+    /// so rows are told apart by their values.
+    /// </summary>
+    private static TResult CountDistinctRows<TResult>(List<Entity> entities)
+    {
+        var rows = new HashSet<string>(entities.Select(RowKey));
+        return (TResult)Convert.ChangeType(rows.Count, typeof(TResult));
+
+        static string RowKey(Entity row) => string.Join("\u001F", row.Attributes
+            .OrderBy(attribute => attribute.Key, StringComparer.Ordinal)
+            .Select(attribute => attribute.Key + "\u001E" + ValueKey(attribute.Value)));
+
+        static string ValueKey(object? value) => value switch
+        {
+            null => "",
+            AliasedValue aliased => ValueKey(aliased.Value),
+            EntityReference reference => reference.LogicalName + ":" + reference.Id,
+            Money money => money.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            OptionSetValue option => option.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            OptionSetValueCollection options => string.Join(",", options.Select(option => option.Value).OrderBy(v => v)),
+            IFormattable formattable => formattable.ToString(null, System.Globalization.CultureInfo.InvariantCulture),
+            _ => value.ToString() ?? "",
+        };
+    }
 
     protected static TResult ExtractAggregateResult<TResult>(List<Entity> entities, QueryTerminalOperator op)
     {

@@ -63,5 +63,17 @@ public class ServiceClientFixture : IDisposable
     }
 }
 
-[CollectionDefinition("Dataverse")]
+// The integration tests subscribe to the process-wide DataverseQueryDiagnostics hooks, which would
+// also see the queries of unit tests running beside them; they run after those, alone.
+[CollectionDefinition("Dataverse", DisableParallelization = true)]
 public class DataverseCollection : ICollectionFixture<ServiceClientFixture>;
+
+/// <summary>
+/// Unit tests that set or subscribe to the process-wide <see cref="DataverseQueryDiagnostics"/>
+/// hooks, which see every query the process runs: they run after the other tests, alone.
+/// </summary>
+[CollectionDefinition(Name, DisableParallelization = true)]
+public class GlobalDiagnosticsCollection
+{
+    public const string Name = "Global diagnostics";
+}

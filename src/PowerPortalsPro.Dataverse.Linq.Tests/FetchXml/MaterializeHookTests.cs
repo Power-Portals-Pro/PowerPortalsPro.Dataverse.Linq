@@ -10,6 +10,7 @@ namespace PowerPortalsPro.Dataverse.Linq.Tests.FetchXml;
 /// Tests for the OnBeforeMaterialize / OnAfterMaterialize transform hooks — both the
 /// per-query (inline) form and the global <see cref="DataverseQueryDiagnostics"/> form.
 /// </summary>
+[Collection(GlobalDiagnosticsCollection.Name)]
 public class MaterializeHookTests : FetchXmlTestBase
 {
     private void SetupRows(params Entity[] rows)

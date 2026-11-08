@@ -8,6 +8,31 @@ namespace PowerPortalsPro.Dataverse.Linq.Tests.Integration;
 public partial class PagingIntegrationTests
 {
     // -------------------------------------------------------------------------
+    // Take
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ToListAsync_TakeAfterTake_TakesTheSmallerCount()
+    {
+        var results = await Service.Queryable<CustomAccount>()
+            .OrderBy(a => a.Name)
+            .Take(20)
+            .Take(5)
+            .ToListAsync();
+
+        results.Should().HaveCount(5);
+        results[0].Name.Should().Be("Custom Account 001");
+    }
+
+    [Fact]
+    public async Task CountAsync_AfterTake_Throws()
+    {
+        var act = () => Service.Queryable<CustomAccount>().Take(5).CountAsync();
+
+        await act.Should().ThrowAsync<NotSupportedException>();
+    }
+
+    // -------------------------------------------------------------------------
     // WithPageSize
     // -------------------------------------------------------------------------
 
