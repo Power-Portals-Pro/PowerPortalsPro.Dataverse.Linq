@@ -167,6 +167,22 @@ public partial class IndexerIntegrationTests(ServiceClientFixture fixture) : Int
     }
 
     [Fact]
+    public void JoinKeyOnCapturedIndexer_Throws()
+    {
+        // The key is the same value on every row, not the contact's parent account.
+        var other = new Entity("new_customcontact")
+        {
+            ["new_parentaccount"] = new EntityReference("new_customaccount", Guid.NewGuid()),
+        };
+
+        var act = () => (from a in Accounts
+                         join c in Contacts on a.Id equals ((EntityReference)other["new_parentaccount"]).Id
+                         select new { Name = (string)a["new_name"] }).ToList();
+
+        act.Should().Throw<NotSupportedException>().WithMessage("*join key*");
+    }
+
+    [Fact]
     public void CountWithIndexerPredicate_CountsTheMatches()
     {
         var count = Accounts.Count(a => ((string)a["new_name"]).StartsWith("Custom Account"));

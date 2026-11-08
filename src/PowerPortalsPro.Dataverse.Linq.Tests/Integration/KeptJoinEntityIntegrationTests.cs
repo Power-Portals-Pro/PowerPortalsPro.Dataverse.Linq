@@ -134,6 +134,19 @@ public partial class KeptJoinEntityIntegrationTests(ServiceClientFixture fixture
     }
 
     [Fact]
+    public void CountChildrenOnKeptInnerJoinedRoot_CountsTheChildAccounts()
+    {
+        // Accounts 001 to 010 each parent four others; 001 is joined to each of its five contacts.
+        var results = Accounts
+            .Where(x => x.Name == "Custom Account 001")
+            .Select(x => new { x.Name, Children = x.CountChildren() })
+            .ToList();
+
+        results.Should().HaveCount(5);
+        results.Should().AllSatisfy(r => r.Children.Should().Be(4));
+    }
+
+    [Fact]
     public void SelectAfterDistinctOnKeptLeftJoinedRoot_ReturnsEachAccountOnce()
     {
         var accounts = from a in Service.Queryable<CustomAccount>()

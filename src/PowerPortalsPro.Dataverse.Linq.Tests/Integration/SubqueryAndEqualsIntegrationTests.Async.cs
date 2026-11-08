@@ -24,6 +24,35 @@ public partial class SubqueryAndEqualsIntegrationTests
     }
 
     [Fact]
+    public async Task CountAsync_ExistsInsideAny_CountsTheAccountsWithAContactWithAnOpportunity()
+    {
+        // Counted from the rows themselves, not by the query under test.
+        var contactsWithOpportunities = new HashSet<Guid>(Opportunities.Select(o => o.Contact.Id).ToList());
+        var expected = Contacts.ToList()
+            .Where(c => contactsWithOpportunities.Contains(c.CustomContactId))
+            .Select(c => c.ParentAccount.Id)
+            .Distinct()
+            .Count();
+
+        var count = await Accounts
+            .Where(a => Contacts.Any(c => c.ParentAccount.Id == a.CustomAccountId
+                && Opportunities.Exists(o => o.Contact.Id == c.CustomContactId)))
+            .CountAsync();
+
+        count.Should().Be(expected).And.BeInRange(1, 99);
+    }
+
+    [Fact]
+    public async Task CountAsync_InUnderOr_CountsEitherMatch()
+    {
+        var count = await Accounts
+            .Where(a => a.Name == "Empty Account 001" || Contacts.In(c => c.ParentAccount.Id == a.CustomAccountId))
+            .CountAsync();
+
+        count.Should().Be(101);
+    }
+
+    [Fact]
     public async Task CountAsync_AfterOrderBy_CountsEveryRow()
     {
         var count = await Accounts.OrderByDescending(a => a.Name).CountAsync();

@@ -6,6 +6,19 @@ namespace PowerPortalsPro.Dataverse.Linq.Tests.Integration;
 
 public partial class ScalarProjectionIntegrationTests
 {
+    [Fact]
+    public async Task ToListAsync_SelectWholeEntityBesideItsColumn_ReturnsTheCompleteEntity()
+    {
+        var results = await Service.Queryable<CustomAccount>()
+            .Where(a => a.Name == "Custom Account 002")
+            .Select(a => new { a.Name, Account = a })
+            .ToListAsync();
+
+        results.Should().ContainSingle();
+        results[0].Account.Website.Should().Be("https://account002.example.com");
+        results[0].Account.Description.Should().Be("Description for account 002");
+    }
+
     // -------------------------------------------------------------------------
     // Distinct over a single value
     // -------------------------------------------------------------------------

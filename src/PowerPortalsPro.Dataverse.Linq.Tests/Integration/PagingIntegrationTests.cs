@@ -57,6 +57,27 @@ public partial class PagingIntegrationTests(ServiceClientFixture fixture) : Inte
         act.Should().Throw<NotSupportedException>();
     }
 
+    // Dataverse would apply each to every row, then take the first five.
+    public static TheoryData<string, Func<IQueryable<CustomAccount>, IQueryable<CustomContact>, object?>> OperatorsAfterTake => new()
+    {
+        { "OrderBy", (taken, _) => taken.OrderBy(a => a.Website).ToList() },
+        { "GroupBy", (taken, _) => taken.GroupBy(a => a.AccountRating).Select(g => new { g.Key, Count = g.Count() }).ToList() },
+        { "Join", (taken, contacts) => taken.Join(contacts, a => a.CustomAccountId, c => c.ParentAccount.Id, (a, c) => new { a.Name, c.LastName }).ToList() },
+        { "FirstOrDefault with a predicate", (taken, _) => taken.FirstOrDefault(a => a.Name.StartsWith("Empty Account")) },
+    };
+
+    [Theory]
+    [MemberData(nameof(OperatorsAfterTake))]
+    public void OperatorAfterTake_Throws(
+        string operation, Func<IQueryable<CustomAccount>, IQueryable<CustomContact>, object?> query)
+    {
+        var taken = Service.Queryable<CustomAccount>().OrderBy(a => a.Name).Take(5);
+
+        var act = () => query(taken, Service.Queryable<CustomContact>());
+
+        act.Should().Throw<NotSupportedException>(operation).WithMessage("*after Take()*");
+    }
+
     [Fact]
     public void CountAfterTake_Throws()
     {

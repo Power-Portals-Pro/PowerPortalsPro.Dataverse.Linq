@@ -234,6 +234,62 @@ public partial class OperatorAfterSelectIntegrationTests(ServiceClientFixture fi
     }
 
     [Fact]
+    public void OrderByAfterGroupedSelect_Throws()
+    {
+        var act = () => Accounts
+            .GroupBy(a => a.AccountRating)
+            .Select(g => new { g.Key, Count = g.Count() })
+            .OrderBy(x => x.Key)
+            .ToList();
+
+        act.Should().Throw<NotSupportedException>().WithMessage("*can't follow a Select on groups*");
+    }
+
+    [Fact]
+    public void WhereAfterGroupedSelect_Throws()
+    {
+        var act = () => Accounts
+            .GroupBy(a => a.AccountRating)
+            .Select(g => new { g.Key, Count = g.Count() })
+            .Where(x => x.Count > 1)
+            .ToList();
+
+        act.Should().Throw<NotSupportedException>().WithMessage("*can't follow a Select on groups*");
+    }
+
+    [Fact]
+    public void JoinAfterSelectMakingAnEntity_Throws()
+    {
+        // The join would key and read the stored name, not the upper-cased one.
+        var act = () => Accounts
+            .Select(a => new CustomAccount { CustomAccountId = a.CustomAccountId, Name = a.Name.ToUpper() })
+            .Join(Contacts, x => x.CustomAccountId, c => c.ParentAccount.Id, (x, c) => new { x.Name, c.LastName })
+            .ToList();
+
+        act.Should().Throw<NotSupportedException>().WithMessage("*'Join' can't follow a Select that makes new values*");
+    }
+
+    // A cast that may change the value, or a value the row computes, isn't a column to compare.
+    public static TheoryData<string, Func<IQueryable<CustomAccount>, object?>> ComparisonsThatChangeTheValue => new()
+    {
+        // (float)16777217 is 16777216, so the condition couldn't keep 16777217 apart from it; the
+        // cast is rejected whatever the value. A decimal's double is only near the decimal.
+        { "int to float", q => q.Where(a => (float?)a.NumberOfEmployees == 16777217f).ToList() },
+        { "decimal to double", q => q.Where(a => (double?)a.CreditLimit > 1000.5).ToList() },
+        { "a column to a truncated column", q => q.Where(a => (int?)a.CreditLimit == a.NumberOfEmployees).ToList() },
+        { "a member to a computed member", q => q.Select(a => new { a.Name, Upper = a.Name.ToUpper() }).Where(x => x.Name == x.Upper).ToList() },
+    };
+
+    [Theory]
+    [MemberData(nameof(ComparisonsThatChangeTheValue))]
+    public void WhereComparingAValueTheRowChanges_Throws(string comparison, Func<IQueryable<CustomAccount>, object?> query)
+    {
+        var act = () => query(Accounts);
+
+        act.Should().Throw<NotSupportedException>(comparison).WithMessage("*comparison*");
+    }
+
+    [Fact]
     public void GroupByAfterSelectMakingAnEntity_Throws()
     {
         var act = () => Accounts

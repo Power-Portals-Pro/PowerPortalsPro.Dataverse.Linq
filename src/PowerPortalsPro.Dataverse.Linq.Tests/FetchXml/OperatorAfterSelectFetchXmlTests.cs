@@ -569,6 +569,19 @@ public class OperatorAfterSelectFetchXmlTests : FetchXmlTestBase
     }
 
     [Fact]
+    public void ToFetchXml_WhereAfterGroupedSelect_Throws()
+    {
+        // The condition would test a column of the rows, not the groups' count.
+        var act = () => Accounts
+            .GroupBy(a => a.AccountRating)
+            .Select(g => new { g.Key, Count = g.Count() })
+            .Where(x => x.Count > 1)
+            .ToFetchXml();
+
+        act.Should().Throw<NotSupportedException>().WithMessage("*can't follow a Select on groups*");
+    }
+
+    [Fact]
     public void ToFetchXml_GroupByAfterSelectMakingAnEntity_Throws()
     {
         var act = () => Accounts

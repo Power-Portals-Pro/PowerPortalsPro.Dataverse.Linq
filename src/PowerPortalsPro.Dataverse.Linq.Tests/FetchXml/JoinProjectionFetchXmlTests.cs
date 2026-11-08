@@ -13,6 +13,24 @@ namespace PowerPortalsPro.Dataverse.Linq.Tests.FetchXml;
 public class JoinProjectionFetchXmlTests : FetchXmlTestBase
 {
     // -------------------------------------------------------------------------
+    // Distinct on a join
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToFetchXml_SelectAfterDistinctOnAJoin_Throws()
+    {
+        // The select's narrower columns would merge the distinct pairs Distinct() kept apart.
+        var act = () => _service.Queryable<CustomAccount>()
+            .Join(_service.Queryable<CustomContact>(), a => a.CustomAccountId, c => c.ParentAccount.Id,
+                (a, c) => new { a, c })
+            .Distinct()
+            .Select(x => x.a.Name)
+            .ToFetchXml();
+
+        act.Should().Throw<NotSupportedException>().WithMessage("*Select after Distinct() on a join*");
+    }
+
+    // -------------------------------------------------------------------------
     // Left join, select folded into the join
     // -------------------------------------------------------------------------
 
