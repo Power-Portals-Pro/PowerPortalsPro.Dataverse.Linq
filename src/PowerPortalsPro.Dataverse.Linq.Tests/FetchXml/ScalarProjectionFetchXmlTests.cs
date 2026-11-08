@@ -1321,7 +1321,7 @@ public class ScalarProjectionFetchXmlTests : FetchXmlTestBase
     }
 
     /// <summary>A value made from a column by a conversion of its own.</summary>
-    public readonly record struct Headcount(int? Count)
+    private readonly record struct Headcount(int? Count)
     {
         public static explicit operator Headcount(int? count) => new(count);
     }

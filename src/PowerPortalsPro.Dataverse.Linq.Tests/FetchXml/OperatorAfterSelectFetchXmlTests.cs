@@ -623,6 +623,17 @@ public class OperatorAfterSelectFetchXmlTests : FetchXmlTestBase
     }
 
     [Fact]
+    public void ToFetchXml_MaxOfTypedJoinedColumn_Throws()
+    {
+        // The aggregate would go on the account's new_lastname, not the contact's.
+        var act = () => Accounts
+            .Join(Contacts, a => a.CustomAccountId, c => c.ParentAccount.Id, (a, c) => new { a, c })
+            .ToFetchXml(q => q.Max(x => x.c.LastName));
+
+        act.Should().Throw<NotSupportedException>().WithMessage("*joined entity's column*");
+    }
+
+    [Fact]
     public void ToFetchXml_MaxOfRootColumnAfterJoin_GeneratesAggregateOnTheRoot()
     {
         var fetchXml = _service.Queryable("account")

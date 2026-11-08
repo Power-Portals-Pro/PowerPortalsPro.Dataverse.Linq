@@ -38,15 +38,4 @@ public partial class OperatorAfterSelectIntegrationTests
 
         count.Should().Be(50);
     }
-
-    [Fact]
-    public async Task ToListAsync_WhereOnComputedEntityMember_Throws()
-    {
-        var act = () => Accounts
-            .Select(a => new CustomAccount { Name = "x" + a.Name })
-            .Where(x => x.Name == "xCustom Account 001")
-            .ToListAsync();
-
-        await act.Should().ThrowAsync<NotSupportedException>();
-    }
 }

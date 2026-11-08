@@ -275,6 +275,7 @@ public class PagingFetchXmlTests : FetchXmlTestBase
     public static TheoryData<string, Func<IQueryable<CustomAccount>, IQueryable<CustomAccount>, object?>> OperatorsAfterTake => new()
     {
         { "Where", (taken, _) => taken.Where(a => a.Name == "Contoso").ToFetchXml() },
+        { "Where after an ordered Take", (_, all) => all.OrderBy(a => a.Name).Take(5).Where(a => a.Name.StartsWith("Con")).ToFetchXml() },
         { "OrderBy", (taken, _) => taken.OrderBy(a => a.Name).ToFetchXml() },
         { "Where after Select", (taken, _) => taken.Select(a => new { a.Name }).Where(x => x.Name == "Contoso").ToFetchXml() },
         { "GroupBy", (taken, _) => taken.GroupBy(a => a.Name).Select(g => new { g.Key, Count = g.Count() }).ToFetchXml() },

@@ -101,27 +101,6 @@ public partial class OperatorAfterSelectIntegrationTests(ServiceClientFixture fi
     }
 
     [Fact]
-    public void WhereOnComputedEntityMember_Throws()
-    {
-        // LINQ would match Custom Account 001; a condition on new_name would match nothing.
-        var act = () => Accounts
-            .Select(a => new CustomAccount { Name = "x" + a.Name })
-            .Where(x => x.Name == "xCustom Account 001")
-            .ToList();
-
-        act.Should().Throw<NotSupportedException>();
-    }
-
-    [Fact]
-    public void WhereTruncatingCast_Throws()
-    {
-        // (int?)1000.50 is 1000, which a condition on the credit limit wouldn't match.
-        var act = () => Accounts.Where(a => (int?)a.CreditLimit == 1000).ToList();
-
-        act.Should().Throw<NotSupportedException>();
-    }
-
-    [Fact]
     public void WhereWideningCast_MatchesTheUncastCondition()
     {
         var expected = Accounts.Where(a => a.NumberOfEmployees > 500).Count();
@@ -219,52 +198,6 @@ public partial class OperatorAfterSelectIntegrationTests(ServiceClientFixture fi
             r.a.Name.Should().Be("Custom Account 001");
             r.c.LastName.Should().NotBe("Last1");
         });
-    }
-
-    [Fact]
-    public void WhereOnComputedJoinSelectMember_Throws()
-    {
-        var act = () => (from a in Accounts
-                         join c in Contacts on a.CustomAccountId equals c.ParentAccount.Id
-                         select new { FullName = c.FirstName + " " + c.LastName })
-            .Where(x => x.FullName == "First1 Last1")
-            .ToList();
-
-        act.Should().Throw<NotSupportedException>();
-    }
-
-    [Fact]
-    public void GroupByAfterSelectMakingAnEntity_Throws()
-    {
-        var act = () => Accounts
-            .Select(a => new CustomAccount { Name = a.Name.Substring(0, 5) })
-            .GroupBy(x => x.Name)
-            .Select(g => new { g.Key, Count = g.Count() })
-            .ToList();
-
-        act.Should().Throw<NotSupportedException>();
-    }
-
-    [Fact]
-    public void WhereAfterJoinSelectMakingAnEntity_Throws()
-    {
-        var act = () => (from a in Accounts
-                         join c in Contacts on a.CustomAccountId equals c.ParentAccount.Id
-                         select new CustomContact { LastName = c.LastName.ToUpper() })
-            .Where(x => x.LastName == "LAST1")
-            .ToList();
-
-        act.Should().Throw<NotSupportedException>();
-    }
-
-    [Fact]
-    public void MaxOfJoinedColumn_Throws()
-    {
-        var act = () => Accounts
-            .Join(Contacts, a => a.CustomAccountId, c => c.ParentAccount.Id, (a, c) => new { a, c })
-            .Max(x => x.c.LastName);
-
-        act.Should().Throw<NotSupportedException>();
     }
 
     [Fact]

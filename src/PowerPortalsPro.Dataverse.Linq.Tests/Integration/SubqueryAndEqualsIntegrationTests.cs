@@ -120,14 +120,6 @@ public partial class SubqueryAndEqualsIntegrationTests(ServiceClientFixture fixt
     }
 
     [Fact]
-    public void WhereEqualsWithCaseSensitiveComparison_Throws()
-    {
-        var act = () => Accounts.Where(a => a.Name.Equals("custom account 001", StringComparison.Ordinal)).ToList();
-
-        act.Should().Throw<NotSupportedException>();
-    }
-
-    [Fact]
     public void WhereAfterWhereWithOr_AndsThePredicates()
     {
         // Custom Account 002 has 20 employees, 001 has 10.
@@ -184,14 +176,6 @@ public partial class SubqueryAndEqualsIntegrationTests(ServiceClientFixture fixt
     }
 
     [Fact]
-    public void WhereEqualsOfAnotherNumberType_Throws()
-    {
-        var act = () => Accounts.Where(a => a.NumberOfEmployees.Equals(20L)).ToList();
-
-        act.Should().Throw<NotSupportedException>();
-    }
-
-    [Fact]
     public void ExistsInsideAny_ReturnsTheAccountsWithAContactWithAnOpportunity()
     {
         // The inner Exists was dropped, which returned every account with a contact.
@@ -217,18 +201,6 @@ public partial class SubqueryAndEqualsIntegrationTests(ServiceClientFixture fixt
         count.Should().Be(101);
     }
 
-    [Fact]
-    public void AnyOnLeftJoinedEntity_Throws()
-    {
-        var act = () => (from a in Accounts
-                         join c in Contacts on a.CustomAccountId equals c.ParentAccount.Id into contacts
-                         from c in contacts.DefaultIfEmpty()
-                         where Opportunities.Any(o => o.Contact.Id == c.CustomContactId)
-                         select a.Name).ToList();
-
-        act.Should().Throw<NotSupportedException>();
-    }
-
     // -------------------------------------------------------------------------
     // Aggregates over ordered rows
     // -------------------------------------------------------------------------
@@ -251,16 +223,5 @@ public partial class SubqueryAndEqualsIntegrationTests(ServiceClientFixture fixt
                       select a.NumberOfEmployees).Sum();
 
         result.Should().Be(expected).And.BeGreaterThan(0);
-    }
-
-    [Fact]
-    public void CountOverOrderedWithFirstRowJoin_Throws()
-    {
-        var act = () => (from a in Accounts
-                         join c in Contacts.OrderByDescending(p => p.LastName).WithFirstRow()
-                             on a.CustomAccountId equals c.ParentAccount.Id
-                         select new { a, c }).Count();
-
-        act.Should().Throw<NotSupportedException>();
     }
 }

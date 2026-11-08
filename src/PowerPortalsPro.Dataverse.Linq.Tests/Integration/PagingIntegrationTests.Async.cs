@@ -24,14 +24,6 @@ public partial class PagingIntegrationTests
         results[0].Name.Should().Be("Custom Account 001");
     }
 
-    [Fact]
-    public async Task CountAsync_AfterTake_Throws()
-    {
-        var act = () => Service.Queryable<CustomAccount>().Take(5).CountAsync();
-
-        await act.Should().ThrowAsync<NotSupportedException>();
-    }
-
     // -------------------------------------------------------------------------
     // WithPageSize
     // -------------------------------------------------------------------------

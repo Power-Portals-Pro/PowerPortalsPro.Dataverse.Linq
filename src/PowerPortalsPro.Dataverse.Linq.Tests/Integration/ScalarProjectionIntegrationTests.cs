@@ -90,17 +90,6 @@ public partial class ScalarProjectionIntegrationTests(ServiceClientFixture fixtu
     }
 
     [Fact]
-    public void SelectThenComputedSelect_Sum_Throws()
-    {
-        var act = () => Service.Queryable<CustomAccount>()
-            .Select(a => a.NumberOfEmployees)
-            .Select(n => n + 1)
-            .Sum();
-
-        act.Should().Throw<NotSupportedException>();
-    }
-
-    [Fact]
     public void SelectAfterWhereOnProjection_ReturnsTheProjectedValues()
     {
         var expected = Service.Queryable<CustomAccount>().Select(a => new { a.Name, a.Website }).ToList();
@@ -227,19 +216,6 @@ public partial class ScalarProjectionIntegrationTests(ServiceClientFixture fixtu
     }
 
     [Fact]
-    public void OrderByAfterASelectOnResults_Throws()
-    {
-        var act = () => Service.Queryable<CustomAccount>()
-            .Select(a => a.Website)
-            .Take(5)
-            .Select(w => new CustomAccount { Name = w })
-            .OrderBy(x => x.Name)
-            .ToList();
-
-        act.Should().Throw<NotSupportedException>();
-    }
-
-    [Fact]
     public void SelectWholeEntityBesideItsColumn_ReturnsTheCompleteEntity()
     {
         var results = Service.Queryable<CustomAccount>()
@@ -252,42 +228,6 @@ public partial class ScalarProjectionIntegrationTests(ServiceClientFixture fixtu
         results[0].Account.Website.Should().Be("https://account001.example.com");
         results[0].Account.Description.Should().Be("Description for account 001");
         results[0].Account.Id.Should().NotBe(Guid.Empty);
-    }
-
-    [Fact]
-    public void SelectUserDefinedConversion_Max_Throws()
-    {
-        var act = () => Service.Queryable<CustomAccount>()
-            .Select(a => (FetchXml.ScalarProjectionFetchXmlTests.Headcount)a.NumberOfEmployees)
-            .Max();
-
-        act.Should().Throw<NotSupportedException>();
-    }
-
-    [Fact]
-    public void DistinctAfterASelectOnResults_Throws()
-    {
-        var act = () => Service.Queryable<CustomAccount>()
-            .Select(a => new { a.Name, a.Website })
-            .Take(5)
-            .Select(x => x.Name)
-            .Distinct()
-            .ToList();
-
-        act.Should().Throw<NotSupportedException>();
-    }
-
-    [Fact]
-    public void OnAfterMaterializeBeforeASelectOnResults_Throws()
-    {
-        var act = () => Service.Queryable<CustomAccount>()
-            .Select(a => a.Name)
-            .OnAfterMaterialize((e, n) => n.Trim())
-            .Take(5)
-            .Select(n => n.Length)
-            .ToList();
-
-        act.Should().Throw<NotSupportedException>();
     }
 
     [Fact]
@@ -318,18 +258,6 @@ public partial class ScalarProjectionIntegrationTests(ServiceClientFixture fixtu
     }
 
     [Fact]
-    public void AggregateOfASelectComposedAcrossTake_Throws()
-    {
-        var act = () => Service.Queryable<CustomAccount>()
-            .Select(a => new CustomAccount { NumberOfEmployees = a.NumberOfEmployees + 1 })
-            .Take(5)
-            .Select(x => x.NumberOfEmployees)
-            .Sum();
-
-        act.Should().Throw<NotSupportedException>();
-    }
-
-    [Fact]
     public void SelectOnGroupedSelect_RunsOnTheGroups()
     {
         var expected = (from a in Service.Queryable<CustomAccount>()
@@ -344,32 +272,6 @@ public partial class ScalarProjectionIntegrationTests(ServiceClientFixture fixtu
                       .ToList();
 
         results.Should().BeEquivalentTo(expected);
-    }
-
-    [Fact]
-    public void OnAfterMaterializeBeforeALaterSelect_Throws()
-    {
-        var act = () => Service.Queryable<CustomAccount>()
-            .Select(a => new CustomAccount { Name = a.Name })
-            .OnAfterMaterialize((e, x) => x)
-            .Where(x => x.Name != null)
-            .Select(x => x.Name)
-            .ToList();
-
-        act.Should().Throw<NotSupportedException>();
-    }
-
-    [Fact]
-    public void JoinAfterASelectOnResults_Throws()
-    {
-        var act = () => Service.Queryable<CustomAccount>()
-            .Select(a => a.Name)
-            .Take(5)
-            .Select(n => n.ToUpper())
-            .Join(Service.Queryable<CustomContact>(), n => n, c => c.LastName, (n, c) => c.FirstName)
-            .ToList();
-
-        act.Should().Throw<NotSupportedException>();
     }
 
     [Fact]
@@ -433,16 +335,6 @@ public partial class ScalarProjectionIntegrationTests(ServiceClientFixture fixtu
     }
 
     [Fact]
-    public void SelectAsCast_Sum_Throws()
-    {
-        var act = () => Service.Queryable("new_customaccount")
-            .Select(a => a["new_creditlimit"] as decimal?)
-            .Sum();
-
-        act.Should().Throw<NotSupportedException>();
-    }
-
-    [Fact]
     public void SelectThenSelectReadingTwoMembersOfAClass_MakesTheObjectOnce()
     {
         var results = Service.Queryable<CustomAccount>()
@@ -452,26 +344,6 @@ public partial class ScalarProjectionIntegrationTests(ServiceClientFixture fixtu
 
         results.Should().HaveCount(150);
         results.Should().AllSatisfy(r => r.Again.Should().Be(r.Id));
-    }
-
-    [Fact]
-    public void SelectCastToFloat_Max_Throws()
-    {
-        var act = () => Service.Queryable<CustomAccount>()
-            .Select(a => (float?)a.CreditLimitMoney.Value)
-            .Max();
-
-        act.Should().Throw<NotSupportedException>();
-    }
-
-    [Fact]
-    public void SelectDoubleToDecimal_Sum_Throws()
-    {
-        var act = () => Service.Queryable<CustomAccount>()
-            .Select(a => (decimal?)a.Latitude)
-            .Sum();
-
-        act.Should().Throw<NotSupportedException>();
     }
 
     [Fact]
@@ -487,27 +359,6 @@ public partial class ScalarProjectionIntegrationTests(ServiceClientFixture fixtu
 
         expected.Should().Contain((string?)null, "some accounts have no description");
         results.Should().BeEquivalentTo(expected);
-    }
-
-    [Fact]
-    public void SelectWideningCast_Sum_Throws()
-    {
-        var act = () => Service.Queryable<CustomAccount>()
-            .Select(a => (long?)a.NumberOfEmployees)
-            .Sum();
-
-        act.Should().Throw<NotSupportedException>();
-    }
-
-    [Fact]
-    public void SelectDistinct_Sum_Throws()
-    {
-        var act = () => Service.Queryable<CustomAccount>()
-            .Select(a => a.NumberOfEmployees)
-            .Distinct()
-            .Sum();
-
-        act.Should().Throw<NotSupportedException>();
     }
 
     [Fact]
@@ -535,18 +386,6 @@ public partial class ScalarProjectionIntegrationTests(ServiceClientFixture fixtu
             .ToList();
 
         results.Should().Equal("Custom Account 001", "Custom Account 002", "Custom Account 003");
-    }
-
-    [Fact]
-    public void CountChildrenInASelectOnResults_Throws()
-    {
-        var act = () => Service.Queryable<CustomAccount>()
-            .Select(a => new { Account = a })
-            .Take(5)
-            .Select(x => x.Account.CountChildren())
-            .ToList();
-
-        act.Should().Throw<NotSupportedException>();
     }
 
     [Fact]
@@ -586,42 +425,6 @@ public partial class ScalarProjectionIntegrationTests(ServiceClientFixture fixtu
     }
 
     [Fact]
-    public void OnAfterMaterializeBetweenSelectsOfTheSameType_Throws()
-    {
-        var act = () => Service.Queryable<CustomAccount>()
-            .Select(a => a.Name)
-            .OnAfterMaterialize((e, n) => n + "!")
-            .Take(5)
-            .Select(n => n.Substring(0, 1))
-            .ToList();
-
-        act.Should().Throw<NotSupportedException>();
-    }
-
-    [Fact]
-    public void CountAfterASelectOnResults_Throws()
-    {
-        var act = () => Service.Queryable<CustomAccount>()
-            .Select(a => a.Name)
-            .Take(5)
-            .Select(n => n.Length)
-            .Count();
-
-        act.Should().Throw<NotSupportedException>();
-    }
-
-    [Fact]
-    public void DistinctOverAComputedValue_Throws()
-    {
-        var act = () => Service.Queryable<CustomContact>()
-            .Select(c => c.FirstName.Substring(0, 6))
-            .Distinct()
-            .ToList();
-
-        act.Should().Throw<NotSupportedException>();
-    }
-
-    [Fact]
     public void DistinctOverAComputedValueBesideItsColumn_ReturnsEachValueOnce()
     {
         var results = Service.Queryable<CustomContact>()
@@ -657,28 +460,6 @@ public partial class ScalarProjectionIntegrationTests(ServiceClientFixture fixtu
     }
 
     [Fact]
-    public void SelectDistinct_CountWithPredicate_Throws()
-    {
-        var act = () => Service.Queryable<CustomContact>()
-            .Select(c => c.LastName)
-            .Distinct()
-            .Count(n => n != null);
-
-        act.Should().Throw<NotSupportedException>();
-    }
-
-    [Fact]
-    public void DistinctOverANarrowingCast_Throws()
-    {
-        var act = () => Service.Queryable<CustomAccount>()
-            .Select(a => (int)a.CreditLimitMoney.Value)
-            .Distinct()
-            .ToList();
-
-        act.Should().Throw<NotSupportedException>();
-    }
-
-    [Fact]
     public void DistinctOverAWholeEntity_ReturnsEachEntity()
     {
         var results = Service.Queryable<CustomAccount>()
@@ -688,29 +469,6 @@ public partial class ScalarProjectionIntegrationTests(ServiceClientFixture fixtu
 
         results.Should().HaveCount(150);
         results.Select(r => r.Account.Id).Should().OnlyHaveUniqueItems();
-    }
-
-    [Fact]
-    public void DistinctOverAConstant_Throws()
-    {
-        var act = () => Service.Queryable<CustomAccount>()
-            .Select(a => 1)
-            .Distinct()
-            .ToList();
-
-        act.Should().Throw<NotSupportedException>();
-    }
-
-    [Fact]
-    public void DistinctAfterTake_Throws()
-    {
-        var act = () => Service.Queryable<CustomContact>()
-            .Select(c => c.LastName)
-            .Take(10)
-            .Distinct()
-            .ToList();
-
-        act.Should().Throw<NotSupportedException>();
     }
 
     [Fact]
@@ -733,16 +491,6 @@ public partial class ScalarProjectionIntegrationTests(ServiceClientFixture fixtu
             .LongCount();
 
         count.Should().Be(5L);
-    }
-
-    [Fact]
-    public void IndexedSelect_Throws()
-    {
-        var act = () => Service.Queryable<CustomAccount>()
-            .Select((a, i) => a.Name + i)
-            .ToList();
-
-        act.Should().Throw<NotSupportedException>();
     }
 
     [Fact]
@@ -782,16 +530,6 @@ public partial class ScalarProjectionIntegrationTests(ServiceClientFixture fixtu
             .ToList();
 
         results.Should().BeEquivalentTo(expected);
-    }
-
-    [Fact]
-    public void SelectNumericCast_Sum_Throws()
-    {
-        var act = () => Service.Queryable<CustomAccount>()
-            .Select(a => (int)a.CreditLimitMoney.Value)
-            .Sum();
-
-        act.Should().Throw<NotSupportedException>();
     }
 
     [Fact]

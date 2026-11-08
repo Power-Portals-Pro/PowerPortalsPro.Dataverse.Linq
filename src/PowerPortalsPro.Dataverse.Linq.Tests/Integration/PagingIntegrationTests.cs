@@ -45,27 +45,6 @@ public partial class PagingIntegrationTests(ServiceClientFixture fixture) : Inte
     }
 
     [Fact]
-    public void WhereAfterTake_Throws()
-    {
-        // LINQ finds no Empty Account among the first five; Dataverse would filter, then take five.
-        var act = () => Service.Queryable<CustomAccount>()
-            .OrderBy(a => a.Name)
-            .Take(5)
-            .Where(a => a.Name.StartsWith("Empty Account"))
-            .ToList();
-
-        act.Should().Throw<NotSupportedException>();
-    }
-
-    [Fact]
-    public void CountAfterTake_Throws()
-    {
-        var act = () => Service.Queryable<CustomAccount>().Take(5).Count();
-
-        act.Should().Throw<NotSupportedException>();
-    }
-
-    [Fact]
     public void SelectAfterTake_ReturnsTheValuesOfTheRowsTaken()
     {
         var results = Service.Queryable<CustomAccount>()

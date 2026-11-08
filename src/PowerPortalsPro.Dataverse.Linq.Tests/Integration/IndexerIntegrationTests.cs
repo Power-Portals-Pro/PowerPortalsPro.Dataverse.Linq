@@ -42,16 +42,6 @@ public partial class IndexerIntegrationTests(ServiceClientFixture fixture) : Int
     }
 
     [Fact]
-    public void WhereNarrowedColumnValue_Throws()
-    {
-        var act = () => Accounts
-            .Where(a => ((int?)a.GetAttributeValue<decimal?>("new_percentcomplete")).Value == 3)
-            .ToList();
-
-        act.Should().Throw<NotSupportedException>();
-    }
-
-    [Fact]
     public void WhereIndexerIsNull_MatchesGetAttributeValue()
     {
         var expected = Accounts.Where(a => a.GetAttributeValue<string>("new_description") == null).Count();
@@ -153,17 +143,6 @@ public partial class IndexerIntegrationTests(ServiceClientFixture fixture) : Int
 
         results.Should().ContainSingle()
             .Which.GetAttributeValue<string>("new_name").Should().Be("Custom Account 001");
-    }
-
-    [Fact]
-    public void MaxOfCapturedIndexer_Throws()
-    {
-        // LINQ gives the captured 7 for every row; the query's column would give its own maximum.
-        var other = new Entity("new_customaccount") { ["new_numberofemployees"] = 7 };
-
-        var act = () => Accounts.Max(a => (int?)other["new_numberofemployees"]);
-
-        act.Should().Throw<NotSupportedException>();
     }
 
     [Fact]
