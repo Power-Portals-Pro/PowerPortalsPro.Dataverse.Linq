@@ -333,7 +333,7 @@ internal static class ExpressionExtensions
         public override Expression? Visit(Expression? node)
         {
             if (node is MethodCallExpression call
-                    && !call.IsGetAttributeValueCall(out _, out _) && !call.IsEntityIndexerCall(out _, out _)
+                    && !call.IsColumnReadCall(out _, out _)
                 || node is not null && (node.IsNewObject() || node is InvocationExpression)
                     && !ReferenceEquals(node, _initialized)
                 || node is MemberExpression { Expression: null, Member: PropertyInfo })

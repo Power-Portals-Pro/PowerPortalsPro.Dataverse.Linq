@@ -202,8 +202,7 @@ internal static class MaterializerBuilder
         {
             // Handle Entity.GetAttributeValue<T>(name) and the indexer, entity[name]: the column
             // alone, null when the row doesn't have it
-            if ((node.IsGetAttributeValueCall(out var attrName, out var entityExpr)
-                    || node.IsEntityIndexerCall(out attrName, out entityExpr))
+            if (node.IsColumnReadCall(out var attrName, out var entityExpr)
                 && _resolveEntity(entityExpr) is { } res)
             {
                 var resultType = node.Type;

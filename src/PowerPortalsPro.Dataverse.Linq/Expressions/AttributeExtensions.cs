@@ -60,6 +60,29 @@ internal static class AttributeExtensions
     }
 
     /// <summary>
+    /// Matches a read of one column by name: <see cref="Entity.GetAttributeValue{T}"/> or the
+    /// indexer, <c>entity[name]</c> (see <see cref="IsGetAttributeValueCall"/> and
+    /// <see cref="IsEntityIndexerCall"/>).
+    /// </summary>
+    internal static bool IsColumnReadCall(
+        this Expression expr,
+        [NotNullWhen(true)] out string? attributeName,
+        [NotNullWhen(true)] out Expression? entityExpression) =>
+        expr.IsGetAttributeValueCall(out attributeName, out entityExpression)
+        || expr.IsEntityIndexerCall(out attributeName, out entityExpression);
+
+    /// <summary>
+    /// The expression without a cast of an <see cref="object"/> to the type it holds, as the
+    /// indexer's value is read: <c>(string)entity["name"]</c>, <c>entity["name"] as string</c>.
+    /// Such a cast leaves the value as it is, or makes it null; it doesn't change it.
+    /// </summary>
+    internal static Expression UnwrapCastOfObject(this Expression expr) =>
+        expr is UnaryExpression { NodeType: ExpressionType.Convert or ExpressionType.ConvertChecked or ExpressionType.TypeAs, Operand: var operand }
+        && operand.Type == typeof(object)
+            ? operand
+            : expr;
+
+    /// <summary>
     /// Matches the shape of a read through the <see cref="Entity"/> indexer, <c>entity[name]</c>,
     /// whatever its name argument.
     /// </summary>
@@ -83,8 +106,9 @@ internal static class AttributeExtensions
     /// <summary>
     /// Resolves an expression to an attribute name and the entity expression it's accessed on.
     /// Handles direct property access, EntityReference.Id, Money.Value, OptionSetValue.Value,
-    /// and <see cref="Entity.GetAttributeValue{T}"/> calls whose attribute-name argument can be
-    /// resolved at translation time (see <see cref="IsGetAttributeValueCall"/>).
+    /// and <see cref="Entity.GetAttributeValue{T}"/> calls and indexer reads (<c>entity["name"]</c>,
+    /// cast as the column's type: <c>((EntityReference)entity["name"]).Id</c>) whose attribute-name
+    /// argument can be resolved at translation time (see <see cref="IsGetAttributeValueCall"/>).
     /// </summary>
     /// <param name="rootEntityLogicalName">
     /// Fallback logical name used to resolve <see cref="Entity.Id"/> when the entity expression's
@@ -95,11 +119,13 @@ internal static class AttributeExtensions
         this Expression expr, Func<string, string>? primaryKeyResolver = null,
         string? rootEntityLogicalName = null)
     {
-        if (expr is UnaryExpression { NodeType: ExpressionType.Convert } convert)
+        if (expr is UnaryExpression { NodeType: ExpressionType.Convert or ExpressionType.ConvertChecked } convert)
             expr = convert.Operand;
+        else
+            expr = expr.UnwrapCastOfObject();
 
-        // Entity.GetAttributeValue<T>(name)
-        if (expr.IsGetAttributeValueCall(out var attributeName, out var attributeEntity))
+        // Entity.GetAttributeValue<T>(name), or the indexer, entity[name]
+        if (expr.IsColumnReadCall(out var attributeName, out var attributeEntity))
             return (attributeName, attributeEntity);
 
         if (expr is not MemberExpression memberExpr || memberExpr.Expression is null)
@@ -134,8 +160,10 @@ internal static class AttributeExtensions
                     return (attrName, parentContainer);
             }
 
-            // Parent is GetAttributeValue<T>(name): entity.GetAttributeValue<EntityReference>("attr").Id
-            if (memberExpr.Expression.IsGetAttributeValueCall(out var unwrapAttrName, out var unwrapEntity))
+            // Parent is GetAttributeValue<T>(name), entity.GetAttributeValue<EntityReference>("attr").Id,
+            // or the indexer cast as the column's type, ((EntityReference)entity["attr"]).Id. Only the
+            // indexer's object is cast through; a cast of a typed value may change it ((int?)decimal).
+            if (memberExpr.Expression.UnwrapCastOfObject().IsColumnReadCall(out var unwrapAttrName, out var unwrapEntity))
                 return (unwrapAttrName, unwrapEntity);
         }
 

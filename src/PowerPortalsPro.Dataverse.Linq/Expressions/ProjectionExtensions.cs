@@ -195,12 +195,6 @@ internal static class ProjectionExtensions
         {
             expr = Unwrap(expr)!;
 
-            if (expr.IsEntityIndexerCall(out column, out var indexed) && ResolveEntity(indexed) is { } indexedEntity)
-            {
-                entity = indexedEntity;
-                return true;
-            }
-
             // Entity.Id is the primary key of the entity it's read on, which for an unbound entity
             // only that entity's resolution names; nothing else needs the key looked up.
             var owner = expr is MemberExpression { Member.Name: nameof(Entity.Id), Expression: { } idOwner }
