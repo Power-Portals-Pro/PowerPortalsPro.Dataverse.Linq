@@ -352,6 +352,8 @@ internal static class FetchXmlQueryTranslator
         if (lambda.Parameters.Count != 1)
             throw new NotSupportedException("The Select overload that passes each element's index is not supported.");
 
+        BindKeptEntity(ctx, call.Arguments[1]);
+
         // A hook registered before this select runs on its values, so it can only be one for the
         // type this select produces; otherwise it would be skipped.
         if (ctx.Query.OnAfterMaterialize is { } hook && hook.GetType().GetGenericArguments()[1] != lambda.ReturnType)
@@ -380,7 +382,11 @@ internal static class FetchXmlQueryTranslator
 
         // Distinct before this select de-duplicates the rows, which its narrower columns would
         // change; the root's primary key keeps them apart below, which a join can't do.
-        if (ctx.Query.Distinct && (ctx.OuterEntityPath is not null || ctx.JoinMappings is not null))
+        // A join's select that kept the root (select a) leaves the root's rows, which select as a
+        // query on the root does.
+        var keptRoot = ctx.KeptEntity is { LinkAlias: null };
+
+        if (ctx.Query.Distinct && !keptRoot && (ctx.OuterEntityPath is not null || ctx.JoinMappings is not null))
             throw new NotSupportedException(
                 "A Select after Distinct() on a join is not supported; apply Distinct() after the Select.");
 
@@ -396,11 +402,11 @@ internal static class FetchXmlQueryTranslator
                     ? lambda.Parameters[0].Type.GetProperty(ctx.InnerEntityProperty)?.PropertyType
                     : null,
                 ctx.Query.EntityLogicalName, ctx.Query.Links[^1].Name);
-            ApplyProjection(lambda, resolveEntity, ctx);
+            ApplyProjection(lambda, resolveEntity, ctx, onJoin: true);
             ctx.Query.Materializer = MaterializerBuilder.BuildJoinMaterializer(
                 lambda, resolveEntity, ctx.PrimaryKeyResolver);
         }
-        else if (ctx.JoinMappings is not null)
+        else if (ctx.JoinMappings is not null && !keptRoot)
         {
             // After an inner join or chained left join with transparent identifier
             HandleJoinSelect(lambda, ctx);
@@ -409,7 +415,7 @@ internal static class FetchXmlQueryTranslator
         {
             // Simple select on root entity
             ApplyProjection(lambda, ProjectionExtensions.RootEntityResolver(
-                lambda.Parameters[0], ctx.Query.EntityLogicalName), ctx);
+                lambda.Parameters[0], ctx.Query.EntityLogicalName), ctx, onJoin: keptRoot);
 
             // After Distinct(), every entity is a distinct row; its primary key keeps the rows apart
             // when this select reads fewer columns (Distinct().Select(a => a.Name) gives every name).
@@ -475,15 +481,61 @@ internal static class FetchXmlQueryTranslator
     /// made something other than one of the query's own entities, which a later select can't
     /// re-read from the row.
     /// </summary>
+    /// <param name="onJoin">
+    /// The select is on a join's rows: one that keeps an entity whole makes that entity the rows
+    /// (see <see cref="TranslationContext.KeptEntity"/>).
+    /// </param>
     private static void ApplyProjection(
-        LambdaExpression lambda, MaterializerBuilder.EntityResolver resolveEntity, TranslationContext ctx)
+        LambdaExpression lambda, MaterializerBuilder.EntityResolver resolveEntity, TranslationContext ctx,
+        bool onJoin)
     {
         var projected = lambda.ExtractProjectedColumns(resolveEntity, ctx.PrimaryKeyOf);
         ctx.Query.ApplyProjectedColumns(projected);
         ctx.Projection = projected;
-        ctx.RowsTransformed = resolveEntity(lambda.Body.UnwrapConvert()) is null;
+        var kept = resolveEntity(lambda.Body.UnwrapConvert());
+        ctx.RowsTransformed = kept is null;
         ctx.RowSelector = lambda;
         ctx.RowEntityResolver = resolveEntity;
+        ctx.KeptEntity = null;
+
+        if (onJoin && kept is { } entity)
+        {
+            ctx.KeptEntity = JoinEntityInfo.Of(entity);
+
+            // The rows are that entity now, not the join's rows or a left join's transparent
+            // identifiers. The join's range variables are out of scope: operators after it find
+            // their columns by the names BindKeptEntity gives the entity, and a join's new ones.
+            ctx.JoinMappings = new Dictionary<string, JoinEntityInfo>();
+            ctx.OuterEntityPath = null;
+            ctx.OuterEntityType = null;
+            ctx.InnerEntityProperty = null;
+        }
+    }
+
+    /// <summary>
+    /// Binds the parameter of each lambda to the entity a join's select kept whole, when there is
+    /// one: after <c>select c</c>, <c>x =&gt; x.FirstName</c> reads the contact's column whatever
+    /// the lambda names it, and after <c>select a</c>, <c>c =&gt; c.Name</c> reads the account's,
+    /// not the joined contact's. The rows are that entity, so the name can mean nothing else.
+    /// </summary>
+    /// <param name="lambdaArguments">
+    /// The operator's arguments whose lambda takes a row as its first parameter.
+    /// </param>
+    private static void BindKeptEntity(TranslationContext ctx, params Expression[] lambdaArguments)
+    {
+        if (ctx.KeptEntity is not { } kept)
+            return;
+
+        var mappings = ctx.JoinMappings is null
+            ? new Dictionary<string, JoinEntityInfo>()
+            : new Dictionary<string, JoinEntityInfo>(ctx.JoinMappings);
+        foreach (var argument in lambdaArguments)
+        {
+            if (argument.ExtractLambda().Parameters is [{ Name: { } name }, ..])
+                mappings[name] = kept;
+        }
+
+        ctx.JoinMappings = mappings;
     }
 
     /// <summary>
@@ -494,6 +546,7 @@ internal static class FetchXmlQueryTranslator
     {
         ctx.RowSelector = null;
         ctx.RowEntityResolver = null;
+        ctx.KeptEntity = null;
     }
 
     /// <summary>
@@ -658,7 +711,7 @@ internal static class FetchXmlQueryTranslator
         ClearLinkProjectedColumns(ctx.Query.Links);
 
         var resolveEntity = CreateJoinResolver(ctx.JoinMappings!);
-        ApplyProjection(lambda, resolveEntity, ctx);
+        ApplyProjection(lambda, resolveEntity, ctx, onJoin: true);
         ctx.Query.Materializer = MaterializerBuilder.BuildJoinMaterializer(
             lambda, resolveEntity, ctx.PrimaryKeyResolver);
     }
@@ -695,6 +748,7 @@ internal static class FetchXmlQueryTranslator
     {
         ThrowIfSelectingResults(ctx, call.Method.Name);
         ThrowIfAfterTake(ctx, call.Method.Name);
+        BindKeptEntity(ctx, call.Arguments[1]);
         var lambda = call.Arguments[1].ExtractLambda();
         var predicate = ReadThroughSelect(lambda, ctx, call.Method.Name);
 
@@ -1423,6 +1477,11 @@ internal static class FetchXmlQueryTranslator
                 return leftResult;
         }
 
+        // After a join's select kept a joined entity (select c), every row lambda names it (see
+        // BindKeptEntity); a read the join's names don't find isn't the root's.
+        if (ctx.KeptEntity is { LinkAlias: not null })
+            return null;
+
         // Simple (non-join) resolution — resolve the attribute access and verify the entity
         // expression traces back to a lambda ParameterExpression (not a captured closure variable).
         // Without this check, captured entity properties like `capturedEntity.PrimaryKeyId`
@@ -1531,6 +1590,7 @@ internal static class FetchXmlQueryTranslator
     {
         ThrowIfSelectingResults(ctx, call.Method.Name);
         ThrowIfAfterTake(ctx, call.Method.Name);
+        BindKeptEntity(ctx, call.Arguments[1]);
         var lambda = call.Arguments[1].ExtractLambda();
         var key = ReadThroughSelect(lambda, ctx, call.Method.Name);
         var descending = call.Method.Name is nameof(Queryable.OrderByDescending)
@@ -1581,6 +1641,7 @@ internal static class FetchXmlQueryTranslator
         {
             ThrowIfSelectingResults(ctx, call.Method.Name);
             ThrowIfAfterTake(ctx, call.Method.Name);
+            BindKeptEntity(ctx, call.Arguments[1]);
             var lambda = call.Arguments[1].ExtractLambda();
             var filter = ctx.Query.Filter ??= new FetchFilter { Type = FilterType.And };
             TranslatePredicate(ReadThroughSelect(lambda, ctx, call.Method.Name), filter, ctx);
@@ -1630,6 +1691,8 @@ internal static class FetchXmlQueryTranslator
         TranslateCore(call.Arguments[0], ctx);
         ThrowIfSelectingResults(ctx, methodName);
         ThrowIfAfterTake(ctx, methodName);
+        if (call.Arguments.Count == 2)
+            BindKeptEntity(ctx, call.Arguments[1]);
 
         // A count of a select's distinct values counts the distinct rows Dataverse returns: it can
         // count one column's distinct values, but not several, and it leaves nulls out where LINQ
@@ -1762,6 +1825,10 @@ internal static class FetchXmlQueryTranslator
         ThrowIfSelectingResults(ctx, call.Method.Name);
         ThrowIfAfterTake(ctx, call.Method.Name);
         ThrowIfRowsTransformed(ctx, call.Method.Name);
+
+        // The key and element selectors take a row; a result selector takes the key and its rows.
+        BindKeptEntity(ctx, [.. call.Arguments.Skip(1).Take(2)
+            .Where(a => a is UnaryExpression { NodeType: ExpressionType.Quote, Operand: LambdaExpression { Parameters.Count: 1 } })]);
         ctx.Projection = null;
         ClearRowSelector(ctx);
 
@@ -2581,6 +2648,9 @@ internal static class FetchXmlQueryTranslator
         ThrowIfAfterTake(ctx, call.Method.Name);
         ThrowIfRowsTransformed(ctx, call.Method.Name);
 
+        // The outer key selector and the result selector's first parameter take an outer row.
+        BindKeptEntity(ctx, call.Arguments[2], call.Arguments[4]);
+
         var (innerLogicalName, innerEntityType) = call.Arguments[1].GetSourceInfoFromType();
         var resultLambda = call.Arguments[4].ExtractLambda();
 
@@ -2666,7 +2736,7 @@ internal static class FetchXmlQueryTranslator
             Name = innerLogicalName,
             From = innerKeyAttr,
             To = outerKeyResolved.Name,
-            Alias = resultLambda.Parameters[1].Name!,
+            Alias = UniqueLinkAlias(resultLambda.Parameters[1].Name!, ctx.Query.Links),
             LinkType = linkType
         };
         if (innerSource is not null)
@@ -2695,6 +2765,7 @@ internal static class FetchXmlQueryTranslator
         };
 
         ctx.JoinMappings = updatedMappings;
+        ctx.KeptEntity = null;
 
         // Clear single-left-join context — chained joins use JoinMappings exclusively
         ctx.OuterEntityPath = null;
@@ -2703,6 +2774,20 @@ internal static class FetchXmlQueryTranslator
 
         if (!resultLambda.IsTransparentIdentifier())
             HandleJoinSelect(resultLambda, ctx);
+    }
+
+    /// <summary>
+    /// The alias a joined entity's link gets: its range variable's name, or, when the query
+    /// already has a link by that name (<c>from x in contacts join c in …</c>, where
+    /// <c>contacts</c> joined its own <c>c</c>), that name numbered. Its join mapping, under the
+    /// range variable's name, carries the alias.
+    /// </summary>
+    private static string UniqueLinkAlias(string name, List<FetchLinkEntity> links)
+    {
+        var alias = name;
+        for (var i = 1; links.FindLinkByAlias(alias) is not null; i++)
+            alias = $"{name}{i}";
+        return alias;
     }
 
     // -------------------------------------------------------------------------
@@ -2730,6 +2815,7 @@ internal static class FetchXmlQueryTranslator
             ThrowIfDistinctBeforeJoin(ctx, call.Method.Name);
             ThrowIfAfterTake(ctx, call.Method.Name);
             ThrowIfRowsTransformed(ctx, call.Method.Name);
+            BindKeptEntity(ctx, groupJoinCall.Arguments[2], groupJoinCall.Arguments[4]);
             var (innerLogicalName2, innerEntityType2) = groupJoinCall.Arguments[1].GetSourceInfoFromType();
             var resultSelector2 = call.Arguments[2].ExtractLambda();
             HandleChainedJoin(
@@ -2780,7 +2866,7 @@ internal static class FetchXmlQueryTranslator
                 resultSelector.Parameters[0], outerPath, outerEntityType,
                 innerParam, ctx.Query.Links[^1].Alias!,
                 outerLogicalName, innerLogicalName);
-            ApplyProjection(resultSelector, resolveEntity, ctx);
+            ApplyProjection(resultSelector, resolveEntity, ctx, onJoin: true);
             ctx.Query.Materializer = MaterializerBuilder.BuildJoinMaterializer(
                 resultSelector, resolveEntity, ctx.PrimaryKeyResolver, innerDirectParam: innerParam);
         }
@@ -3051,6 +3137,13 @@ internal static class FetchXmlQueryTranslator
         public MaterializerBuilder.EntityResolver? RowEntityResolver { get; set; }
 
         /// <summary>
+        /// The join entity the last select kept whole (<c>select c</c>), which the rows now are: an
+        /// operator's lambda after it takes that entity as its parameter, whatever it names it
+        /// (see <see cref="BindKeptEntity"/>). Null after any other select, and when none has run.
+        /// </summary>
+        public JoinEntityInfo? KeptEntity { get; set; }
+
+        /// <summary>
         /// The selects already folded with the selects they're on (see FoldSelects), which
         /// translating them must not fold again.
         /// </summary>
@@ -3123,6 +3216,14 @@ internal static class FetchXmlQueryTranslator
 
     private sealed class JoinEntityInfo
     {
+        /// <summary>The entity a select or materializer resolved, as a join names it.</summary>
+        public static JoinEntityInfo Of(MaterializerBuilder.ResolvedEntity entity) => new()
+        {
+            EntityType = entity.EntityType,
+            LogicalName = entity.LogicalName,
+            LinkAlias = entity.LinkAlias,
+        };
+
         public required Type EntityType { get; init; }
 
         /// <summary>
